@@ -1,16 +1,25 @@
 # Farfield — a self-owned content backend.
-# Workspace: five library crates + one server binary + the CLI.
+#
+# An Andromeda-shaped workspace: shared library crates + three deployable
+# app services. content and feed are typed-records services (each its own
+# SQLite DB + domain) built on a shared records engine; blobs is a shared
+# content-addressed blob service the others consume.
+#
 # Design doc: ~/.gstack/projects/mission-control/iammatthias-main-design-20260515-091028.md
 
 [workspace]
 resolver = "3"
 members = [
     "crates/core",
-    "crates/store",
     "crates/schema",
+    "crates/store",
+    "crates/httpkit",
+    "crates/records",
     "crates/blobs",
     "crates/snapshot",
-    "server",
+    "apps/content",
+    "apps/feed",
+    "apps/blobs",
     "cli",
 ]
 
@@ -24,8 +33,10 @@ repository = "https://github.com/iammatthias/farfield"
 [workspace.dependencies]
 # Internal crates.
 farfield-core = { path = "crates/core" }
-farfield-store = { path = "crates/store" }
 farfield-schema = { path = "crates/schema" }
+farfield-store = { path = "crates/store" }
+farfield-httpkit = { path = "crates/httpkit" }
+farfield-records = { path = "crates/records" }
 farfield-blobs = { path = "crates/blobs" }
 farfield-snapshot = { path = "crates/snapshot" }
 

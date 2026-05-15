@@ -124,11 +124,27 @@ dependencies = [
 ]
 
 [[package]]
+name = "farfield-blobs-app"
+version = "0.1.0"
+dependencies = [
+ "farfield-blobs",
+ "farfield-core",
+ "farfield-httpkit",
+]
+
+[[package]]
 name = "farfield-cli"
 version = "0.1.0"
 dependencies = [
  "farfield-core",
  "farfield-schema",
+]
+
+[[package]]
+name = "farfield-content"
+version = "0.1.0"
+dependencies = [
+ "farfield-records",
 ]
 
 [[package]]
@@ -145,21 +161,31 @@ dependencies = [
 ]
 
 [[package]]
+name = "farfield-feed"
+version = "0.1.0"
+dependencies = [
+ "farfield-records",
+]
+
+[[package]]
+name = "farfield-httpkit"
+version = "0.1.0"
+
+[[package]]
+name = "farfield-records"
+version = "0.1.0"
+dependencies = [
+ "farfield-core",
+ "farfield-httpkit",
+ "farfield-schema",
+ "farfield-store",
+]
+
+[[package]]
 name = "farfield-schema"
 version = "0.1.0"
 dependencies = [
  "farfield-core",
-]
-
-[[package]]
-name = "farfield-server"
-version = "0.1.0"
-dependencies = [
- "farfield-blobs",
- "farfield-core",
- "farfield-schema",
- "farfield-snapshot",
- "farfield-store",
 ]
 
 [[package]]

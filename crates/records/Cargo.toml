@@ -1,0 +1,11 @@
+[package]
+name = "farfield-records"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+farfield-core.workspace = true
+farfield-schema.workspace = true
+farfield-store.workspace = true
+farfield-httpkit.workspace = true

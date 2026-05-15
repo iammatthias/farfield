@@ -1,0 +1,12 @@
+[package]
+name = "farfield-feed"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[[bin]]
+name = "farfield-feed"
+path = "src/main.rs"
+
+[dependencies]
+farfield-records.workspace = true

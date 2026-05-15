@@ -1,3 +1,0 @@
-# Lexicon-lite schema files go here — one JSON file per content type.
-# First implementation step (The Assignment): write post / recipe / art /
-# media / series / feed schemas from real existing markdown frontmatter.
