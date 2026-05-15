@@ -35,13 +35,7 @@
       "name": "media",
       "schema": "media",
       "title": "Media",
-      "description": "Image metadata records — one per blob."
-    },
-    {
-      "name": "series",
-      "schema": "series",
-      "title": "Series",
-      "description": "Ordered image galleries."
+      "description": "Image metadata records — one per blob. A gallery is just an entry whose markdown body holds several images; no separate type."
     }
   ]
 }
