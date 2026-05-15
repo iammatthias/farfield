@@ -11,3 +11,6 @@
 *.snapshot
 
 # Secrets live in env / EnvironmentFile, never in the repo.
+
+# blob service local-backend data
+/farfield-blobs-data/

@@ -5,4 +5,9 @@ edition.workspace = true
 license.workspace = true
 
 [dependencies]
+blurhash = "0.2.3"
 farfield-core.workspace = true
+image = "0.25.10"
+serde.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
