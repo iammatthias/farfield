@@ -234,7 +234,9 @@ dependencies = [
 name = "farfield-schema"
 version = "0.1.0"
 dependencies = [
- "farfield-core",
+ "serde",
+ "serde_json",
+ "thiserror",
 ]
 
 [[package]]
