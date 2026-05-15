@@ -1,0 +1,26 @@
+{
+  "id": "feed-entry",
+  "version": 1,
+  "description": "A feed entry — a short post. PROVISIONAL: there is no feed content in obsidian_cms yet, so this is a sketch (design Open Question 1). Finalize once the feed surface is real.",
+  "type": "object",
+  "required": ["body", "created"],
+  "properties": {
+    "body": {
+      "type": "string",
+      "description": "Markdown short post."
+    },
+    "created": {
+      "type": "datetime",
+      "description": "When the entry was posted."
+    },
+    "link": {
+      "type": "string",
+      "description": "Optional URL the entry points at — for link-card style entries."
+    },
+    "tags": {
+      "type": "array",
+      "items": { "type": "string" },
+      "description": "Optional topic tags."
+    }
+  }
+}

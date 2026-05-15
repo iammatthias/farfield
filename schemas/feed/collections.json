@@ -1,0 +1,11 @@
+{
+  "description": "The feed service's collections.",
+  "collections": [
+    {
+      "name": "feed",
+      "schema": "feed-entry",
+      "title": "Feed",
+      "description": "A personal feed of short posts."
+    }
+  ]
+}

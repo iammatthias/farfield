@@ -1,0 +1,42 @@
+{
+  "id": "entry",
+  "version": 1,
+  "description": "A content entry — title, metadata, and a markdown body. Derived from the real frontmatter across posts / open-source / recipes / art / melange in obsidian_cms: every collection currently shares this exact shape.",
+  "type": "object",
+  "required": ["title", "slug", "published", "created", "updated", "tags", "body"],
+  "properties": {
+    "title": {
+      "type": "string",
+      "description": "Display title."
+    },
+    "slug": {
+      "type": "string",
+      "description": "URL slug; also the record's rkey. Form: <timestamp>-<words>, e.g. 1546329600000-markdown-test."
+    },
+    "published": {
+      "type": "boolean",
+      "description": "Whether the entry is live. Drafts are published: false."
+    },
+    "created": {
+      "type": "datetime",
+      "description": "Authored timestamp. Source frontmatter uses 'YYYY-MM-DD HH:MM'; normalized to RFC3339 UTC on push."
+    },
+    "updated": {
+      "type": "datetime",
+      "description": "Last-edited timestamp."
+    },
+    "tags": {
+      "type": "array",
+      "items": { "type": "string" },
+      "description": "Topic tags."
+    },
+    "excerpt": {
+      "type": "string",
+      "description": "Short summary. Optional — absent on a few entries."
+    },
+    "body": {
+      "type": "string",
+      "description": "Markdown source. Images are inline `![](ipfs://<cid>)` URIs."
+    }
+  }
+}
