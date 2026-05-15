@@ -326,9 +326,9 @@ fn require_known_collection(s: &Arc<AppState>, collection: &str) -> Result<(), A
     }
 }
 
-/// rkey grammar: `[a-z0-9-]{1,64}`.
+/// rkey grammar: `[a-z0-9-]{1,128}`.
 fn validate_rkey(rkey: &str) -> Result<(), ApiError> {
-    let ok = (1..=64).contains(&rkey.len())
+    let ok = (1..=128).contains(&rkey.len())
         && rkey
             .bytes()
             .all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || b == b'-');
@@ -337,7 +337,7 @@ fn validate_rkey(rkey: &str) -> Result<(), ApiError> {
     } else {
         Err(ApiError::bad_request(
             "invalid_rkey",
-            format!("rkey `{rkey}` must match [a-z0-9-]{{1,64}}"),
+            format!("rkey `{rkey}` must match [a-z0-9-]{{1,128}}"),
         ))
     }
 }
@@ -382,7 +382,8 @@ mod tests {
         assert!(validate_rkey("Uppercase").is_err());
         assert!(validate_rkey("has space").is_err());
         assert!(validate_rkey("").is_err());
-        assert!(validate_rkey(&"x".repeat(65)).is_err());
+        assert!(validate_rkey(&"x".repeat(70)).is_ok(), "long real slugs are fine");
+        assert!(validate_rkey(&"x".repeat(129)).is_err());
     }
 
     #[test]
