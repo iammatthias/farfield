@@ -1,8 +1,0 @@
-[package]
-name = "farfield-snapshot"
-version.workspace = true
-edition.workspace = true
-license.workspace = true
-
-[dependencies]
-farfield-store.workspace = true

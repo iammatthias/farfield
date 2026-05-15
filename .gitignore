@@ -1,6 +1,9 @@
-/target
-**/*.rs.bk
-*.pdb
+# Compiled binaries.
+/bin/
+farfield-content
+farfield-feed
+farfield-blobs
+/farfield
 
 # Local state — never committed.
 *.db
@@ -8,9 +11,7 @@
 *.db-shm
 /farfield.toml
 .env
+/farfield-blobs-data/
 *.snapshot
 
 # Secrets live in env / EnvironmentFile, never in the repo.
-
-# blob service local-backend data
-/farfield-blobs-data/
