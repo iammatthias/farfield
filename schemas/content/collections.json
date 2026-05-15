@@ -30,6 +30,18 @@
       "schema": "entry",
       "title": "Melange",
       "description": "Spice blends."
+    },
+    {
+      "name": "media",
+      "schema": "media",
+      "title": "Media",
+      "description": "Image metadata records — one per blob."
+    },
+    {
+      "name": "series",
+      "schema": "series",
+      "title": "Series",
+      "description": "Ordered image galleries."
     }
   ]
 }

@@ -12,7 +12,7 @@
 use std::collections::BTreeMap;
 use std::path::Path;
 
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
 /// Errors from loading a schema set.
@@ -33,7 +33,7 @@ pub enum SchemaError {
 }
 
 /// A lexicon-lite field type.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum FieldType {
     String,
@@ -47,7 +47,7 @@ pub enum FieldType {
 }
 
 /// One field in a schema's `properties`.
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Field {
     #[serde(rename = "type")]
     pub ty: FieldType,
@@ -59,7 +59,7 @@ pub struct Field {
 }
 
 /// A content-type schema.
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Schema {
     pub id: String,
     #[serde(default = "one")]
@@ -76,7 +76,7 @@ fn one() -> u32 {
 }
 
 /// A collection's definition: its name, the schema it uses, display metadata.
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct CollectionDef {
     pub name: String,
     pub schema: String,
@@ -330,9 +330,10 @@ mod tests {
         // Integration check against the repo's actual schema files.
         let dir = concat!(env!("CARGO_MANIFEST_DIR"), "/../../schemas/content");
         let set = SchemaSet::load(dir).expect("real content schemas load");
-        assert_eq!(set.collections().len(), 5);
+        assert_eq!(set.collections().len(), 7);
         assert!(set.schema_for("posts").is_some());
         assert!(set.schema_for("melange").is_some());
+        assert!(set.schema_for("media").is_some());
 
         // A record shaped like real obsidian_cms frontmatter + body.
         let record = json!({

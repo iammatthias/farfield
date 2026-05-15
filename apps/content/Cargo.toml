@@ -9,4 +9,6 @@ name = "farfield-content"
 path = "src/main.rs"
 
 [dependencies]
+anyhow.workspace = true
 farfield-records.workspace = true
+tokio = { version = "1.52.3", features = ["rt-multi-thread", "macros"] }

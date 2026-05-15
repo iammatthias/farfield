@@ -1,0 +1,41 @@
+{
+  "id": "media",
+  "version": 1,
+  "description": "An image — a queryable record of one blob's metadata. The blob bytes live in R2 (the blobs service); this record carries everything the website needs to render the image without fetching it. The record's rkey is the blob CID. Bodies reference an image as ![](blob://<cid>).",
+  "type": "object",
+  "required": ["cid", "mime", "width", "height", "blurhash", "dominantColor", "created"],
+  "properties": {
+    "cid": {
+      "type": "string",
+      "description": "The blob's content identifier — also this record's rkey."
+    },
+    "mime": {
+      "type": "string",
+      "description": "Image MIME type, e.g. image/jpeg."
+    },
+    "width": {
+      "type": "integer",
+      "description": "Pixel width."
+    },
+    "height": {
+      "type": "integer",
+      "description": "Pixel height."
+    },
+    "blurhash": {
+      "type": "string",
+      "description": "BlurHash placeholder string."
+    },
+    "dominantColor": {
+      "type": "string",
+      "description": "Dominant color as a hex string, e.g. #3a2f1c."
+    },
+    "alt": {
+      "type": "string",
+      "description": "Alt text. Optional."
+    },
+    "created": {
+      "type": "datetime",
+      "description": "When the image was added."
+    }
+  }
+}
