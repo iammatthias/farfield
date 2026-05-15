@@ -80,6 +80,7 @@ pub async fn serve(config: Config) -> anyhow::Result<()> {
 
 fn router(state: Arc<AppState>) -> Router {
     Router::new()
+        .route("/", get(root))
         .route("/status", get(status))
         .route("/collections", get(collections))
         .route("/schemas", get(schemas_all))
@@ -93,6 +94,26 @@ fn router(state: Arc<AppState>) -> Router {
 }
 
 // ---------- read handlers --------------------------------------------------
+
+async fn root(State(s): State<Arc<AppState>>) -> Json<Value> {
+    Json(json!({
+        "service": format!("farfield-{}", s.service_name),
+        "ok": true,
+        "endpoints": [
+            "GET    /status",
+            "GET    /collections",
+            "GET    /schemas",
+            "GET    /schemas/{collection}",
+            "GET    /records/{collection}",
+            "GET    /records/{collection}?since={seq}",
+            "GET    /records/{collection}/{rkey}",
+            "POST   /records/{collection}            (auth)",
+            "PUT    /records/{collection}/{rkey}     (auth)",
+            "DELETE /records/{collection}/{rkey}     (auth)",
+        ],
+        "collections": s.schemas.collections().iter().map(|c| &c.name).collect::<Vec<_>>(),
+    }))
+}
 
 async fn status(State(s): State<Arc<AppState>>) -> Json<Value> {
     let seq = s.store.lock().unwrap().current_seq().unwrap_or(0);
