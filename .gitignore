@@ -1,0 +1,13 @@
+/target
+**/*.rs.bk
+*.pdb
+
+# Local state — never committed.
+*.db
+*.db-wal
+*.db-shm
+/farfield.toml
+.env
+*.snapshot
+
+# Secrets live in env / EnvironmentFile, never in the repo.

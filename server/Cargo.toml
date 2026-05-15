@@ -1,0 +1,16 @@
+[package]
+name = "farfield-server"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[[bin]]
+name = "farfield-server"
+path = "src/main.rs"
+
+[dependencies]
+farfield-core.workspace = true
+farfield-store.workspace = true
+farfield-schema.workspace = true
+farfield-blobs.workspace = true
+farfield-snapshot.workspace = true

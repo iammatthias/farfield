@@ -1,0 +1,41 @@
+# Farfield — a self-owned content backend.
+# Workspace: five library crates + one server binary + the CLI.
+# Design doc: ~/.gstack/projects/mission-control/iammatthias-main-design-20260515-091028.md
+
+[workspace]
+resolver = "3"
+members = [
+    "crates/core",
+    "crates/store",
+    "crates/schema",
+    "crates/blobs",
+    "crates/snapshot",
+    "server",
+    "cli",
+]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2024"
+license = "MIT"
+authors = ["iammatthias <me@iammatthias.com>"]
+repository = "https://github.com/iammatthias/farfield"
+
+[workspace.dependencies]
+# Internal crates.
+farfield-core = { path = "crates/core" }
+farfield-store = { path = "crates/store" }
+farfield-schema = { path = "crates/schema" }
+farfield-blobs = { path = "crates/blobs" }
+farfield-snapshot = { path = "crates/snapshot" }
+
+# Shared third-party deps (each crate opts in as it needs them).
+anyhow = "1"
+thiserror = "2"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+tracing = "0.1"
+
+[profile.release]
+strip = true
+lto = "thin"

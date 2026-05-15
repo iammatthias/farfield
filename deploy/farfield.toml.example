@@ -1,0 +1,41 @@
+# Farfield server config — example.
+# Copy to ./farfield.toml and fill in. Non-secret settings only;
+# secrets come from the environment, never this file.
+#
+# Secrets via env:
+#   FARFIELD_TOKEN           bearer token for writes (required)
+#   FARFIELD_TOKEN_PREVIOUS  optional, accepted during rotation
+#   R2_ACCESS_KEY_ID         R2 credentials
+#   R2_SECRET_ACCESS_KEY
+
+[server]
+# Read socket — GET only, fronted by cloudflared.
+read_addr = "127.0.0.1:8787"
+# Write socket — full API, bound to the tailnet interface.
+# Set to the host's Tailscale address (e.g. "100.x.y.z:8788").
+write_addr = "127.0.0.1:8788"
+
+[database]
+path = "farfield.db"
+
+[blobs]
+# "r2" in production, "local" for `farfield --local` development.
+backend = "r2"
+local_dir = "blobs"            # used only when backend = "local"
+max_upload_bytes = 52428800    # 50 MB
+
+[r2]
+account_id = ""
+bucket = "farfield-blobs"
+# Public hostname the bucket is served from (Cloudflare-cached).
+public_host = "blobs.farfield.systems"
+
+[snapshot]
+bucket = "farfield-snapshots"
+interval_secs = 86400          # daily
+keep_daily = 7
+keep_weekly = 4
+
+[schemas]
+dir = "schemas"
+codegen_out = ""               # absolute path to the site's generated .d.ts

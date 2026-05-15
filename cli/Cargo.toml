@@ -1,0 +1,13 @@
+[package]
+name = "farfield-cli"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[[bin]]
+name = "farfield"
+path = "src/main.rs"
+
+[dependencies]
+farfield-core.workspace = true
+farfield-schema.workspace = true
