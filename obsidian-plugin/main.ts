@@ -4,11 +4,9 @@
 // Every request goes through Obsidian's `requestUrl`, so the plugin works on
 // desktop and mobile alike — no CLI, no child process, no CORS.
 //
-//   - Publish the current note   — PUT /records/{collection}/{rkey}
-//   - Upload pasted/dropped media — POST /blobs, then a media record
-//
-// The collection is the note's parent folder. A note under a `feed` folder
-// publishes to the feed service; every other folder to the content service.
+// Content and the feed are distinct. Content pieces belong to collections
+// (posts, art, …) under the content folder; the feed is a stream of short
+// posts under `feed/`. Each has its own "new" command.
 
 import {
   App,
@@ -20,16 +18,20 @@ import {
   PluginSettingTab,
   Setting,
   TFile,
-  TFolder,
   requestUrl,
   RequestUrlResponse,
 } from "obsidian";
+
+// The feed is a single, fixed collection — its folder name and collection
+// name are the same, which is what publish routing keys on.
+const FEED = "feed";
 
 interface FarfieldSettings {
   contentUrl: string;
   feedUrl: string;
   blobsUrl: string;
   token: string;
+  contentFolder: string;
 }
 
 const DEFAULT_SETTINGS: FarfieldSettings = {
@@ -37,6 +39,7 @@ const DEFAULT_SETTINGS: FarfieldSettings = {
   feedUrl: "https://feed.farfield.systems",
   blobsUrl: "https://blobs.farfield.systems",
   token: "",
+  contentFolder: "content",
 };
 
 // A lexicon-lite schema, as served by GET /schemas/{collection}.
@@ -47,12 +50,6 @@ interface SchemaField {
 interface Schema {
   required?: string[];
   properties: Record<string, SchemaField>;
-}
-
-// A collection paired with the service that hosts it.
-interface Coll {
-  name: string;
-  service: string;
 }
 
 export default class FarfieldPlugin extends Plugin {
@@ -75,9 +72,15 @@ export default class FarfieldPlugin extends Plugin {
     });
 
     this.addCommand({
-      id: "new-note",
-      name: "New note",
-      callback: () => void this.newNote(),
+      id: "new-content",
+      name: "New content piece",
+      callback: () => void this.newContent(),
+    });
+
+    this.addCommand({
+      id: "new-feed-post",
+      name: "New feed post",
+      callback: () => void this.newFeedPost(),
     });
 
     this.addCommand({
@@ -136,11 +139,99 @@ export default class FarfieldPlugin extends Plugin {
     }
   }
 
-  // serviceFor routes a collection to its service: `feed` to the feed service,
-  // everything else to the content service.
+  // serviceFor routes a collection to its service: the feed to the feed
+  // service, every other collection to the content service.
   private serviceFor(collection: string): string {
-    return collection === "feed" ? this.settings.feedUrl : this.settings.contentUrl;
+    return collection === FEED ? this.settings.feedUrl : this.settings.contentUrl;
   }
+
+  // ---- new content ---------------------------------------------------------
+
+  // newContent scaffolds a content piece: pick a collection, name it, and the
+  // plugin writes a note pre-filled from that collection's live schema, in the
+  // collection's folder under the content root.
+  private async newContent(): Promise<void> {
+    let collections: string[];
+    try {
+      collections = await this.contentCollections();
+    } catch (e) {
+      new Notice(`Farfield: ${errMessage(e)}`, 8000);
+      return;
+    }
+    if (collections.length === 0) {
+      new Notice("Farfield: no content collections found — check the content service URL.");
+      return;
+    }
+
+    const collection = await pickFromList(this.app, collections, "Collection for the new piece");
+    if (!collection) return;
+    const title = await promptText(this.app, "New content piece", "Title");
+    if (title === null) return;
+
+    try {
+      const schema = await this.fetchSchema(this.settings.contentUrl, collection);
+      const slug = `${Date.now()}-${kebab(title) || "untitled"}`;
+      const folder = `${this.settings.contentFolder}/${collection}`;
+      await this.ensureFolder(folder);
+      const file = await this.app.vault.create(
+        `${folder}/${slug}.md`,
+        scaffoldFrontmatter(schema, { title, slug }) + "\n\n",
+      );
+      await this.app.workspace.getLeaf(false).openFile(file);
+      new Notice(`Farfield: new ${collection} — ${slug}`);
+    } catch (e) {
+      new Notice(`Farfield: ${errMessage(e)}`, 8000);
+    }
+  }
+
+  // newFeedPost scaffolds a feed entry — no collection to pick, no title; the
+  // feed is one stream of short posts. A note is created in `feed/` and opened.
+  private async newFeedPost(): Promise<void> {
+    try {
+      const schema = await this.fetchSchema(this.settings.feedUrl, FEED);
+      const slug = `${Date.now()}`;
+      await this.ensureFolder(FEED);
+      const file = await this.app.vault.create(
+        `${FEED}/${slug}.md`,
+        scaffoldFrontmatter(schema, {}) + "\n\n",
+      );
+      await this.app.workspace.getLeaf(false).openFile(file);
+      new Notice(`Farfield: new feed post — ${slug}`);
+    } catch (e) {
+      new Notice(`Farfield: ${errMessage(e)}`, 8000);
+    }
+  }
+
+  // contentCollections lists the content service's authored collections —
+  // those whose schema has a `body` field (so media and series are excluded).
+  private async contentCollections(): Promise<string[]> {
+    const cols = await this.api("GET", `${this.settings.contentUrl}/collections`);
+    const schemas = await this.api("GET", `${this.settings.contentUrl}/schemas`);
+    if (cols.status >= 300) throw new Error(`collections: ${apiError(cols)}`);
+    if (schemas.status >= 300) throw new Error(`schemas: ${apiError(schemas)}`);
+    const colList = (cols.json?.collections ?? []) as { name: string; schema: string }[];
+    const schemaList = (schemas.json?.schemas ?? []) as {
+      id: string;
+      properties?: Record<string, unknown>;
+    }[];
+    const authored = new Set(
+      schemaList.filter((s) => s.properties && "body" in s.properties).map((s) => s.id),
+    );
+    return colList.filter((c) => authored.has(c.schema)).map((c) => c.name);
+  }
+
+  // ensureFolder creates a vault folder and any missing parents.
+  private async ensureFolder(path: string): Promise<void> {
+    let cur = "";
+    for (const part of path.split("/")) {
+      cur = cur ? `${cur}/${part}` : part;
+      if (!this.app.vault.getAbstractFileByPath(cur)) {
+        await this.app.vault.createFolder(cur);
+      }
+    }
+  }
+
+  // ---- shared --------------------------------------------------------------
 
   private async fetchSchema(service: string, collection: string): Promise<Schema> {
     const resp = await this.api("GET", `${service}/schemas/${collection}`);
@@ -217,76 +308,6 @@ export default class FarfieldPlugin extends Plugin {
     new Notice("Farfield —\n" + lines.join("\n"), 8000);
   }
 
-  // ---- scaffold ------------------------------------------------------------
-
-  // newNote scaffolds a new note for a chosen collection: it reads the live
-  // schema and writes a frontmatter skeleton with every declared field, each
-  // a valid value for its type — so the note publishes cleanly once authored.
-  private async newNote(): Promise<void> {
-    let collections: Coll[];
-    try {
-      collections = await this.authorableCollections();
-    } catch (e) {
-      new Notice(`Farfield: ${errMessage(e)}`, 8000);
-      return;
-    }
-    if (collections.length === 0) {
-      new Notice("Farfield: no authorable collections found — check the service URLs.");
-      return;
-    }
-
-    const coll = await pickCollection(this.app, collections);
-    if (!coll) return;
-    const title = await promptTitle(this.app);
-    if (title === null) return;
-
-    try {
-      const schema = await this.fetchSchema(coll.service, coll.name);
-      const slug = `${Date.now()}-${kebab(title) || "untitled"}`;
-      const frontmatter = scaffoldFrontmatter(schema, title, slug);
-      const folder = await this.ensureCollectionFolder(coll.name);
-      const file = await this.app.vault.create(`${folder}/${slug}.md`, frontmatter + "\n\n");
-      await this.app.workspace.getLeaf(false).openFile(file);
-      new Notice(`Farfield: new ${coll.name} note — ${slug}`);
-    } catch (e) {
-      new Notice(`Farfield: ${errMessage(e)}`, 8000);
-    }
-  }
-
-  // authorableCollections lists the collections you write notes for — those
-  // whose schema has a `body` field — across the content and feed services.
-  private async authorableCollections(): Promise<Coll[]> {
-    const out: Coll[] = [];
-    for (const service of [this.settings.contentUrl, this.settings.feedUrl]) {
-      const cols = await this.api("GET", `${service}/collections`);
-      const schemas = await this.api("GET", `${service}/schemas`);
-      if (cols.status >= 300 || schemas.status >= 300) continue;
-      const colList = (cols.json?.collections ?? []) as { name: string; schema: string }[];
-      const schemaList = (schemas.json?.schemas ?? []) as {
-        id: string;
-        properties?: Record<string, unknown>;
-      }[];
-      const authorable = new Set(
-        schemaList.filter((s) => s.properties && "body" in s.properties).map((s) => s.id),
-      );
-      for (const c of colList) {
-        if (authorable.has(c.schema)) out.push({ name: c.name, service });
-      }
-    }
-    return out;
-  }
-
-  // ensureCollectionFolder finds an existing folder named for the collection
-  // (e.g. content/art) so publish routing works, creating one if absent.
-  private async ensureCollectionFolder(name: string): Promise<string> {
-    const existing = this.app.vault
-      .getAllLoadedFiles()
-      .find((f): f is TFolder => f instanceof TFolder && f.name === name);
-    if (existing) return existing.path;
-    await this.app.vault.createFolder(name);
-    return name;
-  }
-
   // ---- http ----------------------------------------------------------------
 
   // api makes an authenticated request through Obsidian's requestUrl, which
@@ -325,7 +346,7 @@ export default class FarfieldPlugin extends Plugin {
 // buildRecord projects a note's frontmatter onto a collection's schema: every
 // declared field, coerced to its type; `body` from the markdown body; unknown
 // frontmatter keys dropped (the server rejects them). A required datetime that
-// is absent — common for quick feed posts — is stamped with the current time.
+// is absent is stamped with the current time.
 function buildRecord(
   schema: Schema,
   frontmatter: Record<string, unknown>,
@@ -399,16 +420,19 @@ function validRkey(rkey: string): boolean {
 // scaffoldFrontmatter renders a frontmatter skeleton from a schema: every
 // declared field except `body`, each given a valid value for its type — so a
 // freshly scaffolded note already satisfies the schema. `slug` and `title`
-// (when the schema has them) are filled from the new note's identity.
-function scaffoldFrontmatter(schema: Schema, title: string, slug: string): string {
+// are filled when present, both in the schema and in `fill`.
+function scaffoldFrontmatter(
+  schema: Schema,
+  fill: { title?: string; slug?: string },
+): string {
   const lines = ["---"];
   for (const [name, field] of Object.entries(schema.properties ?? {})) {
     if (name === "body") continue;
     let value: string;
-    if (name === "slug") {
-      value = yamlString(slug);
-    } else if (name === "title") {
-      value = yamlString(title);
+    if (name === "slug" && fill.slug != null) {
+      value = yamlString(fill.slug);
+    } else if (name === "title" && fill.title != null) {
+      value = yamlString(fill.title);
     } else {
       switch (field.type) {
         case "datetime":
@@ -438,8 +462,7 @@ function yamlString(s: string): string {
   return '"' + s.replace(/\\/g, "\\\\").replace(/"/g, '\\"') + '"';
 }
 
-// kebab slugifies a title for use in a record key: lowercase, alphanumerics
-// joined by hyphens.
+// kebab slugifies a title for use in a record key.
 function kebab(s: string): string {
   return s
     .toLowerCase()
@@ -495,6 +518,95 @@ function errMessage(e: unknown): string {
   return e instanceof Error ? e.message : String(e);
 }
 
+// ---- modals ----------------------------------------------------------------
+
+// pickFromList asks the user to choose one of `items`; resolves null if the
+// picker is dismissed.
+function pickFromList(app: App, items: string[], placeholder: string): Promise<string | null> {
+  return new Promise((resolve) => new ListSuggest(app, items, placeholder, resolve).open());
+}
+
+class ListSuggest extends FuzzySuggestModal<string> {
+  private chose = false;
+
+  constructor(
+    app: App,
+    private items: string[],
+    placeholder: string,
+    private resolve: (v: string | null) => void,
+  ) {
+    super(app);
+    this.setPlaceholder(placeholder);
+  }
+
+  getItems(): string[] {
+    return this.items;
+  }
+  getItemText(v: string): string {
+    return v;
+  }
+  onChooseItem(v: string): void {
+    this.chose = true;
+    this.resolve(v);
+  }
+  onClose(): void {
+    if (!this.chose) this.resolve(null);
+  }
+}
+
+// promptText asks for a line of text; resolves null if dismissed.
+function promptText(app: App, heading: string, placeholder: string): Promise<string | null> {
+  return new Promise((resolve) => new TextPromptModal(app, heading, placeholder, resolve).open());
+}
+
+class TextPromptModal extends Modal {
+  private done = false;
+
+  constructor(
+    app: App,
+    private heading: string,
+    private placeholder: string,
+    private resolve: (value: string | null) => void,
+  ) {
+    super(app);
+  }
+
+  onOpen(): void {
+    this.titleEl.setText(this.heading);
+    const input = this.contentEl.createEl("input", { type: "text" });
+    input.placeholder = this.placeholder;
+    input.style.width = "100%";
+
+    const finish = (value: string | null): void => {
+      if (this.done) return;
+      this.done = true;
+      this.resolve(value);
+      this.close();
+    };
+    input.addEventListener("keydown", (e) => {
+      if (e.key === "Enter") {
+        e.preventDefault();
+        finish(input.value.trim());
+      }
+    });
+    const button = this.contentEl.createEl("button", { text: "Create" });
+    button.style.marginTop = "1rem";
+    button.addEventListener("click", () => finish(input.value.trim()));
+
+    window.setTimeout(() => input.focus(), 0);
+  }
+
+  onClose(): void {
+    if (!this.done) {
+      this.done = true;
+      this.resolve(null);
+    }
+    this.contentEl.empty();
+  }
+}
+
+// ---- settings --------------------------------------------------------------
+
 class FarfieldSettingTab extends PluginSettingTab {
   constructor(
     app: App,
@@ -536,7 +648,7 @@ class FarfieldSettingTab extends PluginSettingTab {
     );
     field(
       "Feed service URL",
-      "Where notes in a `feed` folder publish.",
+      "Where feed posts publish.",
       () => s.feedUrl,
       (v) => (s.feedUrl = v),
     );
@@ -547,95 +659,17 @@ class FarfieldSettingTab extends PluginSettingTab {
       (v) => (s.blobsUrl = v),
     );
     field(
+      "Content folder",
+      "Vault folder that holds the content collection folders. The feed lives in `feed/`.",
+      () => s.contentFolder,
+      (v) => (s.contentFolder = v),
+    );
+    field(
       "Write token",
       "FARFIELD_TOKEN — the bearer token for authenticated writes.",
       () => s.token,
       (v) => (s.token = v),
       true,
     );
-  }
-}
-
-// ---- modals ----------------------------------------------------------------
-
-// pickCollection asks the user to choose a collection; resolves null if the
-// picker is dismissed.
-function pickCollection(app: App, items: Coll[]): Promise<Coll | null> {
-  return new Promise((resolve) => new CollectionSuggest(app, items, resolve).open());
-}
-
-class CollectionSuggest extends FuzzySuggestModal<Coll> {
-  private chose = false;
-
-  constructor(
-    app: App,
-    private items: Coll[],
-    private resolve: (c: Coll | null) => void,
-  ) {
-    super(app);
-    this.setPlaceholder("Collection for the new note");
-  }
-
-  getItems(): Coll[] {
-    return this.items;
-  }
-  getItemText(c: Coll): string {
-    return c.name;
-  }
-  onChooseItem(c: Coll): void {
-    this.chose = true;
-    this.resolve(c);
-  }
-  onClose(): void {
-    if (!this.chose) this.resolve(null);
-  }
-}
-
-// promptTitle asks for a note title; resolves null if dismissed.
-function promptTitle(app: App): Promise<string | null> {
-  return new Promise((resolve) => new TitlePromptModal(app, resolve).open());
-}
-
-class TitlePromptModal extends Modal {
-  private done = false;
-
-  constructor(
-    app: App,
-    private resolve: (title: string | null) => void,
-  ) {
-    super(app);
-  }
-
-  onOpen(): void {
-    this.titleEl.setText("New Farfield note");
-    const input = this.contentEl.createEl("input", { type: "text" });
-    input.placeholder = "Title";
-    input.style.width = "100%";
-
-    const finish = (value: string | null): void => {
-      if (this.done) return;
-      this.done = true;
-      this.resolve(value);
-      this.close();
-    };
-    input.addEventListener("keydown", (e) => {
-      if (e.key === "Enter") {
-        e.preventDefault();
-        finish(input.value.trim());
-      }
-    });
-    const button = this.contentEl.createEl("button", { text: "Create" });
-    button.style.marginTop = "1rem";
-    button.addEventListener("click", () => finish(input.value.trim()));
-
-    window.setTimeout(() => input.focus(), 0);
-  }
-
-  onClose(): void {
-    if (!this.done) {
-      this.done = true;
-      this.resolve(null);
-    }
-    this.contentEl.empty();
   }
 }
