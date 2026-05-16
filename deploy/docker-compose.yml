@@ -1,0 +1,53 @@
+# Farfield — the three backend services on one machine.
+#
+#   cd deploy && cp .env.example .env   # set FARFIELD_TOKEN
+#   docker compose up --build
+#
+# One image (built once), run three times — content, feed, and the shared
+# blob service. Each keeps its state in a named volume.
+
+services:
+  content:
+    build:
+      context: ..
+      dockerfile: deploy/Dockerfile
+    image: farfield
+    command: ["/content"]
+    environment:
+      FARFIELD_CONTENT_ADDR: "0.0.0.0:8787"
+      FARFIELD_CONTENT_DB: "/data/content.db"
+      FARFIELD_CONTENT_SCHEMAS: "/schemas/content"
+      FARFIELD_TOKEN: "${FARFIELD_TOKEN}"
+    ports: ["8787:8787"]
+    volumes: ["content-data:/data"]
+    restart: unless-stopped
+
+  feed:
+    image: farfield
+    command: ["/feed"]
+    environment:
+      FARFIELD_FEED_ADDR: "0.0.0.0:8788"
+      FARFIELD_FEED_DB: "/data/feed.db"
+      FARFIELD_FEED_SCHEMAS: "/schemas/feed"
+      FARFIELD_TOKEN: "${FARFIELD_TOKEN}"
+    ports: ["8788:8788"]
+    volumes: ["feed-data:/data"]
+    depends_on: ["content"]
+    restart: unless-stopped
+
+  blobs:
+    image: farfield
+    command: ["/blobs"]
+    environment:
+      FARFIELD_BLOBS_ADDR: "0.0.0.0:8789"
+      FARFIELD_BLOBS_DIR: "/data/blobs"
+      FARFIELD_TOKEN: "${FARFIELD_TOKEN}"
+    ports: ["8789:8789"]
+    volumes: ["blob-data:/data"]
+    depends_on: ["content"]
+    restart: unless-stopped
+
+volumes:
+  content-data:
+  feed-data:
+  blob-data:

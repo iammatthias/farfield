@@ -1,0 +1,8 @@
+.git
+*.db
+*.db-wal
+*.db-shm
+farfield-blobs-data/
+deploy/.env
+docs/
+README.md
