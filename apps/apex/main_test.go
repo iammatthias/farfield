@@ -27,7 +27,7 @@ func TestServesHomepage(t *testing.T) {
 		t.Fatalf("GET / = %d, want 200", resp.StatusCode)
 	}
 	body, _ := io.ReadAll(resp.Body)
-	if !strings.Contains(string(body), "<title>Pale Blue Dot</title>") {
+	if !strings.Contains(string(body), "<title>Farfield Systems</title>") {
 		t.Fatal("homepage body missing expected content")
 	}
 }
