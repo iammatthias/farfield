@@ -7,6 +7,7 @@
 package main
 
 import (
+	"fmt"
 	"io"
 	"log"
 	"net/http"
@@ -25,14 +26,14 @@ type service struct {
 }
 
 func main() {
-	dir := envOr("FARFIELD_BLOBS_DIR", "farfield-blobs-data")
 	addr := envOr("FARFIELD_BLOBS_ADDR", "127.0.0.1:8789")
 
-	store, err := blob.OpenLocalDir(dir)
+	store, desc, err := openStore()
 	if err != nil {
-		log.Fatalf("opening blob store %s: %v", dir, err)
+		log.Fatalf("opening blob store: %v", err)
 	}
 	svc := &service{store: store, tokens: tokensFromEnv()}
+	log.Printf("blob backend: %s", desc)
 
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /{$}", svc.root)
@@ -42,8 +43,30 @@ func main() {
 	mux.HandleFunc("GET /blobs/{cid}", svc.getBlob)
 	mux.HandleFunc("GET /blobs/{cid}/meta", svc.getMeta)
 
-	log.Printf("farfield-blobs listening on http://%s — store: %s", addr, dir)
+	log.Printf("farfield-blobs listening on http://%s", addr)
 	log.Fatal(http.ListenAndServe(addr, mux))
+}
+
+// openStore picks the blob backend. FARFIELD_BLOBS_BACKEND is "local"
+// (default) or "r2"; the R2 backend reads its credentials from R2_* env vars.
+func openStore() (blob.Store, string, error) {
+	switch envOr("FARFIELD_BLOBS_BACKEND", "local") {
+	case "local":
+		dir := envOr("FARFIELD_BLOBS_DIR", "farfield-blobs-data")
+		s, err := blob.OpenLocalDir(dir)
+		return s, "local:" + dir, err
+	case "r2":
+		bucket := os.Getenv("R2_BUCKET")
+		s, err := blob.NewR2(blob.R2Config{
+			AccountID:       os.Getenv("R2_ACCOUNT_ID"),
+			AccessKeyID:     os.Getenv("R2_ACCESS_KEY_ID"),
+			SecretAccessKey: os.Getenv("R2_SECRET_ACCESS_KEY"),
+			Bucket:          bucket,
+		})
+		return s, "r2:" + bucket, err
+	default:
+		return nil, "", fmt.Errorf("unknown FARFIELD_BLOBS_BACKEND (want local|r2)")
+	}
 }
 
 func (s *service) root(w http.ResponseWriter, _ *http.Request) {
