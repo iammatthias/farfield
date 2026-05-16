@@ -1,10 +1,11 @@
 // Command farfield is the Farfield content backend CLI.
 //
 // It publishes markdown into the running services: import bulk-loads a
-// directory of collections, push publishes individual files, migrate-images
-// lifts ipfs:// images onto the blob service, extract-series lifts runs of
-// inline media into series records, upload-media registers local files on the
-// blob service, and status reports health.
+// directory of collections, push publishes individual files, export writes
+// records back out as markdown, migrate-images lifts ipfs:// images onto the
+// blob service, extract-series lifts runs of inline media into series records,
+// upload-media registers local files on the blob service, and status reports
+// health.
 package main
 
 import (
@@ -38,6 +39,8 @@ func main() {
 		err = cmdImport(os.Args[2:])
 	case "push":
 		err = cmdPush(os.Args[2:])
+	case "export":
+		err = cmdExport(os.Args[2:])
 	case "migrate-images":
 		err = cmdMigrateImages(os.Args[2:])
 	case "extract-series":
@@ -65,6 +68,7 @@ func usage() {
 
   farfield import <dir>      bulk-import a directory of markdown collections
   farfield push <file>...    publish individual markdown files
+  farfield export <dir>      write every content record back out as markdown
   farfield migrate-images    move ipfs:// images onto the blob service
   farfield extract-series    lift runs of inline media into series records
   farfield upload-media      upload local media files, print their blob CIDs
