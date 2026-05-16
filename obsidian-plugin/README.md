@@ -37,6 +37,11 @@ In the plugin's settings tab:
 
 ## Use
 
+- **New note** — command palette → "Farfield Publisher: New note". Pick a
+  collection and enter a title; the plugin reads that collection's live schema
+  and creates a note pre-filled with a correct frontmatter skeleton (every
+  declared field, valid for its type, `created`/`updated` stamped, `slug` set),
+  in the right folder. Then write and publish.
 - **Publish current note** — command palette → "Farfield Publisher: Publish
   current note". The note's **parent folder is the collection**. A note under a
   `feed` folder publishes to the feed service; every other folder publishes to

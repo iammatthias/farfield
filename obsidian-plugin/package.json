@@ -1,6 +1,6 @@
 {
   "name": "farfield-publisher",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "description": "Obsidian plugin — publish notes and media to a Farfield backend over HTTP.",
   "private": true,
   "scripts": {
