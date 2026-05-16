@@ -9,8 +9,8 @@ const production = process.argv[2] === "production";
 const options = {
   entryPoints: ["main.ts"],
   bundle: true,
-  // Obsidian, Electron, and Node builtins are provided by the host at runtime.
-  external: ["obsidian", "electron", "child_process", "fs", "os", "path"],
+  // Obsidian is provided by the host at runtime.
+  external: ["obsidian"],
   format: "cjs",
   target: "es2020",
   platform: "node",

@@ -1,17 +1,8 @@
 # Farfield Publisher
 
-An Obsidian plugin — a thin wrapper over the `farfield` CLI. It publishes the
-current note to a Farfield content backend and uploads pasted or dropped media
-(images, video, audio, PDFs) to its blob store.
-
-The CLI does the real work — frontmatter parsing, schema validation, the
-blob/media records. This plugin is just the Obsidian-side ergonomics, so it is
-**desktop-only** (spawning the binary needs Node).
-
-## Prerequisites
-
-- The `farfield` CLI binary, built from this repo: `go build -o farfield ./apps/farfield`
-- A reachable Farfield deployment (content + blob services)
+An Obsidian plugin that publishes notes and media to a Farfield backend over
+its authenticated HTTP API. Every request goes through Obsidian's `requestUrl`,
+so it works on **desktop and mobile** — no CLI, no binary to install.
 
 ## Build
 
@@ -39,17 +30,23 @@ In the plugin's settings tab:
 
 | Setting | What |
 |---------|------|
-| Farfield binary | Absolute path to the compiled `farfield` binary |
 | Content service URL | e.g. `https://content.farfield.systems` |
+| Feed service URL | e.g. `https://feed.farfield.systems` |
 | Blob service URL | e.g. `https://blobs.farfield.systems` |
-| Schema directory | Path to this repo's `schemas/content` |
-| Write token | `FARFIELD_TOKEN` — passed to the CLI for authenticated writes |
+| Write token | `FARFIELD_TOKEN` — the bearer token for authenticated writes |
 
 ## Use
 
 - **Publish current note** — command palette → "Farfield Publisher: Publish
-  current note". The note's collection is its parent folder (`farfield push`).
+  current note". The note's **parent folder is the collection**. A note under a
+  `feed` folder publishes to the feed service; every other folder publishes to
+  the content service.
 - **Paste / drop media** — paste an image or drop a file into a note; it
   uploads to the blob store and the embed becomes `![](blob://<cid>)` (or a
   `[name](blob://<cid>)` link for non-visual files).
-- **Check service status** — pings the content service.
+- **Check service status** — pings the content, feed, and blob services.
+
+The note's frontmatter is projected onto the collection's schema — only
+declared fields are sent, others are dropped. A required timestamp that is
+missing (common for quick feed posts) is stamped with the current time. The
+record key is the `slug` frontmatter field, or the filename if there is none.

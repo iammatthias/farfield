@@ -1,49 +1,49 @@
-// Farfield Publisher — a thin Obsidian wrapper over the `farfield` CLI.
+// Farfield Publisher — an Obsidian plugin that publishes notes and media to a
+// Farfield backend over its authenticated HTTP API.
 //
-// Two jobs:
-//   1. Publish the current note    — shells out to `farfield push`.
-//   2. Upload pasted/dropped media — shells out to `farfield upload-media`,
-//      then rewrites the embed to `blob://<cid>`.
+// Every request goes through Obsidian's `requestUrl`, so the plugin works on
+// desktop and mobile alike — no CLI, no child process, no CORS.
 //
-// The CLI does the real work (frontmatter parsing, schema validation, the
-// blob/media records); this plugin is just the Obsidian-side ergonomics. It
-// is desktop-only — spawning the binary needs Node's child_process.
+//   - Publish the current note   — PUT /records/{collection}/{rkey}
+//   - Upload pasted/dropped media — POST /blobs, then a media record
+//
+// The collection is the note's parent folder. A note under a `feed` folder
+// publishes to the feed service; every other folder to the content service.
 
 import {
   App,
   Editor,
-  FileSystemAdapter,
   Notice,
   Plugin,
   PluginSettingTab,
   Setting,
   TFile,
+  requestUrl,
+  RequestUrlResponse,
 } from "obsidian";
-import { execFile } from "child_process";
-import { promises as fs } from "fs";
-import * as os from "os";
-import * as path from "path";
 
 interface FarfieldSettings {
-  binaryPath: string;
   contentUrl: string;
+  feedUrl: string;
   blobsUrl: string;
-  schemasPath: string;
   token: string;
 }
 
 const DEFAULT_SETTINGS: FarfieldSettings = {
-  binaryPath: "",
   contentUrl: "https://content.farfield.systems",
+  feedUrl: "https://feed.farfield.systems",
   blobsUrl: "https://blobs.farfield.systems",
-  schemasPath: "",
   token: "",
 };
 
-interface RunResult {
-  code: number;
-  stdout: string;
-  stderr: string;
+// A lexicon-lite schema, as served by GET /schemas/{collection}.
+interface SchemaField {
+  type: string;
+  items?: SchemaField;
+}
+interface Schema {
+  required?: string[];
+  properties: Record<string, SchemaField>;
 }
 
 export default class FarfieldPlugin extends Plugin {
@@ -71,7 +71,7 @@ export default class FarfieldPlugin extends Plugin {
       callback: () => void this.checkStatus(),
     });
 
-    // Intercept pasted / dropped media and route it through the blob store.
+    // Route pasted / dropped media through the blob store.
     this.registerEvent(
       this.app.workspace.on("editor-paste", (evt, editor) => {
         const files = mediaFiles(evt.clipboardData);
@@ -90,53 +90,71 @@ export default class FarfieldPlugin extends Plugin {
     );
   }
 
-  // ---- commands ------------------------------------------------------------
+  // ---- publish -------------------------------------------------------------
 
   private async publish(file: TFile): Promise<void> {
-    const abs = this.absPath(file);
-    if (!abs) {
-      new Notice("Farfield: this vault is not on a local filesystem.");
+    const collection = file.parent?.name;
+    if (!collection || file.parent?.isRoot()) {
+      new Notice("Farfield: a note must live inside a collection folder.");
       return;
     }
-    const args = ["push", abs, "--service", this.settings.contentUrl];
-    if (this.settings.schemasPath) {
-      args.push("--schemas", this.settings.schemasPath);
-    }
+    const service = this.serviceFor(collection);
+
     new Notice(`Farfield: publishing ${file.basename}…`);
     try {
-      const r = await this.run(args);
-      if (r.code === 0) {
-        new Notice(`Farfield: published ${file.basename} ✓`);
+      const schema = await this.fetchSchema(service, collection);
+      const { frontmatter, body } = await this.readNote(file);
+      const record = buildRecord(schema, frontmatter, body);
+      const rkey = pickRkey(frontmatter, file);
+      if (!validRkey(rkey)) {
+        new Notice(`Farfield: "${rkey}" is not a valid rkey ([a-z0-9-], 1–128).`, 8000);
+        return;
+      }
+      const resp = await this.api("PUT", `${service}/records/${collection}/${rkey}`, record);
+      if (resp.status < 300) {
+        new Notice(`Farfield: published ${collection}/${rkey} ✓`);
       } else {
-        new Notice(`Farfield: publish failed — ${firstLine(r.stderr || r.stdout)}`, 8000);
+        new Notice(`Farfield: ${collection}/${rkey} — ${apiError(resp)}`, 8000);
       }
     } catch (e) {
       new Notice(`Farfield: ${errMessage(e)}`, 8000);
     }
   }
 
-  private async checkStatus(): Promise<void> {
-    try {
-      const r = await this.run(["status", "--service", this.settings.contentUrl]);
-      if (r.code === 0) {
-        new Notice(`Farfield status:\n${r.stdout.trim()}`, 8000);
-      } else {
-        new Notice(`Farfield: ${firstLine(r.stderr || r.stdout)}`, 8000);
-      }
-    } catch (e) {
-      new Notice(`Farfield: ${errMessage(e)}`, 8000);
-    }
+  // serviceFor routes a collection to its service: `feed` to the feed service,
+  // everything else to the content service.
+  private serviceFor(collection: string): string {
+    return collection === "feed" ? this.settings.feedUrl : this.settings.contentUrl;
   }
 
-  // ---- media upload --------------------------------------------------------
+  private async fetchSchema(service: string, collection: string): Promise<Schema> {
+    const resp = await this.api("GET", `${service}/schemas/${collection}`);
+    if (resp.status === 404) throw new Error(`unknown collection "${collection}"`);
+    if (resp.status >= 300) throw new Error(`fetching schema: ${apiError(resp)}`);
+    return resp.json as Schema;
+  }
+
+  private async readNote(
+    file: TFile,
+  ): Promise<{ frontmatter: Record<string, unknown>; body: string }> {
+    const content = await this.app.vault.read(file);
+    const cache = this.app.metadataCache.getFileCache(file);
+    const frontmatter = (cache?.frontmatter ?? {}) as Record<string, unknown>;
+    // Strip a leading YAML frontmatter block; what remains is the body.
+    const body = content
+      .replace(/^---\r?\n[\s\S]*?\r?\n---\r?\n?/, "")
+      .replace(/^\s+/, "");
+    return { frontmatter, body };
+  }
+
+  // ---- media ---------------------------------------------------------------
 
   private async handleFiles(files: File[], editor: Editor): Promise<void> {
     for (const file of files) {
       const token = `![uploading ${file.name} #${++this.uploadCounter}…]()`;
       editor.replaceSelection(token + "\n");
       try {
-        const data = await file.arrayBuffer();
-        const cid = await this.uploadMedia(data, file.name);
+        const cid = await this.uploadMedia(await file.arrayBuffer());
         const embed =
           file.type.startsWith("image/") || file.type.startsWith("video/")
             ? `![](blob://${cid})`
@@ -150,63 +168,62 @@ export default class FarfieldPlugin extends Plugin {
     }
   }
 
-  // uploadMedia writes the bytes to a temp file, runs `farfield upload-media`,
-  // and returns the blob CID it prints.
-  private async uploadMedia(data: ArrayBuffer, name: string): Promise<string> {
-    const tmp = path.join(os.tmpdir(), `farfield-${Date.now()}-${safeName(name)}`);
-    await fs.writeFile(tmp, Buffer.from(data));
-    try {
-      const r = await this.run([
-        "upload-media",
-        tmp,
-        "--blobs",
-        this.settings.blobsUrl,
-        "--content",
-        this.settings.contentUrl,
-      ]);
-      if (r.code !== 0) {
-        throw new Error(firstLine(r.stderr || r.stdout) || "upload failed");
+  // uploadMedia POSTs bytes to the blob service, then records the media entry
+  // on the content service (rkey = the blob CID).
+  private async uploadMedia(data: ArrayBuffer): Promise<string> {
+    const up = await this.api("POST", `${this.settings.blobsUrl}/blobs`, data);
+    if (up.status >= 300) throw new Error(apiError(up));
+    const meta = up.json as Record<string, unknown>;
+    const cid = typeof meta.cid === "string" ? meta.cid : "";
+    if (!cid) throw new Error("blob service returned no CID");
+    const rec = { ...meta, created: nowRFC3339() };
+    const put = await this.api("PUT", `${this.settings.contentUrl}/records/media/${cid}`, rec);
+    if (put.status >= 300) throw new Error(`media record: ${apiError(put)}`);
+    return cid;
+  }
+
+  // ---- status --------------------------------------------------------------
+
+  private async checkStatus(): Promise<void> {
+    const services: ReadonlyArray<readonly [string, string]> = [
+      ["content", this.settings.contentUrl],
+      ["feed", this.settings.feedUrl],
+      ["blobs", this.settings.blobsUrl],
+    ];
+    const lines: string[] = [];
+    for (const [name, url] of services) {
+      try {
+        const r = await this.api("GET", `${url}/status`);
+        lines.push(`${name}: ${r.status < 300 ? "ok" : "HTTP " + r.status}`);
+      } catch {
+        lines.push(`${name}: unreachable`);
       }
-      const cid = r.stdout.trim().split("\n")[0].trim();
-      if (!cid) throw new Error("the CLI returned no CID");
-      return cid;
-    } finally {
-      void fs.unlink(tmp).catch(() => {});
     }
+    new Notice("Farfield —\n" + lines.join("\n"), 8000);
   }
 
-  // ---- helpers -------------------------------------------------------------
+  // ---- http ----------------------------------------------------------------
 
-  // run spawns the configured farfield binary, passing the write token in the
-  // environment, and resolves with its exit code and output.
-  private run(args: string[]): Promise<RunResult> {
-    return new Promise((resolve, reject) => {
-      if (!this.settings.binaryPath) {
-        reject(new Error("set the farfield binary path in plugin settings"));
-        return;
-      }
-      execFile(
-        this.settings.binaryPath,
-        args,
-        {
-          env: { ...process.env, FARFIELD_TOKEN: this.settings.token },
-          maxBuffer: 16 * 1024 * 1024,
-        },
-        (err, stdout, stderr) => {
-          const code =
-            err && typeof err.code === "number" ? err.code : err ? 1 : 0;
-          resolve({ code, stdout: stdout ?? "", stderr: stderr ?? "" });
-        },
-      );
-    });
-  }
+  // api makes an authenticated request through Obsidian's requestUrl, which
+  // works on mobile and is not subject to CORS. A plain object body is sent as
+  // JSON; an ArrayBuffer as raw bytes. Never throws on HTTP status.
+  private async api(
+    method: string,
+    url: string,
+    body?: unknown,
+  ): Promise<RequestUrlResponse> {
+    const headers: Record<string, string> = {};
+    if (this.settings.token) headers["Authorization"] = `Bearer ${this.settings.token}`;
 
-  // absPath resolves a vault file to an absolute filesystem path, or null when
-  // the vault is not on a local filesystem.
-  private absPath(file: TFile): string | null {
-    const adapter = this.app.vault.adapter;
-    if (!(adapter instanceof FileSystemAdapter)) return null;
-    return path.join(adapter.getBasePath(), file.path);
+    let payload: string | ArrayBuffer | undefined;
+    if (body instanceof ArrayBuffer) {
+      payload = body;
+      headers["Content-Type"] = "application/octet-stream";
+    } else if (body !== undefined) {
+      payload = JSON.stringify(body);
+      headers["Content-Type"] = "application/json";
+    }
+    return requestUrl({ url, method, headers, body: payload, throw: false });
   }
 
   async loadSettings(): Promise<void> {
@@ -218,31 +235,102 @@ export default class FarfieldPlugin extends Plugin {
   }
 }
 
-// mediaFiles returns the image / video / audio / PDF files in a clipboard or
-// drag payload — the ones worth routing to the blob store. Anything else
-// (plain text, markdown files) is left for Obsidian to handle.
-function mediaFiles(dt: DataTransfer | null): File[] {
-  if (!dt || dt.files.length === 0) return [];
-  return Array.from(dt.files).filter(isMedia);
+// ---- record building -------------------------------------------------------
+
+// buildRecord projects a note's frontmatter onto a collection's schema: every
+// declared field, coerced to its type; `body` from the markdown body; unknown
+// frontmatter keys dropped (the server rejects them). A required datetime that
+// is absent — common for quick feed posts — is stamped with the current time.
+function buildRecord(
+  schema: Schema,
+  frontmatter: Record<string, unknown>,
+  body: string,
+): Record<string, unknown> {
+  const required = new Set(schema.required ?? []);
+  const out: Record<string, unknown> = {};
+  for (const [name, field] of Object.entries(schema.properties ?? {})) {
+    if (name === "body") {
+      out.body = body;
+    } else if (name in frontmatter && frontmatter[name] != null) {
+      out[name] = coerce(field, frontmatter[name]);
+    } else if (required.has(name) && field.type === "datetime") {
+      out[name] = nowRFC3339();
+    }
+  }
+  return out;
 }
 
-function isMedia(file: File): boolean {
-  return (
-    file.type.startsWith("image/") ||
-    file.type.startsWith("video/") ||
-    file.type.startsWith("audio/") ||
-    file.type === "application/pdf"
+function coerce(field: SchemaField, value: unknown): unknown {
+  switch (field.type) {
+    case "string":
+      return String(value);
+    case "datetime":
+      return toRFC3339(value);
+    case "boolean":
+      if (typeof value === "boolean") return value;
+      return ["true", "yes", "on", "1"].includes(String(value).toLowerCase());
+    case "integer":
+    case "float":
+      return typeof value === "number" ? value : Number(value);
+    case "array":
+      if (Array.isArray(value) && field.items) {
+        return value.map((v) => coerce(field.items as SchemaField, v));
+      }
+      return value;
+    default:
+      return value;
+  }
+}
+
+// toRFC3339 normalizes a frontmatter datetime to an RFC3339 UTC string. An
+// unparseable value is passed through so the server can report it.
+function toRFC3339(value: unknown): string {
+  if (value instanceof Date) return stripMillis(value);
+  const s = String(value).trim();
+  const d = new Date(s);
+  return isNaN(d.getTime()) ? s : stripMillis(d);
+}
+
+function nowRFC3339(): string {
+  return stripMillis(new Date());
+}
+
+function stripMillis(d: Date): string {
+  return d.toISOString().replace(/\.\d{3}Z$/, "Z");
+}
+
+function pickRkey(frontmatter: Record<string, unknown>, file: TFile): string {
+  const slug = frontmatter.slug;
+  if (typeof slug === "string" && slug.trim()) return slug.trim();
+  return file.basename;
+}
+
+function validRkey(rkey: string): boolean {
+  return /^[a-z0-9-]{1,128}$/.test(rkey);
+}
+
+// ---- media helpers ---------------------------------------------------------
+
+// mediaFiles returns the image / video / audio / PDF files in a clipboard or
+// drag payload — the ones worth routing to the blob store.
+function mediaFiles(dt: DataTransfer | null): File[] {
+  if (!dt || dt.files.length === 0) return [];
+  return Array.from(dt.files).filter(
+    (f) =>
+      f.type.startsWith("image/") ||
+      f.type.startsWith("video/") ||
+      f.type.startsWith("audio/") ||
+      f.type === "application/pdf",
   );
 }
 
-// replaceToken swaps the first occurrence of a placeholder token for the final
-// text. The upload is async, so the token may have moved; a fresh search keeps
-// it correct. If the user deleted the token, this is a no-op.
+// replaceToken swaps the first occurrence of a placeholder for the final text.
+// The upload is async, so the token may have moved; a fresh search keeps it
+// correct. If the user deleted the token, this is a no-op.
 function replaceToken(editor: Editor, token: string, replacement: string): void {
   const content = editor.getValue();
   const idx = content.indexOf(token);
   if (idx === -1) return;
-  // Also consume the trailing newline that was inserted with the token.
   const end = content.startsWith("\n", idx + token.length)
     ? idx + token.length + 1
     : idx + token.length;
@@ -253,12 +341,16 @@ function replaceToken(editor: Editor, token: string, replacement: string): void 
   );
 }
 
-function safeName(name: string): string {
-  return name.replace(/[^a-zA-Z0-9._-]/g, "_");
-}
+// ---- misc ------------------------------------------------------------------
 
-function firstLine(s: string): string {
-  return s.trim().split("\n")[0].trim();
+function apiError(resp: RequestUrlResponse): string {
+  try {
+    const j = resp.json as { message?: string } | undefined;
+    if (j && j.message) return j.message;
+  } catch {
+    /* response body was not JSON */
+  }
+  return `HTTP ${resp.status}`;
 }
 
 function errMessage(e: unknown): string {
@@ -277,10 +369,10 @@ class FarfieldSettingTab extends PluginSettingTab {
     const { containerEl } = this;
     containerEl.empty();
 
+    const s = this.plugin.settings;
     const field = (
       name: string,
       desc: string,
-      placeholder: string,
       get: () => string,
       set: (v: string) => void,
       password = false,
@@ -289,52 +381,36 @@ class FarfieldSettingTab extends PluginSettingTab {
         .setName(name)
         .setDesc(desc)
         .addText((text) => {
-          text
-            .setPlaceholder(placeholder)
-            .setValue(get())
-            .onChange(async (v) => {
-              set(v.trim());
-              await this.plugin.saveSettings();
-            });
+          text.setValue(get()).onChange(async (v) => {
+            set(v.trim());
+            await this.plugin.saveSettings();
+          });
           if (password) text.inputEl.type = "password";
           text.inputEl.style.width = "320px";
         });
     };
 
-    const s = this.plugin.settings;
-
-    field(
-      "Farfield binary",
-      "Absolute path to the compiled `farfield` CLI binary.",
-      "/Users/you/Developer/farfield/farfield",
-      () => s.binaryPath,
-      (v) => (s.binaryPath = v),
-    );
     field(
       "Content service URL",
-      "The content/records service the notes publish to.",
-      DEFAULT_SETTINGS.contentUrl,
+      "Where content collections (posts, art, …) publish.",
       () => s.contentUrl,
       (v) => (s.contentUrl = v),
     );
     field(
+      "Feed service URL",
+      "Where notes in a `feed` folder publish.",
+      () => s.feedUrl,
+      (v) => (s.feedUrl = v),
+    );
+    field(
       "Blob service URL",
-      "The blob service pasted media uploads to.",
-      DEFAULT_SETTINGS.blobsUrl,
+      "Where pasted media uploads.",
       () => s.blobsUrl,
       (v) => (s.blobsUrl = v),
     );
     field(
-      "Schema directory",
-      "Path to the farfield repo's `schemas/content` — used to validate notes before publishing.",
-      "/Users/you/Developer/farfield/schemas/content",
-      () => s.schemasPath,
-      (v) => (s.schemasPath = v),
-    );
-    field(
       "Write token",
-      "FARFIELD_TOKEN — passed to the CLI in the environment for authenticated writes.",
-      "",
+      "FARFIELD_TOKEN — the bearer token for authenticated writes.",
       () => s.token,
       (v) => (s.token = v),
       true,
