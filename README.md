@@ -1,9 +1,9 @@
 # Farfield
 
-A self-owned content backend. Three small Go services — content-addressed
-records, lexicon-lite schemas, image blobs, SQLite. It is the backend for
-`iammatthias.com`; the landing page and the website that consume it are
-separate Astro projects.
+A self-owned content backend. A few small Go services — content-addressed
+records, lexicon-lite schemas, image blobs, SQLite — plus the apex site at
+`farfield.systems`. It is the backend for `iammatthias.com`; the website that
+consumes it is a separate Astro project.
 
 History is git's job (the authored markdown is versioned there). Farfield
 holds current published state and serves it fast, with each record's CID as
@@ -21,6 +21,7 @@ An Andromeda-shaped workspace — `apps/` over `lib/`, composed by `deploy/`.
 apps/content    content service — posts, open-source, recipes, art, melange, media, series
 apps/feed       feed service — feed entries
 apps/blobs      blob service — content-addressed blob store (local dir or R2)
+apps/apex       apex site — farfield.systems, an embedded static site
 apps/farfield   the `farfield` CLI
 
 lib/core        records, canonical hashing, CIDv1

@@ -1,10 +1,11 @@
-# Farfield — the three backend services on one machine.
+# Farfield — the backend services on one machine.
 #
 #   cd deploy && cp .env.example .env   # set FARFIELD_TOKEN
 #   docker compose up --build
 #
-# One image (built once), run three times — content, feed, and the shared
-# blob service. Each keeps its state in a named volume.
+# One image (built once), run per-service — content, feed, the shared blob
+# service, and the apex site. Each stateful service keeps its data in a
+# named volume; apex is stateless (its site is embedded in the binary).
 
 services:
   content:
@@ -52,6 +53,14 @@ services:
     ports: ["8789:8789"]
     volumes: ["blob-data:/data"]
     depends_on: ["content"]
+    restart: unless-stopped
+
+  apex:
+    image: farfield
+    command: ["/apex"]
+    environment:
+      FARFIELD_APEX_ADDR: "0.0.0.0:8790"
+    ports: ["8790:8790"]
     restart: unless-stopped
 
 volumes:

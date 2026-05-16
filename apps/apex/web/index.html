@@ -1,0 +1,134 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name="theme-color" content="#040810">
+<title>Pale Blue Dot</title>
+<style>
+  *,*::before,*::after{margin:0;padding:0;box-sizing:border-box}
+  html,body{height:100%;width:100%;background:#040810;overflow:hidden}
+  .scene{position:fixed;inset:0;contain:strict}
+  svg{display:block;width:100%;height:100%}
+
+  @media (prefers-reduced-motion:no-preference){
+    .halo{
+      animation:pulse 5s ease-in-out infinite;
+      transform-origin:center;transform-box:fill-box
+    }
+  }
+  @keyframes pulse{
+    0%,100%{opacity:.6;transform:scale(1)}
+    50%{opacity:1;transform:scale(1.22)}
+  }
+</style>
+</head>
+<body>
+<div class="scene">
+  <svg viewBox="0 0 1600 900" preserveAspectRatio="xMidYMid slice"
+       xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Pale Blue Dot">
+    <defs>
+      <!-- Vertical sky: deep blue at top → dusty lavender at bottom -->
+      <linearGradient id="sky" x1="50%" y1="0%" x2="50%" y2="100%">
+        <stop offset="0%"   stop-color="#040810"/>
+        <stop offset="12%"  stop-color="#0a1322"/>
+        <stop offset="30%"  stop-color="#1c2a44"/>
+        <stop offset="50%"  stop-color="#3e4d6e"/>
+        <stop offset="70%"  stop-color="#7686a8"/>
+        <stop offset="88%"  stop-color="#a6afc8"/>
+        <stop offset="100%" stop-color="#bcc1d4"/>
+      </linearGradient>
+
+      <!-- Top-right corner deepening (real photo goes near-black there) -->
+      <radialGradient id="cornerTR" cx="92%" cy="-8%" r="70%">
+        <stop offset="0%"   stop-color="#000" stop-opacity=".82"/>
+        <stop offset="55%"  stop-color="#000" stop-opacity=".22"/>
+        <stop offset="100%" stop-color="#000" stop-opacity="0"/>
+      </radialGradient>
+
+      <!-- Faint teal whisper, upper-left -->
+      <radialGradient id="cornerTL" cx="0%" cy="14%" r="60%">
+        <stop offset="0%"   stop-color="#0c3242" stop-opacity=".35"/>
+        <stop offset="100%" stop-color="#0c3242" stop-opacity="0"/>
+      </radialGradient>
+
+      <!-- Dusty warm hint, lower-left -->
+      <radialGradient id="cornerBL" cx="18%" cy="100%" r="60%">
+        <stop offset="0%"   stop-color="#c198a8" stop-opacity=".16"/>
+        <stop offset="100%" stop-color="#c198a8" stop-opacity="0"/>
+      </radialGradient>
+
+      <!-- Main scattered-light beam, cross-section -->
+      <linearGradient id="beamMain" x1="0%" x2="100%" y1="0" y2="0">
+        <stop offset="0%"   stop-color="#c8d2e8" stop-opacity="0"/>
+        <stop offset="35%"  stop-color="#c8d2e8" stop-opacity=".28"/>
+        <stop offset="50%"  stop-color="#e8eef8" stop-opacity=".58"/>
+        <stop offset="65%"  stop-color="#c8d2e8" stop-opacity=".28"/>
+        <stop offset="100%" stop-color="#c8d2e8" stop-opacity="0"/>
+      </linearGradient>
+
+      <!-- Secondary, fainter beam -->
+      <linearGradient id="beamSide" x1="0%" x2="100%" y1="0" y2="0">
+        <stop offset="0%"   stop-color="#aab4ce" stop-opacity="0"/>
+        <stop offset="50%"  stop-color="#cad4ec" stop-opacity=".20"/>
+        <stop offset="100%" stop-color="#aab4ce" stop-opacity="0"/>
+      </linearGradient>
+
+      <!-- Lengthwise fade so beams don't hard-edge at top/bottom -->
+      <linearGradient id="lenFade" x1="0" y1="0" x2="0" y2="1">
+        <stop offset="0%"   stop-color="#fff" stop-opacity=".35"/>
+        <stop offset="35%"  stop-color="#fff" stop-opacity="1"/>
+        <stop offset="65%"  stop-color="#fff" stop-opacity="1"/>
+        <stop offset="100%" stop-color="#fff" stop-opacity=".4"/>
+      </linearGradient>
+      <mask id="lenMask">
+        <rect x="-600" y="-400" width="2800" height="1700" fill="url(#lenFade)"/>
+      </mask>
+
+      <!-- Earth — halo + core -->
+      <radialGradient id="halo" cx="50%" cy="50%" r="50%">
+        <stop offset="0%"   stop-color="#f4f8fc" stop-opacity=".9"/>
+        <stop offset="35%"  stop-color="#c8d4ec" stop-opacity=".4"/>
+        <stop offset="100%" stop-color="#c8d4ec" stop-opacity="0"/>
+      </radialGradient>
+      <radialGradient id="core" cx="40%" cy="40%" r="60%">
+        <stop offset="0%"   stop-color="#ffffff"/>
+        <stop offset="55%"  stop-color="#dae2f0"/>
+        <stop offset="100%" stop-color="#a8b8d4"/>
+      </radialGradient>
+
+      <!-- Film grain -->
+      <filter id="grain" x="0" y="0" width="100%" height="100%">
+        <feTurbulence type="fractalNoise" baseFrequency=".85" numOctaves="2" seed="4" stitchTiles="stitch"/>
+        <feColorMatrix values="0 0 0 0 .9   0 0 0 0 .9   0 0 0 0 .96   0 0 0 .07 0"/>
+      </filter>
+    </defs>
+
+    <!-- 1. Sky base -->
+    <rect width="1600" height="900" fill="url(#sky)"/>
+
+    <!-- 2. Corner color washes -->
+    <rect width="1600" height="900" fill="url(#cornerTR)"/>
+    <rect width="1600" height="900" fill="url(#cornerTL)"/>
+    <rect width="1600" height="900" fill="url(#cornerBL)"/>
+
+    <!-- 3. Scattered-light beams (rotated subtly; pivot = screen center) -->
+    <g transform="rotate(-4 800 450)" mask="url(#lenMask)">
+      <!-- Faint secondary beam, left of center -->
+      <rect x="380" y="-300" width="220" height="1600" fill="url(#beamSide)"/>
+      <!-- Main bright beam — passes through screen center -->
+      <rect x="650" y="-300" width="300" height="1600" fill="url(#beamMain)"/>
+    </g>
+
+    <!-- 4. Earth — the Pale Blue Dot, dead center (800, 450) -->
+    <g transform="translate(800 450)">
+      <circle class="halo" r="14" fill="url(#halo)"/>
+      <circle r="2.4" fill="url(#core)"/>
+    </g>
+
+    <!-- 5. Film grain over everything -->
+    <rect width="1600" height="900" filter="url(#grain)" opacity=".4"/>
+  </svg>
+</div>
+</body>
+</html>
