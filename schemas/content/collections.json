@@ -35,7 +35,13 @@
       "name": "media",
       "schema": "media",
       "title": "Media",
-      "description": "Image metadata records — one per blob. A gallery is just an entry whose markdown body holds several images; no separate type."
+      "description": "Image metadata records — one per blob. Bodies reference an image as ![](blob://<cid>)."
+    },
+    {
+      "name": "series",
+      "schema": "series",
+      "title": "Series",
+      "description": "Galleries — ordered groups of media extracted from runs of consecutive inline embeds. Bodies reference a series as ![](series://<rkey>)."
     }
   ]
 }

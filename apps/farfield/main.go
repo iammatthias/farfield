@@ -2,7 +2,8 @@
 //
 // It publishes markdown into the running services: import bulk-loads a
 // directory of collections, push publishes individual files, migrate-images
-// lifts ipfs:// images onto the blob service, and status reports health.
+// lifts ipfs:// images onto the blob service, extract-series lifts runs of
+// inline media into series records, and status reports health.
 package main
 
 import (
@@ -38,6 +39,8 @@ func main() {
 		err = cmdPush(os.Args[2:])
 	case "migrate-images":
 		err = cmdMigrateImages(os.Args[2:])
+	case "extract-series":
+		err = cmdExtractSeries(os.Args[2:])
 	case "status":
 		err = cmdStatus(os.Args[2:])
 	case "help", "-h", "--help":
@@ -60,6 +63,7 @@ func usage() {
   farfield import <dir>      bulk-import a directory of markdown collections
   farfield push <file>...    publish individual markdown files
   farfield migrate-images    move ipfs:// images onto the blob service
+  farfield extract-series    lift runs of inline media into series records
   farfield status            print a service's status
 
 Run a command with -h for its flags. The write token is read from

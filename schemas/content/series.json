@@ -1,0 +1,26 @@
+{
+  "id": "series",
+  "version": 1,
+  "description": "An ordered group of media — a gallery. `refs` lists media blob CIDs in display order; the mimetype of each is carried by its own media record, so a series may mix images, video, and other types. Extracted from a run of consecutive inline media embeds. The record's rkey is the content CID of those refs, so re-running extraction upserts the same record. Bodies reference a series as ![](series://<rkey>).",
+  "type": "object",
+  "required": ["refs", "created"],
+  "properties": {
+    "title": {
+      "type": "string",
+      "description": "Gallery title — the heading immediately above the run, if any. Optional."
+    },
+    "description": {
+      "type": "string",
+      "description": "Gallery description. Optional."
+    },
+    "refs": {
+      "type": "array",
+      "items": { "type": "string" },
+      "description": "Media blob CIDs, in display order. Any mimetype."
+    },
+    "created": {
+      "type": "datetime",
+      "description": "When the gallery was created."
+    }
+  }
+}

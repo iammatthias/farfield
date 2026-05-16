@@ -82,10 +82,10 @@ func TestRealContentSchemasLoadAndValidate(t *testing.T) {
 	if err != nil {
 		t.Fatalf("real content schemas should load: %v", err)
 	}
-	if len(set.Collections()) != 6 {
-		t.Fatalf("expected 6 collections, got %d", len(set.Collections()))
+	if len(set.Collections()) != 7 {
+		t.Fatalf("expected 7 collections, got %d", len(set.Collections()))
 	}
-	for _, name := range []string{"posts", "melange", "media"} {
+	for _, name := range []string{"posts", "melange", "media", "series"} {
 		if _, ok := set.SchemaFor(name); !ok {
 			t.Fatalf("missing schema for %q", name)
 		}
