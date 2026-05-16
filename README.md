@@ -63,6 +63,9 @@ docker compose up --build
 One image, three services, each with its own volume. The blob service uses a
 local directory by default, or Cloudflare R2 when `FARFIELD_BLOBS_BACKEND=r2`.
 
+To update a running deployment, `deploy/update.sh` pulls the latest commit and
+rebuilds the stack in place — the volumes (and their content) survive.
+
 ## Design
 
 The full design doc lives at
