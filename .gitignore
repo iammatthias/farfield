@@ -13,5 +13,7 @@ farfield-blobs
 .env
 /farfield-blobs-data/
 *.snapshot
+PLAN.md
+.DS_Store
 
 # Secrets live in env / EnvironmentFile, never in the repo.
