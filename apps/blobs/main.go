@@ -1,9 +1,9 @@
 // Command blobs is the Farfield blob service (blobs.farfield.systems).
 //
-// A standalone content-addressed image store. The content app (and any
-// future app) upload images here and reference them by CID. v1 uses the
-// local-directory backend so the whole stack runs on one machine; an R2
-// backend slots in behind the blob.Store interface for the server.
+// A standalone content-addressed media store — images, video, PDFs, anything.
+// The content app (and any future app) upload media here and reference them
+// by CID. The backend is a local directory or Cloudflare R2, selected at
+// startup behind the blob.Store interface.
 package main
 
 import (
@@ -12,13 +12,16 @@ import (
 	"log"
 	"net/http"
 	"os"
+	"strconv"
 
 	"github.com/iammatthias/farfield/lib/blob"
 	"github.com/iammatthias/farfield/lib/httpkit"
 )
 
-// maxUpload caps an upload at 50 MiB, enforced on bytes actually read.
-const maxUpload = 50 << 20
+// maxUpload caps an upload, in bytes — default 100 MiB, overridable with
+// FARFIELD_BLOBS_MAX_UPLOAD_MB (raise it for large video). Enforced on bytes
+// actually read.
+var maxUpload int64 = 100 << 20
 
 type service struct {
 	store  blob.Store
@@ -27,6 +30,9 @@ type service struct {
 
 func main() {
 	addr := envOr("FARFIELD_BLOBS_ADDR", "127.0.0.1:8789")
+	if mb, err := strconv.Atoi(os.Getenv("FARFIELD_BLOBS_MAX_UPLOAD_MB")); err == nil && mb > 0 {
+		maxUpload = int64(mb) << 20
+	}
 
 	store, desc, err := openStore()
 	if err != nil {
@@ -114,7 +120,7 @@ func (s *service) upload(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		httpkit.WriteError(w, &httpkit.APIError{
 			Status: http.StatusRequestEntityTooLarge, Code: "blob_too_large",
-			Message: "upload exceeds the 50 MiB cap",
+			Message: fmt.Sprintf("upload exceeds the %d MiB cap", maxUpload>>20),
 		})
 		return
 	}
@@ -124,7 +130,7 @@ func (s *service) upload(w http.ResponseWriter, r *http.Request) {
 	}
 	meta, err := blob.DeriveMetadata(data)
 	if err != nil {
-		httpkit.WriteError(w, httpkit.BadRequest("invalid_image", err.Error()))
+		httpkit.WriteError(w, httpkit.BadRequest("invalid_media", err.Error()))
 		return
 	}
 	if err := s.store.Put(meta, data); err != nil {

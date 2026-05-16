@@ -1,14 +1,11 @@
 package main
 
 import (
-	"bytes"
 	"encoding/json"
 	"flag"
 	"fmt"
 	"io"
-	"net/http"
 	"strings"
-	"time"
 
 	"github.com/iammatthias/farfield/lib/core"
 	"github.com/iammatthias/farfield/lib/schema"
@@ -116,44 +113,8 @@ func ensureBlob(gateway, blobs, content, tok, ipfsCID string, dryRun bool) (stri
 	if dryRun {
 		return core.BlobCID(data), nil
 	}
-
-	// Upload to the blob service — it derives the metadata.
-	upReq, err := http.NewRequest(http.MethodPost, blobs+"/blobs", bytes.NewReader(data))
-	if err != nil {
-		return "", err
-	}
-	upReq.Header.Set("Authorization", "Bearer "+tok)
-	upResp, err := httpClient.Do(upReq)
-	if err != nil {
-		return "", fmt.Errorf("blob upload: %w", err)
-	}
-	defer upResp.Body.Close()
-	if upResp.StatusCode >= 300 {
-		return "", fmt.Errorf("blob service returned %d", upResp.StatusCode)
-	}
-	var meta map[string]any
-	if err := json.NewDecoder(upResp.Body).Decode(&meta); err != nil {
-		return "", fmt.Errorf("parsing blob response: %w", err)
-	}
-	blobCID, _ := meta["cid"].(string)
-	if blobCID == "" {
-		return "", fmt.Errorf("blob response had no cid")
-	}
-
-	// Create the media record — rkey is the blob CID.
-	media := map[string]any{
-		"cid":           blobCID,
-		"mime":          meta["mime"],
-		"width":         meta["width"],
-		"height":        meta["height"],
-		"blurhash":      meta["blurhash"],
-		"dominantColor": meta["dominantColor"],
-		"created":       time.Now().UTC().Format(time.RFC3339),
-	}
-	if _, err := send(content, "media", blobCID, media, tok); err != nil {
-		return "", fmt.Errorf("media record: %w", err)
-	}
-	return blobCID, nil
+	cid, _, err := storeMedia(blobs, content, tok, data)
+	return cid, err
 }
 
 // scanIPFS returns every distinct ipfs://<cid> reference in a body, in order.

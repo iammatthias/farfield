@@ -49,9 +49,21 @@ func TestDeriveMetadata(t *testing.T) {
 	}
 }
 
-func TestNonImageBytesRejected(t *testing.T) {
-	if _, err := DeriveMetadata([]byte("this is not an image")); err == nil {
-		t.Fatal("expected an error for non-image bytes")
+func TestNonImageStoredOpaquely(t *testing.T) {
+	// A PDF is not a decodable image — it should still get metadata: a CID, a
+	// size, and a sniffed MIME type, but no image-only fields.
+	m, err := DeriveMetadata([]byte("%PDF-1.4\n% non-image media\n"))
+	if err != nil {
+		t.Fatalf("non-image media should not error: %v", err)
+	}
+	if !strings.HasPrefix(m.CID, "bafkrei") || m.Size == 0 {
+		t.Fatalf("expected a CID and size, got %+v", m)
+	}
+	if m.Mime == "" {
+		t.Fatalf("expected a sniffed MIME type, got %+v", m)
+	}
+	if m.Width != 0 || m.Height != 0 || m.Blurhash != "" || m.DominantColor != "" {
+		t.Fatalf("non-image should carry no image fields: %+v", m)
 	}
 }
 

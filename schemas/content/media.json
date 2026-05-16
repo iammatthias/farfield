@@ -1,9 +1,9 @@
 {
   "id": "media",
   "version": 1,
-  "description": "An image — a queryable record of one blob's metadata. The blob bytes live in R2 (the blobs service); this record carries everything the website needs to render the image without fetching it. The record's rkey is the blob CID. Bodies reference an image as ![](blob://<cid>).",
+  "description": "A media file — image, video, PDF, etc. A queryable record of one blob's metadata; the bytes live in R2 (the blobs service). The record's rkey is the blob CID. Bodies reference media as ![](blob://<cid>). The image-only fields (width, height, blurhash, dominantColor) are absent on other media types.",
   "type": "object",
-  "required": ["cid", "mime", "width", "height", "blurhash", "dominantColor", "created"],
+  "required": ["cid", "mime", "created"],
   "properties": {
     "cid": {
       "type": "string",
@@ -11,23 +11,27 @@
     },
     "mime": {
       "type": "string",
-      "description": "Image MIME type, e.g. image/jpeg."
+      "description": "MIME type, e.g. image/jpeg, video/mp4, application/pdf."
+    },
+    "size": {
+      "type": "integer",
+      "description": "Blob size in bytes."
     },
     "width": {
       "type": "integer",
-      "description": "Pixel width."
+      "description": "Pixel width. Images only."
     },
     "height": {
       "type": "integer",
-      "description": "Pixel height."
+      "description": "Pixel height. Images only."
     },
     "blurhash": {
       "type": "string",
-      "description": "BlurHash placeholder string."
+      "description": "BlurHash placeholder string. Images only."
     },
     "dominantColor": {
       "type": "string",
-      "description": "Dominant color as a hex string, e.g. #3a2f1c."
+      "description": "Dominant color as a hex string, e.g. #3a2f1c. Images only."
     },
     "alt": {
       "type": "string",
@@ -35,7 +39,7 @@
     },
     "created": {
       "type": "datetime",
-      "description": "When the image was added."
+      "description": "When the media was added."
     }
   }
 }
