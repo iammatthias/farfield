@@ -1,0 +1,9 @@
+{
+  "id": "farfield-publisher",
+  "name": "Farfield Publisher",
+  "version": "0.1.0",
+  "minAppVersion": "1.4.0",
+  "description": "Publish notes to a Farfield content backend and upload pasted media to its blob store.",
+  "author": "iammatthias",
+  "isDesktopOnly": true
+}
