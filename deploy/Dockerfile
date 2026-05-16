@@ -10,12 +10,17 @@ RUN go mod download
 COPY . .
 RUN CGO_ENABLED=0 go build -trimpath -ldflags="-s -w" -o /out/content ./apps/content && \
     CGO_ENABLED=0 go build -trimpath -ldflags="-s -w" -o /out/feed    ./apps/feed && \
-    CGO_ENABLED=0 go build -trimpath -ldflags="-s -w" -o /out/blobs   ./apps/blobs
+    CGO_ENABLED=0 go build -trimpath -ldflags="-s -w" -o /out/blobs   ./apps/blobs && \
+    mkdir /out/data
 
 # All three static binaries on one tiny image; docker-compose picks the
 # command per service.
 FROM gcr.io/distroless/static-debian12:nonroot
 COPY --from=build /out/content /out/feed /out/blobs /
 COPY schemas /schemas
+# /data is the volume mountpoint for the SQLite stores. Ship it in the image
+# owned by nonroot: a fresh named volume inherits the mountpoint's ownership,
+# and distroless has no shell to chown at runtime.
+COPY --from=build --chown=nonroot:nonroot /out/data /data
 EXPOSE 8787 8788 8789
 CMD ["/content"]
