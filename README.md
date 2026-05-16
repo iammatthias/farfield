@@ -18,9 +18,9 @@ and `gopkg.in/yaml.v3` (CLI only).
 An Andromeda-shaped workspace — `apps/` over `lib/`, composed by `deploy/`.
 
 ```
-apps/content    content service — posts, open-source, recipes, art, melange, media
+apps/content    content service — posts, open-source, recipes, art, melange, media, series
 apps/feed       feed service — feed entries
-apps/blobs      blob service — content-addressed image store
+apps/blobs      blob service — content-addressed blob store (local dir or R2)
 apps/farfield   the `farfield` CLI
 
 lib/core        records, canonical hashing, CIDv1
@@ -44,21 +44,24 @@ FARFIELD_TOKEN=dev go run ./apps/feed      # :8788
 FARFIELD_TOKEN=dev go run ./apps/blobs     # :8789
 ```
 
-Import content:
+Import and migrate content:
 
 ```sh
 FARFIELD_TOKEN=dev go run ./apps/farfield import <markdown-dir>
+FARFIELD_TOKEN=dev go run ./apps/farfield migrate-images   # ipfs:// images -> blob store
+FARFIELD_TOKEN=dev go run ./apps/farfield extract-series   # runs of inline media -> series records
 ```
 
 ## Run it with Docker
 
 ```sh
 cd deploy
-cp .env.example .env        # set FARFIELD_TOKEN
+cp .env.example .env        # set FARFIELD_TOKEN; set FARFIELD_BLOBS_BACKEND=r2 + R2_* to use R2
 docker compose up --build
 ```
 
-One image, three services, each with its own volume.
+One image, three services, each with its own volume. The blob service uses a
+local directory by default, or Cloudflare R2 when `FARFIELD_BLOBS_BACKEND=r2`.
 
 ## Design
 
