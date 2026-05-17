@@ -254,7 +254,7 @@ func (s *Server) handleAPIGet(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusNotFound, "post not found")
 		return
 	}
-	writeJSON(w, http.StatusOK, p)
+	writeRecord(w, r, p.CID, p)
 }
 
 // ── API-key-gated write API ────────────────────────────────────────────────
@@ -383,6 +383,19 @@ func (s *Server) render(w http.ResponseWriter, page string, data any) {
 func (s *Server) fail(w http.ResponseWriter, what string, err error) {
 	slog.Error(what, "err", err)
 	http.Error(w, "internal error", http.StatusInternalServerError)
+}
+
+// writeRecord writes v as JSON with its content CID as the ETag, and
+// short-circuits to 304 Not Modified when the client already holds that
+// version (If-None-Match).
+func writeRecord(w http.ResponseWriter, r *http.Request, cid string, v any) {
+	etag := `"` + cid + `"`
+	w.Header().Set("ETag", etag)
+	if r.Header.Get("If-None-Match") == etag {
+		w.WriteHeader(http.StatusNotModified)
+		return
+	}
+	writeJSON(w, http.StatusOK, v)
 }
 
 func writeJSON(w http.ResponseWriter, status int, v any) {

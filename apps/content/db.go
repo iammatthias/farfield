@@ -8,6 +8,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/iammatthias/farfield/lib/cid"
 	"github.com/iammatthias/farfield/lib/store"
 	_ "modernc.org/sqlite" // registers the "sqlite" driver
 )
@@ -28,10 +29,13 @@ type Collection struct {
 
 // Entry is one piece of long-form content. Its body is markdown; images are
 // referenced inline as blob://<cid> and resolved against the blobs service.
+// Slug is the stable key; CID is the content hash — it changes whenever the
+// content does, giving inherent versioning and verifiability.
 type Entry struct {
 	ID         int64    `json:"-"`
 	Collection string   `json:"collection"` // collection slug
 	Slug       string   `json:"slug"`
+	CID        string   `json:"cid"`
 	Title      string   `json:"title"`
 	Excerpt    string   `json:"excerpt,omitempty"`
 	Body       string   `json:"body"`
@@ -46,6 +50,7 @@ type Entry struct {
 // markdown into the parent post in its place.
 type Series struct {
 	Rkey      string `json:"rkey"`
+	CID       string `json:"cid"`
 	Title     string `json:"title,omitempty"`
 	Body      string `json:"body"` // markdown
 	CreatedAt string `json:"createdAt"`
@@ -70,7 +75,8 @@ CREATE TABLE IF NOT EXISTS entries (
 	tags          TEXT NOT NULL DEFAULT '[]',
 	published     INTEGER NOT NULL DEFAULT 0,
 	created_at    TEXT NOT NULL,
-	updated_at    TEXT NOT NULL
+	updated_at    TEXT NOT NULL,
+	cid           TEXT NOT NULL DEFAULT ''
 );
 CREATE INDEX IF NOT EXISTS entries_by_collection ON entries (collection_id, created_at DESC);
 CREATE INDEX IF NOT EXISTS entries_by_created ON entries (created_at DESC);
@@ -80,7 +86,8 @@ CREATE TABLE IF NOT EXISTS series (
 	title      TEXT NOT NULL DEFAULT '',
 	body       TEXT NOT NULL DEFAULT '',
 	created_at TEXT NOT NULL,
-	updated_at TEXT NOT NULL
+	updated_at TEXT NOT NULL,
+	cid        TEXT NOT NULL DEFAULT ''
 );`
 
 // openDB opens the SQLite database, applies pragmas, and migrates. Foreign
@@ -102,7 +109,33 @@ func openDB(path string) (*sql.DB, error) {
 	if _, err := db.Exec(store.SessionSchema); err != nil {
 		return nil, err
 	}
+	// Migrate databases created before CIDs: add the column, then backfill.
+	if err := ensureColumn(db, "entries", "cid", "TEXT NOT NULL DEFAULT ''"); err != nil {
+		return nil, err
+	}
+	if err := ensureColumn(db, "series", "cid", "TEXT NOT NULL DEFAULT ''"); err != nil {
+		return nil, err
+	}
+	if err := backfillCIDs(db); err != nil {
+		return nil, err
+	}
 	return db, nil
+}
+
+// ensureColumn adds a column to a table if it is not already present. The
+// table/column/decl are code constants, so the string-built DDL is safe.
+func ensureColumn(db *sql.DB, table, column, decl string) error {
+	var n int
+	if err := db.QueryRow(
+		`SELECT COUNT(*) FROM pragma_table_info(?) WHERE name = ?`,
+		table, column).Scan(&n); err != nil {
+		return err
+	}
+	if n > 0 {
+		return nil
+	}
+	_, err := db.Exec("ALTER TABLE " + table + " ADD COLUMN " + column + " " + decl)
+	return err
 }
 
 func nowRFC3339() string { return time.Now().UTC().Format(time.RFC3339) }
@@ -124,6 +157,87 @@ func decodeTags(s string) []string {
 		out = []string{}
 	}
 	return out
+}
+
+// entryCID is the content identifier of an entry: a CIDv1 over its canonical
+// content — collection, title, excerpt, body, tags, published. The slug (the
+// key) and timestamps are excluded, so the CID tracks content, not metadata.
+func entryCID(e *Entry) string {
+	tags := e.Tags
+	if tags == nil {
+		tags = []string{}
+	}
+	return cid.OfValue(map[string]any{
+		"collection": e.Collection,
+		"title":      e.Title,
+		"excerpt":    e.Excerpt,
+		"body":       e.Body,
+		"tags":       tags,
+		"published":  e.Published,
+	})
+}
+
+// seriesCID is the content identifier of a series fragment.
+func seriesCID(s *Series) string {
+	return cid.OfValue(map[string]any{
+		"title": s.Title,
+		"body":  s.Body,
+	})
+}
+
+// backfillCIDs computes the content CID for any entry or series row that
+// lacks one — a one-time migration for databases created before CIDs.
+func backfillCIDs(db *sql.DB) error {
+	rows, err := db.Query(`SELECT e.slug, c.slug, e.title, e.excerpt, e.body, e.tags, e.published
+		FROM entries e JOIN collections c ON c.id = e.collection_id WHERE e.cid = ''`)
+	if err != nil {
+		return err
+	}
+	type tagged struct {
+		slug string
+		e    Entry
+	}
+	var entries []tagged
+	for rows.Next() {
+		var slug, tags string
+		var e Entry
+		if err := rows.Scan(&slug, &e.Collection, &e.Title, &e.Excerpt,
+			&e.Body, &tags, &e.Published); err != nil {
+			rows.Close()
+			return err
+		}
+		e.Tags = decodeTags(tags)
+		entries = append(entries, tagged{slug, e})
+	}
+	rows.Close()
+	for _, t := range entries {
+		if _, err := db.Exec(`UPDATE entries SET cid = ? WHERE slug = ?`,
+			entryCID(&t.e), t.slug); err != nil {
+			return err
+		}
+	}
+
+	srows, err := db.Query(`SELECT rkey, title, body FROM series WHERE cid = ''`)
+	if err != nil {
+		return err
+	}
+	var seriesRows []Series
+	for srows.Next() {
+		var s Series
+		if err := srows.Scan(&s.Rkey, &s.Title, &s.Body); err != nil {
+			srows.Close()
+			return err
+		}
+		seriesRows = append(seriesRows, s)
+	}
+	srows.Close()
+	for i := range seriesRows {
+		if _, err := db.Exec(`UPDATE series SET cid = ? WHERE rkey = ?`,
+			seriesCID(&seriesRows[i]), seriesRows[i].Rkey); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 // ── collections ────────────────────────────────────────────────────────────
@@ -213,13 +327,13 @@ func deleteCollection(db *sql.DB, slug string) (bool, error) {
 
 // ── entries ────────────────────────────────────────────────────────────────
 
-const entryCols = `e.id, c.slug, e.slug, e.title, e.excerpt, e.body, e.tags,
+const entryCols = `e.id, c.slug, e.slug, e.cid, e.title, e.excerpt, e.body, e.tags,
 	e.published, e.created_at, e.updated_at`
 
 func scanEntry(row interface{ Scan(...any) error }) (*Entry, error) {
 	var e Entry
 	var tags string
-	if err := row.Scan(&e.ID, &e.Collection, &e.Slug, &e.Title, &e.Excerpt,
+	if err := row.Scan(&e.ID, &e.Collection, &e.Slug, &e.CID, &e.Title, &e.Excerpt,
 		&e.Body, &tags, &e.Published, &e.CreatedAt, &e.UpdatedAt); err != nil {
 		return nil, err
 	}
@@ -280,18 +394,19 @@ func getEntry(db *sql.DB, slug string) (*Entry, error) {
 // insertEntry creates an entry in the named collection. The entry slug must be
 // unique; an unknown collection slug is an error.
 func insertEntry(db *sql.DB, e *Entry) error {
-	cid, err := collectionID(db, e.Collection)
+	collID, err := collectionID(db, e.Collection)
 	if err != nil {
 		return err
 	}
 	e.CreatedAt = nowRFC3339()
 	e.UpdatedAt = e.CreatedAt
+	e.CID = entryCID(e)
 	res, err := db.Exec(
 		`INSERT INTO entries
-		   (collection_id, slug, title, excerpt, body, tags, published, created_at, updated_at)
-		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-		cid, e.Slug, e.Title, e.Excerpt, e.Body, encodeTags(e.Tags),
-		e.Published, e.CreatedAt, e.UpdatedAt)
+		   (collection_id, slug, title, excerpt, body, tags, published, created_at, updated_at, cid)
+		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		collID, e.Slug, e.Title, e.Excerpt, e.Body, encodeTags(e.Tags),
+		e.Published, e.CreatedAt, e.UpdatedAt, e.CID)
 	if err != nil {
 		if isUnique(err) {
 			return errSlugTaken
@@ -305,17 +420,18 @@ func insertEntry(db *sql.DB, e *Entry) error {
 // updateEntry replaces an entry, identified by its current slug. e carries the
 // new values (including a possibly-changed collection and slug).
 func updateEntry(db *sql.DB, currentSlug string, e *Entry) error {
-	cid, err := collectionID(db, e.Collection)
+	collID, err := collectionID(db, e.Collection)
 	if err != nil {
 		return err
 	}
 	e.UpdatedAt = nowRFC3339()
+	e.CID = entryCID(e)
 	res, err := db.Exec(
 		`UPDATE entries SET collection_id = ?, slug = ?, title = ?, excerpt = ?,
-		   body = ?, tags = ?, published = ?, updated_at = ?
+		   body = ?, tags = ?, published = ?, updated_at = ?, cid = ?
 		 WHERE slug = ?`,
-		cid, e.Slug, e.Title, e.Excerpt, e.Body, encodeTags(e.Tags),
-		e.Published, e.UpdatedAt, currentSlug)
+		collID, e.Slug, e.Title, e.Excerpt, e.Body, encodeTags(e.Tags),
+		e.Published, e.UpdatedAt, e.CID, currentSlug)
 	if err != nil {
 		if isUnique(err) {
 			return errSlugTaken
@@ -359,7 +475,7 @@ func getOrCreateCollection(db *sql.DB, slug, name string) (*Collection, error) {
 // created/updated timestamps it carries — unlike insertEntry, which stamps
 // them with the current time.
 func importEntry(db *sql.DB, e *Entry) error {
-	cid, err := collectionID(db, e.Collection)
+	collID, err := collectionID(db, e.Collection)
 	if err != nil {
 		return err
 	}
@@ -369,17 +485,18 @@ func importEntry(db *sql.DB, e *Entry) error {
 	if e.UpdatedAt == "" {
 		e.UpdatedAt = e.CreatedAt
 	}
+	e.CID = entryCID(e)
 	_, err = db.Exec(
 		`INSERT INTO entries
-		   (collection_id, slug, title, excerpt, body, tags, published, created_at, updated_at)
-		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+		   (collection_id, slug, title, excerpt, body, tags, published, created_at, updated_at, cid)
+		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 		 ON CONFLICT(slug) DO UPDATE SET
 		   collection_id=excluded.collection_id, title=excluded.title,
 		   excerpt=excluded.excerpt, body=excluded.body, tags=excluded.tags,
 		   published=excluded.published, created_at=excluded.created_at,
-		   updated_at=excluded.updated_at`,
-		cid, e.Slug, e.Title, e.Excerpt, e.Body, encodeTags(e.Tags),
-		e.Published, e.CreatedAt, e.UpdatedAt)
+		   updated_at=excluded.updated_at, cid=excluded.cid`,
+		collID, e.Slug, e.Title, e.Excerpt, e.Body, encodeTags(e.Tags),
+		e.Published, e.CreatedAt, e.UpdatedAt, e.CID)
 	return err
 }
 
@@ -395,11 +512,12 @@ func collectionID(db *sql.DB, slug string) (int64, error) {
 
 // ── series ─────────────────────────────────────────────────────────────────
 
-const seriesCols = `rkey, title, body, created_at, updated_at`
+const seriesCols = `rkey, cid, title, body, created_at, updated_at`
 
 func scanSeries(row interface{ Scan(...any) error }) (*Series, error) {
 	var s Series
-	if err := row.Scan(&s.Rkey, &s.Title, &s.Body, &s.CreatedAt, &s.UpdatedAt); err != nil {
+	if err := row.Scan(&s.Rkey, &s.CID, &s.Title, &s.Body,
+		&s.CreatedAt, &s.UpdatedAt); err != nil {
 		return nil, err
 	}
 	return &s, nil
@@ -439,12 +557,14 @@ func getSeries(db *sql.DB, rkey string) (*Series, error) {
 // upsertSeries inserts or replaces a series fragment, keyed by rkey. The
 // caller sets the timestamps (now for admin edits, the original for imports).
 func upsertSeries(db *sql.DB, s *Series) error {
+	s.CID = seriesCID(s)
 	_, err := db.Exec(
-		`INSERT INTO series (rkey, title, body, created_at, updated_at)
-		 VALUES (?, ?, ?, ?, ?)
+		`INSERT INTO series (rkey, title, body, created_at, updated_at, cid)
+		 VALUES (?, ?, ?, ?, ?, ?)
 		 ON CONFLICT(rkey) DO UPDATE SET
-		   title=excluded.title, body=excluded.body, updated_at=excluded.updated_at`,
-		s.Rkey, s.Title, s.Body, s.CreatedAt, s.UpdatedAt)
+		   title=excluded.title, body=excluded.body,
+		   updated_at=excluded.updated_at, cid=excluded.cid`,
+		s.Rkey, s.Title, s.Body, s.CreatedAt, s.UpdatedAt, s.CID)
 	return err
 }
 

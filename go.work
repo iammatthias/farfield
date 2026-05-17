@@ -8,6 +8,7 @@ use (
 	./apps/feed
 	./lib/auth
 	./lib/backup
+	./lib/cid
 	./lib/store
 	./lib/theme
 )
