@@ -56,9 +56,14 @@ func main() {
 			slog.Error("import-series failed", "err", err)
 			os.Exit(1)
 		}
+	case "reslug-series":
+		if err := withDB(reslugSeries); err != nil {
+			slog.Error("reslug-series failed", "err", err)
+			os.Exit(1)
+		}
 	default:
 		fmt.Fprintln(os.Stderr,
-			"usage: content [serve | import-vault <dir> | import-series <old-content-db>]")
+			"usage: content [serve | import-vault <dir> | import-series <old-content-db> | reslug-series]")
 		os.Exit(2)
 	}
 }
