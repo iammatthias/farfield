@@ -7,15 +7,15 @@
   <form method="post" action="{{.Action}}">
     {{if .IsNew}}
       <div class="field">
-        <label for="rkey">rkey</label>
-        <input type="text" id="rkey" name="rkey" value="{{.Series.Rkey}}">
-        <p class="hint">The key entries reference as series://&lt;rkey&gt;.
+        <label for="slug">Slug</label>
+        <input type="text" id="slug" name="slug" value="{{.Series.Slug}}">
+        <p class="hint">The key entries reference as series://&lt;slug&gt;.
           Leave blank to derive it from the title. Immutable once set.</p>
       </div>
     {{else}}
       <div class="field">
-        <label>rkey</label>
-        <p><code>{{.Series.Rkey}}</code> <span class="hint">— immutable</span></p>
+        <label>Slug</label>
+        <p><code>{{.Series.Slug}}</code> <span class="hint">— immutable</span></p>
       </div>
     {{end}}
     <div class="field">

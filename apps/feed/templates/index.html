@@ -10,8 +10,8 @@
         </div>
         <div class="post-body">{{.Body}}</div>
         <div class="post-actions">
-          <a href="/posts/{{.ID}}/edit">Edit</a>
-          <form method="post" action="/posts/{{.ID}}/delete"
+          <a href="/posts/{{.Slug}}/edit">Edit</a>
+          <form method="post" action="/posts/{{.Slug}}/delete"
                 onsubmit="return confirm('Delete this post?')">
             <button class="danger" type="submit">Delete</button>
           </form>

@@ -31,7 +31,7 @@ func (s *Server) handleEmbedBlob(w http.ResponseWriter, r *http.Request) {
 }
 
 // handleEmbedSeries builds a series fragment from an ordered set of blob CIDs
-// and returns it, so the editor can embed series://<rkey>.
+// and returns it, so the editor can embed series://<slug>.
 func (s *Server) handleEmbedSeries(w http.ResponseWriter, r *http.Request) {
 	var req embedSeriesRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil || len(req.CIDs) == 0 {
@@ -40,7 +40,7 @@ func (s *Server) handleEmbedSeries(w http.ResponseWriter, r *http.Request) {
 	}
 	now := nowRFC3339()
 	se := &Series{
-		Rkey:      uniqueRkey(s.db, slugify(req.Title)),
+		Slug:      uniqueSlug(s.db, slugify(req.Title)),
 		Title:     strings.TrimSpace(req.Title),
 		Body:      seriesBodyFromCIDs(req.CIDs),
 		CreatedAt: now,
@@ -55,14 +55,14 @@ func (s *Server) handleEmbedSeries(w http.ResponseWriter, r *http.Request) {
 
 // handleAPICreateSeries creates a series fragment from a posted JSON body. It
 // is API-key-gated and lets other apps (the feed editor) create series here,
-// since series live in content. An rkey is always assigned, never rejected.
+// since series live in content. A slug is always assigned, never rejected.
 func (s *Server) handleAPICreateSeries(w http.ResponseWriter, r *http.Request) {
 	var se Series
 	if err := json.NewDecoder(r.Body).Decode(&se); err != nil {
 		writeError(w, http.StatusBadRequest, "invalid JSON")
 		return
 	}
-	se.Rkey = uniqueRkey(s.db, firstNonEmpty(slugify(se.Rkey), slugify(se.Title)))
+	se.Slug = uniqueSlug(s.db, firstNonEmpty(slugify(se.Slug), slugify(se.Title)))
 	se.Title = strings.TrimSpace(se.Title)
 	now := nowRFC3339()
 	se.CreatedAt, se.UpdatedAt = now, now
@@ -73,9 +73,9 @@ func (s *Server) handleAPICreateSeries(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusCreated, se)
 }
 
-// uniqueRkey returns an rkey based on candidate that no series uses yet — the
+// uniqueSlug returns a slug based on candidate that no series uses yet — the
 // candidate itself when free, a random key when empty, else a suffixed key.
-func uniqueRkey(db *sql.DB, candidate string) string {
+func uniqueSlug(db *sql.DB, candidate string) string {
 	if candidate == "" {
 		return store.ShortID()
 	}

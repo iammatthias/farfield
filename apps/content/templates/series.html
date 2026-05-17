@@ -8,23 +8,23 @@
   </div>
   <p class="muted">
     Reusable markdown fragments. Embed one in an entry body as
-    <code>![](series://&lt;rkey&gt;)</code>; the website splices it in.
+    <code>![](series://&lt;slug&gt;)</code>; the website splices it in.
   </p>
 
   {{if .Series}}
     <div class="table-wrap">
       <table class="rows">
         <thead>
-          <tr><th>rkey</th><th>Title</th><th class="nowrap">Updated</th><th></th></tr>
+          <tr><th>Slug</th><th>Title</th><th class="nowrap">Updated</th><th></th></tr>
         </thead>
         <tbody>
           {{range .Series}}
             <tr>
-              <td><a href="/series/{{.Rkey}}/edit"><code>{{.Rkey}}</code></a></td>
+              <td><a href="/series/{{.Slug}}/edit"><code>{{.Slug}}</code></a></td>
               <td>{{if .Title}}{{.Title}}{{else}}<span class="muted">—</span>{{end}}</td>
               <td class="nowrap muted">{{slice .UpdatedAt 0 10}}</td>
               <td class="nowrap">
-                <form method="post" action="/series/{{.Rkey}}/delete"
+                <form method="post" action="/series/{{.Slug}}/delete"
                       onsubmit="return confirm('Delete this series?')">
                   <button class="danger" type="submit">Delete</button>
                 </form>

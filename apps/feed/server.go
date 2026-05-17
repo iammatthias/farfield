@@ -99,9 +99,9 @@ func (s *Server) routes() http.Handler {
 	mux.HandleFunc("GET /{$}", s.requireSession(s.handleIndex))
 	mux.HandleFunc("GET /new", s.requireSession(s.handleNewPost))
 	mux.HandleFunc("POST /posts", s.requireSession(s.handleCreatePost))
-	mux.HandleFunc("GET /posts/{id}/edit", s.requireSession(s.handleEditPost))
-	mux.HandleFunc("POST /posts/{id}", s.requireSession(s.handleUpdatePost))
-	mux.HandleFunc("POST /posts/{id}/delete", s.requireSession(s.handleDeletePost))
+	mux.HandleFunc("GET /posts/{slug}/edit", s.requireSession(s.handleEditPost))
+	mux.HandleFunc("POST /posts/{slug}", s.requireSession(s.handleUpdatePost))
+	mux.HandleFunc("POST /posts/{slug}/delete", s.requireSession(s.handleDeletePost))
 
 	// Login — public HTML.
 	mux.HandleFunc("GET /login", s.handleLoginForm)
@@ -111,12 +111,12 @@ func (s *Server) routes() http.Handler {
 	// Public JSON read API.
 	mux.HandleFunc("GET /status", s.handleStatus)
 	mux.HandleFunc("GET /api/posts", s.handleAPIList)
-	mux.HandleFunc("GET /api/posts/{id}", s.handleAPIGet)
+	mux.HandleFunc("GET /api/posts/{slug}", s.handleAPIGet)
 
 	// JSON write API — API-key-gated.
 	mux.HandleFunc("POST /api/posts", s.requireAPIKey(s.handleAPICreate))
-	mux.HandleFunc("PUT /api/posts/{id}", s.requireAPIKey(s.handleAPIUpdate))
-	mux.HandleFunc("DELETE /api/posts/{id}", s.requireAPIKey(s.handleAPIDelete))
+	mux.HandleFunc("PUT /api/posts/{slug}", s.requireAPIKey(s.handleAPIUpdate))
+	mux.HandleFunc("DELETE /api/posts/{slug}", s.requireAPIKey(s.handleAPIDelete))
 
 	// Editor embedding — session-gated proxy so service keys stay server-side.
 	mux.HandleFunc("POST /embed/blob", s.requireSession(s.handleEmbedBlob))
@@ -167,7 +167,7 @@ func (s *Server) handleCreatePost(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleEditPost(w http.ResponseWriter, r *http.Request) {
-	p, err := getPost(s.db, r.PathValue("id"))
+	p, err := getPost(s.db, r.PathValue("slug"))
 	if err != nil {
 		s.fail(w, "get post", err)
 		return
@@ -176,18 +176,18 @@ func (s *Server) handleEditPost(w http.ResponseWriter, r *http.Request) {
 		http.NotFound(w, r)
 		return
 	}
-	s.renderPostForm(w, p, false, "/posts/"+p.ID, "")
+	s.renderPostForm(w, p, false, "/posts/"+p.Slug, "")
 }
 
 func (s *Server) handleUpdatePost(w http.ResponseWriter, r *http.Request) {
-	id := r.PathValue("id")
+	slug := r.PathValue("slug")
 	p := postFromForm(r)
 	if p.Body == "" {
-		p.ID = id
-		s.renderPostForm(w, p, false, "/posts/"+id, "A post needs a body.")
+		p.Slug = slug
+		s.renderPostForm(w, p, false, "/posts/"+slug, "A post needs a body.")
 		return
 	}
-	ok, err := updatePost(s.db, id, p)
+	ok, err := updatePost(s.db, slug, p)
 	if err != nil {
 		s.fail(w, "update post", err)
 		return
@@ -200,7 +200,7 @@ func (s *Server) handleUpdatePost(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleDeletePost(w http.ResponseWriter, r *http.Request) {
-	if _, err := deletePost(s.db, r.PathValue("id")); err != nil {
+	if _, err := deletePost(s.db, r.PathValue("slug")); err != nil {
 		s.fail(w, "delete post", err)
 		return
 	}
@@ -265,7 +265,7 @@ func (s *Server) handleAPIList(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleAPIGet(w http.ResponseWriter, r *http.Request) {
-	p, err := getPost(s.db, r.PathValue("id"))
+	p, err := getPost(s.db, r.PathValue("slug"))
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "could not read post")
 		return
@@ -289,7 +289,7 @@ func (s *Server) handleAPICreate(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "body is required")
 		return
 	}
-	p.ID = "" // server-assigned
+	p.Slug = "" // server-assigned
 	if err := insertPost(s.db, &p); err != nil {
 		writeError(w, http.StatusInternalServerError, "could not create post")
 		return
@@ -298,13 +298,13 @@ func (s *Server) handleAPICreate(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleAPIUpdate(w http.ResponseWriter, r *http.Request) {
-	id := r.PathValue("id")
+	slug := r.PathValue("slug")
 	var p Post
 	if err := json.NewDecoder(r.Body).Decode(&p); err != nil {
 		writeError(w, http.StatusBadRequest, "invalid JSON")
 		return
 	}
-	ok, err := updatePost(s.db, id, &p)
+	ok, err := updatePost(s.db, slug, &p)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "could not update post")
 		return
@@ -313,12 +313,12 @@ func (s *Server) handleAPIUpdate(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusNotFound, "post not found")
 		return
 	}
-	p.ID = id
+	p.Slug = slug
 	writeJSON(w, http.StatusOK, p)
 }
 
 func (s *Server) handleAPIDelete(w http.ResponseWriter, r *http.Request) {
-	existed, err := deletePost(s.db, r.PathValue("id"))
+	existed, err := deletePost(s.db, r.PathValue("slug"))
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "could not delete post")
 		return
@@ -327,7 +327,7 @@ func (s *Server) handleAPIDelete(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusNotFound, "post not found")
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"deleted": r.PathValue("id")})
+	writeJSON(w, http.StatusOK, map[string]any{"deleted": r.PathValue("slug")})
 }
 
 // ── helpers ────────────────────────────────────────────────────────────────

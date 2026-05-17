@@ -17,8 +17,8 @@ The `backup` service is internal (tailnet-only) and has no public API.
 - **Reads are public** — no auth — and send `Access-Control-Allow-Origin: *`,
   so the browser can fetch them directly.
 - **Writes need a key** — `X-API-Key: <key>` (or `Authorization: Bearer <key>`).
-- **Keys vs CIDs.** Every record has a stable **key** (`slug`, `rkey`, or
-  `id`) and a **CID** — a CIDv1 (sha-256) hash of its *content*. The key never
+- **Keys vs CIDs.** Every record has a stable **key** — its `slug` — and a
+  **CID**, a CIDv1 (sha-256) hash of its *content*. The key never
   changes; the CID changes whenever the content does. Use the CID for
   change-detection, cache validation, or verification (re-hash to confirm).
 - **Conditional GET.** Single-record endpoints send the CID as a strong
@@ -35,7 +35,7 @@ The `backup` service is internal (tailnet-only) and has no public API.
 | `GET /api/entries[?collection=slug]` | `{ "entries": [Entry, …] }` — published  |
 | `GET /api/entries/{slug}`            | `Entry` — `404` if missing/draft; `ETag` |
 | `GET /api/series`                    | `{ "series": [Series, …] }`              |
-| `GET /api/series/{rkey}`             | `Series` — `404` if missing; `ETag`      |
+| `GET /api/series/{slug}`             | `Series` — `404` if missing; `ETag`      |
 | `GET /status`                        | `{ "service", "ok", "collections" }`     |
 | `POST /api/entries`                  | create — `X-API-Key`                     |
 | `PUT /api/entries/{slug}`            | replace — `X-API-Key`                    |
@@ -51,11 +51,11 @@ how the feed editor builds galleries that live in content.
 | Method & path             | Returns                              |
 |---------------------------|--------------------------------------|
 | `GET /api/posts`          | `{ "posts": [Post, …] }`             |
-| `GET /api/posts/{id}`     | `Post` — `404` if missing; `ETag`    |
+| `GET /api/posts/{slug}`     | `Post` — `404` if missing; `ETag`    |
 | `GET /status`             | `{ "service", "ok", "posts" }`       |
 | `POST /api/posts`         | create — `X-API-Key`                 |
-| `PUT /api/posts/{id}`     | replace — `X-API-Key`                |
-| `DELETE /api/posts/{id}`  | delete — `X-API-Key`                 |
+| `PUT /api/posts/{slug}`     | replace — `X-API-Key`                |
+| `DELETE /api/posts/{slug}`  | delete — `X-API-Key`                 |
 
 ## blobs — `https://blobs.farfield.systems`
 
@@ -82,10 +82,10 @@ cache it forever.
   "tags": [], "published", "createdAt", "updatedAt" }
 
 // Series — a reusable markdown fragment
-{ "rkey", "cid", "title"?, "body", "createdAt", "updatedAt" }
+{ "slug", "cid", "title"?, "body", "createdAt", "updatedAt" }
 
 // Post — feed
-{ "id", "cid", "body", "tags": [], "createdAt", "updatedAt" }
+{ "slug", "cid", "body", "tags": [], "createdAt", "updatedAt" }
 
 // BlobMeta
 { "cid", "size", "mime", "width"?, "height"?, "blurhash"?, "dominantColor"? }
@@ -98,7 +98,7 @@ rendering:
 
 - **`blob://<cid>`** — rewrite to `https://blobs.farfield.systems/blobs/<cid>`.
   For dimensions / blurhash / a blur-up placeholder, read `GET /blobs/<cid>/meta`.
-- **`![](series://<rkey>)`** — fetch `GET /api/series/<rkey>` and splice the
+- **`![](series://<slug>)`** — fetch `GET /api/series/<slug>` and splice the
   fragment's `body` markdown in place of the whole image construct. The
   fragment itself contains `blob://` images.
 
@@ -122,11 +122,11 @@ export type Collection = {
   createdAt: string; entryCount: number;
 };
 export type Series = {
-  rkey: string; cid: string; title?: string; body: string;
+  slug: string; cid: string; title?: string; body: string;
   createdAt: string; updatedAt: string;
 };
 export type Post = {
-  id: string; cid: string; body: string; tags: string[];
+  slug: string; cid: string; body: string; tags: string[];
   createdAt: string; updatedAt: string;
 };
 export type BlobMeta = {
@@ -149,8 +149,8 @@ export const getEntry = async (slug: string): Promise<Entry | null> => {
   return r.ok ? r.json() : null;          // 404 (draft/missing) → null
 };
 
-export const getSeries = async (rkey: string): Promise<Series | null> => {
-  const r = await fetch(`${CONTENT}/api/series/${rkey}`);
+export const getSeries = async (slug: string): Promise<Series | null> => {
+  const r = await fetch(`${CONTENT}/api/series/${slug}`);
   return r.ok ? r.json() : null;
 };
 
@@ -167,7 +167,7 @@ export const getBlobMeta = async (cid: string): Promise<BlobMeta | null> => {
 
 // ── body resolution ────────────────────────────────────────────────────────
 // Resolve a body's farfield URIs before handing it to a markdown renderer:
-//   ![](series://<rkey>)  → replaced by the fragment's own markdown
+//   ![](series://<slug>)  → replaced by the fragment's own markdown
 //   blob://<cid>          → rewritten to the blobs URL
 async function replaceAsync(
   s: string, re: RegExp, fn: (m: string, ...g: string[]) => Promise<string>,
@@ -182,7 +182,7 @@ export async function resolveBody(markdown: string): Promise<string> {
   // 1. splice series fragments in (the whole ![](series://rkey) → the fragment)
   const spliced = await replaceAsync(
     markdown, /!\[[^\]]*\]\(series:\/\/([a-z0-9]+)\)/g,
-    async (_m, rkey) => (await getSeries(rkey))?.body ?? "",
+    async (_m, slug) => (await getSeries(slug))?.body ?? "",
   );
   // 2. rewrite blob:// image URLs (in the entry and the spliced-in fragments)
   return spliced.replace(/blob:\/\/([a-z0-9]+)/g, (_m, cid) => blobURL(cid));

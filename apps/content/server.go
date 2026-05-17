@@ -108,9 +108,9 @@ func (s *Server) routes() http.Handler {
 	mux.HandleFunc("GET /series", s.requireSession(s.handleSeriesList))
 	mux.HandleFunc("GET /series/new", s.requireSession(s.handleNewSeries))
 	mux.HandleFunc("POST /series", s.requireSession(s.handleCreateSeries))
-	mux.HandleFunc("GET /series/{rkey}/edit", s.requireSession(s.handleEditSeries))
-	mux.HandleFunc("POST /series/{rkey}", s.requireSession(s.handleUpdateSeries))
-	mux.HandleFunc("POST /series/{rkey}/delete", s.requireSession(s.handleDeleteSeries))
+	mux.HandleFunc("GET /series/{slug}/edit", s.requireSession(s.handleEditSeries))
+	mux.HandleFunc("POST /series/{slug}", s.requireSession(s.handleUpdateSeries))
+	mux.HandleFunc("POST /series/{slug}/delete", s.requireSession(s.handleDeleteSeries))
 
 	// Login — public HTML.
 	mux.HandleFunc("GET /login", s.handleLoginForm)
@@ -123,7 +123,7 @@ func (s *Server) routes() http.Handler {
 	mux.HandleFunc("GET /api/entries", s.handleAPIEntries)
 	mux.HandleFunc("GET /api/entries/{slug}", s.handleAPIEntry)
 	mux.HandleFunc("GET /api/series", s.handleAPISeries)
-	mux.HandleFunc("GET /api/series/{rkey}", s.handleAPISeriesOne)
+	mux.HandleFunc("GET /api/series/{slug}", s.handleAPISeriesOne)
 
 	// JSON write API — API-key-gated.
 	mux.HandleFunc("POST /api/entries", s.requireAPIKey(s.handleAPICreateEntry))
@@ -619,16 +619,16 @@ func (s *Server) handleCreateSeries(w http.ResponseWriter, r *http.Request) {
 	_ = r.ParseForm()
 	title := strings.TrimSpace(r.FormValue("title"))
 	se := &Series{
-		Rkey:  slugify(firstNonEmpty(r.FormValue("rkey"), title)),
+		Slug:  slugify(firstNonEmpty(r.FormValue("slug"), title)),
 		Title: title,
 		Body:  r.FormValue("body"),
 	}
-	if se.Rkey == "" {
-		s.renderSeriesForm(w, se, true, "/series", "A series needs an rkey or a title.")
+	if se.Slug == "" {
+		s.renderSeriesForm(w, se, true, "/series", "A series needs a slug or a title.")
 		return
 	}
-	if existing, _ := getSeries(s.db, se.Rkey); existing != nil {
-		s.renderSeriesForm(w, se, true, "/series", "That rkey is already taken.")
+	if existing, _ := getSeries(s.db, se.Slug); existing != nil {
+		s.renderSeriesForm(w, se, true, "/series", "That slug is already taken.")
 		return
 	}
 	now := nowRFC3339()
@@ -641,7 +641,7 @@ func (s *Server) handleCreateSeries(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleEditSeries(w http.ResponseWriter, r *http.Request) {
-	se, err := getSeries(s.db, r.PathValue("rkey"))
+	se, err := getSeries(s.db, r.PathValue("slug"))
 	if err != nil {
 		s.fail(w, "get series", err)
 		return
@@ -650,11 +650,11 @@ func (s *Server) handleEditSeries(w http.ResponseWriter, r *http.Request) {
 		http.NotFound(w, r)
 		return
 	}
-	s.renderSeriesForm(w, se, false, "/series/"+se.Rkey, "")
+	s.renderSeriesForm(w, se, false, "/series/"+se.Slug, "")
 }
 
 func (s *Server) handleUpdateSeries(w http.ResponseWriter, r *http.Request) {
-	se, err := getSeries(s.db, r.PathValue("rkey"))
+	se, err := getSeries(s.db, r.PathValue("slug"))
 	if err != nil {
 		s.fail(w, "get series", err)
 		return
@@ -675,7 +675,7 @@ func (s *Server) handleUpdateSeries(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleDeleteSeries(w http.ResponseWriter, r *http.Request) {
-	if _, err := deleteSeries(s.db, r.PathValue("rkey")); err != nil {
+	if _, err := deleteSeries(s.db, r.PathValue("slug")); err != nil {
 		s.fail(w, "delete series", err)
 		return
 	}
@@ -703,7 +703,7 @@ func (s *Server) handleAPISeries(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleAPISeriesOne(w http.ResponseWriter, r *http.Request) {
-	se, err := getSeries(s.db, r.PathValue("rkey"))
+	se, err := getSeries(s.db, r.PathValue("slug"))
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "could not read series")
 		return

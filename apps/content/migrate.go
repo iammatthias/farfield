@@ -16,7 +16,7 @@ import (
 
 // importSeries reads the series records from an old records-engine content
 // database and writes them as markdown fragments — each ref becomes a
-// blob://<cid> image line. Keyed by rkey, so re-running is idempotent.
+// blob://<cid> image line. Keyed by slug, so re-running is idempotent.
 func importSeries(db *sql.DB, oldDBPath string) error {
 	old, err := sql.Open("sqlite", "file:"+oldDBPath+"?mode=ro")
 	if err != nil {
@@ -32,8 +32,8 @@ func importSeries(db *sql.DB, oldDBPath string) error {
 
 	var imported, failed int
 	for rows.Next() {
-		var rkey, value string
-		if err := rows.Scan(&rkey, &value); err != nil {
+		var slug, value string
+		if err := rows.Scan(&slug, &value); err != nil {
 			return err
 		}
 		var old struct {
@@ -43,7 +43,7 @@ func importSeries(db *sql.DB, oldDBPath string) error {
 			Refs        []string `json:"refs"`
 		}
 		if err := json.Unmarshal([]byte(value), &old); err != nil {
-			slog.Error("import-series: unparseable record", "rkey", rkey, "err", err)
+			slog.Error("import-series: unparseable record", "slug", slug, "err", err)
 			failed++
 			continue
 		}
@@ -62,14 +62,14 @@ func importSeries(db *sql.DB, oldDBPath string) error {
 			created = nowRFC3339()
 		}
 		s := &Series{
-			Rkey:      rkey,
+			Slug:      slug,
 			Title:     old.Title,
 			Body:      strings.TrimSpace(b.String()),
 			CreatedAt: created,
 			UpdatedAt: created,
 		}
 		if err := upsertSeries(db, s); err != nil {
-			slog.Error("import-series: upsert failed", "rkey", rkey, "err", err)
+			slog.Error("import-series: upsert failed", "slug", slug, "err", err)
 			failed++
 			continue
 		}

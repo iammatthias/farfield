@@ -13,10 +13,10 @@ import (
 )
 
 // Post is one ephemeral feed entry: a dated markdown note with tags. Links,
-// images, anything else live inline in the markdown body. ID is the stable
+// images, anything else live inline in the markdown body. Slug is the stable
 // key; CID is the content hash — it changes whenever the content does.
 type Post struct {
-	ID        string   `json:"id"`
+	Slug      string   `json:"slug"`
 	CID       string   `json:"cid"`
 	Body      string   `json:"body"`
 	Tags      []string `json:"tags"`
@@ -26,7 +26,7 @@ type Post struct {
 
 const schema = `
 CREATE TABLE IF NOT EXISTS posts (
-	id         TEXT PRIMARY KEY,
+	slug       TEXT PRIMARY KEY,
 	body       TEXT NOT NULL DEFAULT '',
 	tags       TEXT NOT NULL DEFAULT '[]',
 	created_at TEXT NOT NULL,
@@ -36,7 +36,7 @@ CREATE TABLE IF NOT EXISTS posts (
 CREATE INDEX IF NOT EXISTS posts_by_created ON posts (created_at DESC);`
 
 // postCols is the column list, in Post-field order, shared by every query.
-const postCols = `id, cid, body, tags, created_at, updated_at`
+const postCols = `slug, cid, body, tags, created_at, updated_at`
 
 // openDB opens the SQLite database, applies pragmas, and migrates.
 func openDB(path string) (*sql.DB, error) {
@@ -53,6 +53,10 @@ func openDB(path string) (*sql.DB, error) {
 		return nil, err
 	}
 	if _, err := db.Exec(store.SessionSchema); err != nil {
+		return nil, err
+	}
+	// Migrate pre-rename databases: the post stable key went id -> slug.
+	if err := renameColumn(db, "posts", "id", "slug"); err != nil {
 		return nil, err
 	}
 	// Migrate databases created before CIDs: add the column, then backfill.
@@ -80,6 +84,23 @@ func ensureColumn(db *sql.DB, table, column, decl string) error {
 	return err
 }
 
+// renameColumn renames a table column when the old name still exists and the
+// new one does not — a one-time migration for databases predating a rename.
+func renameColumn(db *sql.DB, table, oldName, newName string) error {
+	var hasOld, hasNew int
+	if err := db.QueryRow(`SELECT
+		(SELECT COUNT(*) FROM pragma_table_info(?) WHERE name = ?),
+		(SELECT COUNT(*) FROM pragma_table_info(?) WHERE name = ?)`,
+		table, oldName, table, newName).Scan(&hasOld, &hasNew); err != nil {
+		return err
+	}
+	if hasOld == 0 || hasNew > 0 {
+		return nil
+	}
+	_, err := db.Exec("ALTER TABLE " + table + " RENAME COLUMN " + oldName + " TO " + newName)
+	return err
+}
+
 func nowRFC3339() string { return time.Now().UTC().Format(time.RFC3339) }
 
 func encodeTags(tags []string) string {
@@ -102,7 +123,7 @@ func decodeTags(s string) []string {
 }
 
 // postCID is the content identifier of a post: a CIDv1 over its canonical
-// content — body and tags. The id (the key) and timestamps are excluded.
+// content — body and tags. The slug (the key) and timestamps are excluded.
 func postCID(p *Post) string {
 	tags := p.Tags
 	if tags == nil {
@@ -114,7 +135,7 @@ func postCID(p *Post) string {
 // backfillCIDs computes the content CID for any post that lacks one — a
 // one-time migration for databases created before CIDs.
 func backfillCIDs(db *sql.DB) error {
-	rows, err := db.Query(`SELECT id, body, tags FROM posts WHERE cid = ''`)
+	rows, err := db.Query(`SELECT slug, body, tags FROM posts WHERE cid = ''`)
 	if err != nil {
 		return err
 	}
@@ -122,7 +143,7 @@ func backfillCIDs(db *sql.DB) error {
 	for rows.Next() {
 		var p Post
 		var tags string
-		if err := rows.Scan(&p.ID, &p.Body, &tags); err != nil {
+		if err := rows.Scan(&p.Slug, &p.Body, &tags); err != nil {
 			rows.Close()
 			return err
 		}
@@ -131,8 +152,8 @@ func backfillCIDs(db *sql.DB) error {
 	}
 	rows.Close()
 	for i := range posts {
-		if _, err := db.Exec(`UPDATE posts SET cid = ? WHERE id = ?`,
-			postCID(&posts[i]), posts[i].ID); err != nil {
+		if _, err := db.Exec(`UPDATE posts SET cid = ? WHERE slug = ?`,
+			postCID(&posts[i]), posts[i].Slug); err != nil {
 			return err
 		}
 	}
@@ -145,7 +166,7 @@ type scanner interface{ Scan(...any) error }
 func scanPost(row scanner) (*Post, error) {
 	var p Post
 	var tags string
-	if err := row.Scan(&p.ID, &p.CID, &p.Body, &tags, &p.CreatedAt, &p.UpdatedAt); err != nil {
+	if err := row.Scan(&p.Slug, &p.CID, &p.Body, &tags, &p.CreatedAt, &p.UpdatedAt); err != nil {
 		return nil, err
 	}
 	p.Tags = decodeTags(tags)
@@ -171,10 +192,10 @@ func listPosts(db *sql.DB) ([]Post, error) {
 	return out, rows.Err()
 }
 
-// getPost returns a post by id, or (nil, nil) if absent.
-func getPost(db *sql.DB, id string) (*Post, error) {
+// getPost returns a post by slug, or (nil, nil) if absent.
+func getPost(db *sql.DB, slug string) (*Post, error) {
 	p, err := scanPost(db.QueryRow(
-		`SELECT `+postCols+` FROM posts WHERE id = ?`, id))
+		`SELECT `+postCols+` FROM posts WHERE slug = ?`, slug))
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, nil
 	}
@@ -184,27 +205,27 @@ func getPost(db *sql.DB, id string) (*Post, error) {
 	return p, nil
 }
 
-// insertPost creates a post, assigning a random id and timestamps.
+// insertPost creates a post, assigning a random slug and timestamps.
 func insertPost(db *sql.DB, p *Post) error {
-	if p.ID == "" {
-		p.ID = store.ShortID()
+	if p.Slug == "" {
+		p.Slug = store.ShortID()
 	}
 	p.CreatedAt = nowRFC3339()
 	p.UpdatedAt = p.CreatedAt
 	p.CID = postCID(p)
 	_, err := db.Exec(
-		`INSERT INTO posts (id, cid, body, tags, created_at, updated_at)
+		`INSERT INTO posts (slug, cid, body, tags, created_at, updated_at)
 		 VALUES (?, ?, ?, ?, ?, ?)`,
-		p.ID, p.CID, p.Body, encodeTags(p.Tags), p.CreatedAt, p.UpdatedAt)
+		p.Slug, p.CID, p.Body, encodeTags(p.Tags), p.CreatedAt, p.UpdatedAt)
 	return err
 }
 
 // updatePost replaces a post's body and tags, and stamps updated_at.
-func updatePost(db *sql.DB, id string, p *Post) (bool, error) {
+func updatePost(db *sql.DB, slug string, p *Post) (bool, error) {
 	p.CID = postCID(p)
 	res, err := db.Exec(
-		`UPDATE posts SET body = ?, tags = ?, cid = ?, updated_at = ? WHERE id = ?`,
-		p.Body, encodeTags(p.Tags), p.CID, nowRFC3339(), id)
+		`UPDATE posts SET body = ?, tags = ?, cid = ?, updated_at = ? WHERE slug = ?`,
+		p.Body, encodeTags(p.Tags), p.CID, nowRFC3339(), slug)
 	if err != nil {
 		return false, err
 	}
@@ -212,9 +233,9 @@ func updatePost(db *sql.DB, id string, p *Post) (bool, error) {
 	return n > 0, nil
 }
 
-// deletePost removes a post by id.
-func deletePost(db *sql.DB, id string) (bool, error) {
-	res, err := db.Exec(`DELETE FROM posts WHERE id = ?`, id)
+// deletePost removes a post by slug.
+func deletePost(db *sql.DB, slug string) (bool, error) {
+	res, err := db.Exec(`DELETE FROM posts WHERE slug = ?`, slug)
 	if err != nil {
 		return false, err
 	}
@@ -222,11 +243,11 @@ func deletePost(db *sql.DB, id string) (bool, error) {
 	return n > 0, nil
 }
 
-// importPost inserts or replaces a post, keyed by id, preserving the id and
-// timestamps it carries — used by the vault importer.
+// importPost inserts or replaces a post, keyed by slug, preserving the slug
+// and timestamps it carries — used by the vault importer.
 func importPost(db *sql.DB, p *Post) error {
-	if p.ID == "" {
-		p.ID = store.ShortID()
+	if p.Slug == "" {
+		p.Slug = store.ShortID()
 	}
 	if p.CreatedAt == "" {
 		p.CreatedAt = nowRFC3339()
@@ -236,11 +257,11 @@ func importPost(db *sql.DB, p *Post) error {
 	}
 	p.CID = postCID(p)
 	_, err := db.Exec(
-		`INSERT INTO posts (id, cid, body, tags, created_at, updated_at)
+		`INSERT INTO posts (slug, cid, body, tags, created_at, updated_at)
 		 VALUES (?, ?, ?, ?, ?, ?)
-		 ON CONFLICT(id) DO UPDATE SET
+		 ON CONFLICT(slug) DO UPDATE SET
 		   cid=excluded.cid, body=excluded.body, tags=excluded.tags,
 		   created_at=excluded.created_at, updated_at=excluded.updated_at`,
-		p.ID, p.CID, p.Body, encodeTags(p.Tags), p.CreatedAt, p.UpdatedAt)
+		p.Slug, p.CID, p.Body, encodeTags(p.Tags), p.CreatedAt, p.UpdatedAt)
 	return err
 }

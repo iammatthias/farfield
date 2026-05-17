@@ -37,7 +37,7 @@ func importVault(db *sql.DB, dir string) error {
 			continue
 		}
 		if err := importPost(db, p); err != nil {
-			slog.Error("import: upsert failed", "id", p.ID, "err", err)
+			slog.Error("import: upsert failed", "slug", p.Slug, "err", err)
 			failed++
 			continue
 		}
@@ -66,7 +66,7 @@ func postFromFile(file string) (*Post, error) {
 	}
 	created := normalizeTime(fm.Created)
 	return &Post{
-		ID:        strings.TrimSuffix(filepath.Base(file), ".md"),
+		Slug:      strings.TrimSuffix(filepath.Base(file), ".md"),
 		Body:      strings.TrimSpace(body),
 		Tags:      fm.Tags,
 		CreatedAt: created,

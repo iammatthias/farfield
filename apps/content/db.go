@@ -46,10 +46,10 @@ type Entry struct {
 }
 
 // Series is a reusable markdown fragment — typically a gallery. An entry body
-// embeds one with series://<rkey>; the website splices the fragment's rendered
+// embeds one with series://<slug>; the website splices the fragment's rendered
 // markdown into the parent post in its place.
 type Series struct {
-	Rkey      string `json:"rkey"`
+	Slug      string `json:"slug"`
 	CID       string `json:"cid"`
 	Title     string `json:"title,omitempty"`
 	Body      string `json:"body"` // markdown
@@ -82,7 +82,7 @@ CREATE INDEX IF NOT EXISTS entries_by_collection ON entries (collection_id, crea
 CREATE INDEX IF NOT EXISTS entries_by_created ON entries (created_at DESC);
 
 CREATE TABLE IF NOT EXISTS series (
-	rkey       TEXT PRIMARY KEY,
+	slug       TEXT PRIMARY KEY,
 	title      TEXT NOT NULL DEFAULT '',
 	body       TEXT NOT NULL DEFAULT '',
 	created_at TEXT NOT NULL,
@@ -107,6 +107,10 @@ func openDB(path string) (*sql.DB, error) {
 		return nil, err
 	}
 	if _, err := db.Exec(store.SessionSchema); err != nil {
+		return nil, err
+	}
+	// Migrate pre-rename databases: the series stable key went rkey -> slug.
+	if err := renameColumn(db, "series", "rkey", "slug"); err != nil {
 		return nil, err
 	}
 	// Migrate databases created before CIDs: add the column, then backfill.
@@ -135,6 +139,23 @@ func ensureColumn(db *sql.DB, table, column, decl string) error {
 		return nil
 	}
 	_, err := db.Exec("ALTER TABLE " + table + " ADD COLUMN " + column + " " + decl)
+	return err
+}
+
+// renameColumn renames a table column when the old name still exists and the
+// new one does not — a one-time migration for databases predating a rename.
+func renameColumn(db *sql.DB, table, oldName, newName string) error {
+	var hasOld, hasNew int
+	if err := db.QueryRow(`SELECT
+		(SELECT COUNT(*) FROM pragma_table_info(?) WHERE name = ?),
+		(SELECT COUNT(*) FROM pragma_table_info(?) WHERE name = ?)`,
+		table, oldName, table, newName).Scan(&hasOld, &hasNew); err != nil {
+		return err
+	}
+	if hasOld == 0 || hasNew > 0 {
+		return nil
+	}
+	_, err := db.Exec("ALTER TABLE " + table + " RENAME COLUMN " + oldName + " TO " + newName)
 	return err
 }
 
@@ -217,14 +238,14 @@ func backfillCIDs(db *sql.DB) error {
 		}
 	}
 
-	srows, err := db.Query(`SELECT rkey, title, body FROM series WHERE cid = ''`)
+	srows, err := db.Query(`SELECT slug, title, body FROM series WHERE cid = ''`)
 	if err != nil {
 		return err
 	}
 	var seriesRows []Series
 	for srows.Next() {
 		var s Series
-		if err := srows.Scan(&s.Rkey, &s.Title, &s.Body); err != nil {
+		if err := srows.Scan(&s.Slug, &s.Title, &s.Body); err != nil {
 			srows.Close()
 			return err
 		}
@@ -232,8 +253,8 @@ func backfillCIDs(db *sql.DB) error {
 	}
 	srows.Close()
 	for i := range seriesRows {
-		if _, err := db.Exec(`UPDATE series SET cid = ? WHERE rkey = ?`,
-			seriesCID(&seriesRows[i]), seriesRows[i].Rkey); err != nil {
+		if _, err := db.Exec(`UPDATE series SET cid = ? WHERE slug = ?`,
+			seriesCID(&seriesRows[i]), seriesRows[i].Slug); err != nil {
 			return err
 		}
 	}
@@ -512,11 +533,11 @@ func collectionID(db *sql.DB, slug string) (int64, error) {
 
 // ── series ─────────────────────────────────────────────────────────────────
 
-const seriesCols = `rkey, cid, title, body, created_at, updated_at`
+const seriesCols = `slug, cid, title, body, created_at, updated_at`
 
 func scanSeries(row interface{ Scan(...any) error }) (*Series, error) {
 	var s Series
-	if err := row.Scan(&s.Rkey, &s.CID, &s.Title, &s.Body,
+	if err := row.Scan(&s.Slug, &s.CID, &s.Title, &s.Body,
 		&s.CreatedAt, &s.UpdatedAt); err != nil {
 		return nil, err
 	}
@@ -541,10 +562,10 @@ func listSeries(db *sql.DB) ([]Series, error) {
 	return out, rows.Err()
 }
 
-// getSeries returns a series by rkey, or (nil, nil) if absent.
-func getSeries(db *sql.DB, rkey string) (*Series, error) {
+// getSeries returns a series by slug, or (nil, nil) if absent.
+func getSeries(db *sql.DB, slug string) (*Series, error) {
 	s, err := scanSeries(db.QueryRow(
-		`SELECT `+seriesCols+` FROM series WHERE rkey = ?`, rkey))
+		`SELECT `+seriesCols+` FROM series WHERE slug = ?`, slug))
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, nil
 	}
@@ -554,23 +575,23 @@ func getSeries(db *sql.DB, rkey string) (*Series, error) {
 	return s, nil
 }
 
-// upsertSeries inserts or replaces a series fragment, keyed by rkey. The
+// upsertSeries inserts or replaces a series fragment, keyed by slug. The
 // caller sets the timestamps (now for admin edits, the original for imports).
 func upsertSeries(db *sql.DB, s *Series) error {
 	s.CID = seriesCID(s)
 	_, err := db.Exec(
-		`INSERT INTO series (rkey, title, body, created_at, updated_at, cid)
+		`INSERT INTO series (slug, title, body, created_at, updated_at, cid)
 		 VALUES (?, ?, ?, ?, ?, ?)
-		 ON CONFLICT(rkey) DO UPDATE SET
+		 ON CONFLICT(slug) DO UPDATE SET
 		   title=excluded.title, body=excluded.body,
 		   updated_at=excluded.updated_at, cid=excluded.cid`,
-		s.Rkey, s.Title, s.Body, s.CreatedAt, s.UpdatedAt, s.CID)
+		s.Slug, s.Title, s.Body, s.CreatedAt, s.UpdatedAt, s.CID)
 	return err
 }
 
-// deleteSeries removes a series fragment by rkey.
-func deleteSeries(db *sql.DB, rkey string) (bool, error) {
-	res, err := db.Exec(`DELETE FROM series WHERE rkey = ?`, rkey)
+// deleteSeries removes a series fragment by slug.
+func deleteSeries(db *sql.DB, slug string) (bool, error) {
+	res, err := db.Exec(`DELETE FROM series WHERE slug = ?`, slug)
 	if err != nil {
 		return false, err
 	}
