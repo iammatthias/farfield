@@ -40,9 +40,11 @@ The `backup` service is internal (tailnet-only) and has no public API.
 | `POST /api/entries`                  | create — `X-API-Key`                     |
 | `PUT /api/entries/{slug}`            | replace — `X-API-Key`                    |
 | `DELETE /api/entries/{slug}`         | delete — `X-API-Key`                     |
+| `POST /api/series`                   | create a series fragment — `X-API-Key`   |
 
-Collections and series are managed in the admin UI; only entries have a
-write API.
+Collections are managed in the admin UI. `POST /api/series` always assigns a
+fresh rkey (slugified from the title) and returns the created fragment — it is
+how the feed editor builds galleries that live in content.
 
 ## feed — `https://feed.farfield.systems`
 
