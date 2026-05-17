@@ -45,6 +45,10 @@ services:
       - CONTENT_DB_PATH=/data/content.sqlite
       - PASSWORD=${PASSWORD:-changeme}
       - CONTENT_API_KEY=${CONTENT_API_KEY:-}
+      - BLOBS_URL=http://blobs:8789
+      - BLOBS_API_KEY=${BLOBS_API_KEY:-}
+      - BLOBS_PUBLIC_URL=${BLOBS_PUBLIC_URL:-https://blobs.farfield.systems}
+      - CONTENT_PUBLIC_URL=${CONTENT_PUBLIC_URL:-https://content.farfield.systems}
       - COOKIE_SECURE=true
     volumes:
       - ./data:/data
@@ -63,6 +67,12 @@ services:
       - FEED_DB_PATH=/data/feed.sqlite
       - PASSWORD=${PASSWORD:-changeme}
       - FEED_API_KEY=${FEED_API_KEY:-}
+      - BLOBS_URL=http://blobs:8789
+      - BLOBS_API_KEY=${BLOBS_API_KEY:-}
+      - CONTENT_URL=http://content:8787
+      - CONTENT_API_KEY=${CONTENT_API_KEY:-}
+      - BLOBS_PUBLIC_URL=${BLOBS_PUBLIC_URL:-https://blobs.farfield.systems}
+      - CONTENT_PUBLIC_URL=${CONTENT_PUBLIC_URL:-https://content.farfield.systems}
       - COOKIE_SECURE=true
     volumes:
       - ./data:/data

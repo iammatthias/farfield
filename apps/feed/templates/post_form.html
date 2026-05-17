@@ -7,6 +7,10 @@
   <form method="post" action="{{.Action}}">
     <div class="field">
       <label for="body">Body (markdown)</label>
+      <div class="embed-toolbar">
+        <button type="button" data-embed="blob">Embed blob</button>
+        <button type="button" data-embed="series">Embed series</button>
+      </div>
       <textarea id="body" name="body" required autofocus>{{.Post.Body}}</textarea>
     </div>
     <div class="field">
@@ -19,4 +23,7 @@
       <a href="/">Cancel</a>
     </div>
   </form>
+
+  <script>window.FARFIELD={blobs:"{{.BlobsPublic}}",content:"{{.ContentPublic}}"};</script>
+  <script src="/static/editor.js" defer></script>
 {{end}}

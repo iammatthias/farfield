@@ -9,3 +9,10 @@ import _ "embed"
 //
 //go:embed theme.css
 var CSS string
+
+// EditorJS is the shared editor enhancement: it adds blob/series embedding to
+// a markdown <textarea>. Dependency-free vanilla JavaScript; the apps with a
+// markdown editor (content, feed) serve it at /static/editor.js.
+//
+//go:embed editor.js
+var EditorJS string

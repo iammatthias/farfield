@@ -34,8 +34,12 @@
     </div>
     <div class="field">
       <label for="body">Body (markdown)</label>
+      <div class="embed-toolbar">
+        <button type="button" data-embed="blob">Embed blob</button>
+        <button type="button" data-embed="series">Embed series</button>
+      </div>
       <textarea id="body" name="body">{{.Entry.Body}}</textarea>
-      <p class="hint">Reference images as blob://&lt;cid&gt; — resolved against the blobs service.</p>
+      <p class="hint">Reference images as blob://&lt;cid&gt; — or use the buttons above.</p>
     </div>
     <div class="field check">
       <input type="checkbox" id="published" name="published" value="1"
@@ -47,4 +51,7 @@
       <a href="/entries">Cancel</a>
     </div>
   </form>
+
+  <script>window.FARFIELD={blobs:"{{.BlobsPublic}}",content:"{{.ContentPublic}}"};</script>
+  <script src="/static/editor.js" defer></script>
 {{end}}

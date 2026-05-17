@@ -29,11 +29,17 @@ var assets embed.FS
 
 // Server holds the running feed service.
 type Server struct {
-	db           *sql.DB
-	templates    map[string]*template.Template
-	password     string
-	apiKey       string
-	cookieSecure bool
+	db            *sql.DB
+	templates     map[string]*template.Template
+	password      string
+	apiKey        string
+	cookieSecure  bool
+	blobsURL      string // internal blobs service URL — for the upload proxy
+	blobsKey      string // blobs API key — kept server-side
+	contentURL    string // internal content service URL — for series creation
+	contentKey    string // content API key — kept server-side
+	blobsPublic   string // browser-facing blobs URL — injected into the editor
+	contentPublic string // browser-facing content URL — injected into the editor
 }
 
 // run wires up the service and serves until interrupted.
@@ -50,11 +56,17 @@ func run(host, port string) error {
 	}
 
 	s := &Server{
-		db:           db,
-		templates:    tmpl,
-		password:     store.Env("PASSWORD", ""),
-		apiKey:       store.Env("FEED_API_KEY", ""),
-		cookieSecure: store.Env("COOKIE_SECURE", "false") == "true",
+		db:            db,
+		templates:     tmpl,
+		password:      store.Env("PASSWORD", ""),
+		apiKey:        store.Env("FEED_API_KEY", ""),
+		cookieSecure:  store.Env("COOKIE_SECURE", "false") == "true",
+		blobsURL:      store.Env("BLOBS_URL", "http://127.0.0.1:8789"),
+		blobsKey:      store.Env("BLOBS_API_KEY", ""),
+		contentURL:    store.Env("CONTENT_URL", "http://127.0.0.1:8787"),
+		contentKey:    store.Env("CONTENT_API_KEY", ""),
+		blobsPublic:   store.Env("BLOBS_PUBLIC_URL", "http://127.0.0.1:8789"),
+		contentPublic: store.Env("CONTENT_PUBLIC_URL", "http://127.0.0.1:8787"),
 	}
 
 	srv := &http.Server{Addr: net.JoinHostPort(host, port), Handler: s.routes()}
@@ -103,8 +115,13 @@ func (s *Server) routes() http.Handler {
 	mux.HandleFunc("PUT /api/posts/{id}", s.requireAPIKey(s.handleAPIUpdate))
 	mux.HandleFunc("DELETE /api/posts/{id}", s.requireAPIKey(s.handleAPIDelete))
 
-	// Shared theme stylesheet.
+	// Editor embedding — session-gated proxy so service keys stay server-side.
+	mux.HandleFunc("POST /embed/blob", s.requireSession(s.handleEmbedBlob))
+	mux.HandleFunc("POST /embed/series", s.requireSession(s.handleEmbedSeries))
+
+	// Shared theme stylesheet and editor script.
 	mux.HandleFunc("GET /static/styles.css", handleCSS)
+	mux.HandleFunc("GET /static/editor.js", handleEditorJS)
 
 	return cors(logRequests(mux))
 }
@@ -331,7 +348,8 @@ func splitTags(s string) []string {
 func (s *Server) renderPostForm(w http.ResponseWriter, p *Post, isNew bool, action, errMsg string) {
 	s.render(w, "post_form.html", map[string]any{
 		"Post": p, "IsNew": isNew, "Action": action, "Error": errMsg,
-		"TagsText": strings.Join(p.Tags, ", "),
+		"TagsText":    strings.Join(p.Tags, ", "),
+		"BlobsPublic": s.blobsPublic, "ContentPublic": s.contentPublic,
 	})
 }
 
@@ -339,6 +357,12 @@ func handleCSS(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "text/css; charset=utf-8")
 	w.Header().Set("Cache-Control", "public, max-age=3600")
 	_, _ = io.WriteString(w, theme.CSS)
+}
+
+func handleEditorJS(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "text/javascript; charset=utf-8")
+	w.Header().Set("Cache-Control", "public, max-age=3600")
+	_, _ = io.WriteString(w, theme.EditorJS)
 }
 
 func parseTemplates() (map[string]*template.Template, error) {
