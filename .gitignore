@@ -18,3 +18,4 @@
 # Editor / OS cruft.
 .DS_Store
 PLAN.md
+.gstack/
