@@ -1,219 +1,77 @@
-// Command blobs is the Farfield blob service (blobs.farfield.systems).
+// Command blobs is the farfield blob service — a content-addressed media
+// store. It exposes an HTML admin UI for uploading and moderating blobs and a
+// public JSON/bytes API for consumers. Blob bytes live in a byte store (a
+// local directory or Cloudflare R2); metadata lives in SQLite.
 //
-// A standalone content-addressed media store — images, video, PDFs, anything.
-// The content app (and any future app) upload media here and reference them
-// by CID. The backend is a local directory or Cloudflare R2, selected at
-// startup behind the blob.Store interface.
+// Usage:
+//
+//	blobs                          serve the HTTP service (default)
+//	blobs import-sidecars          copy R2 <cid>.json sidecars into SQLite
+//	blobs prune-sidecars           dry-run: report sidecars to delete from R2
+//	blobs prune-sidecars --confirm delete the <cid>.json sidecars from R2
 package main
 
 import (
 	"fmt"
-	"io"
-	"log"
-	"net/http"
+	"log/slog"
 	"os"
-	"strconv"
 
-	"github.com/iammatthias/farfield/lib/blob"
-	"github.com/iammatthias/farfield/lib/httpkit"
+	"github.com/iammatthias/farfield/lib/store"
 )
 
-// maxUpload caps an upload, in bytes — default 100 MiB, overridable with
-// FARFIELD_BLOBS_MAX_UPLOAD_MB (raise it for large video). Enforced on bytes
-// actually read.
-var maxUpload int64 = 100 << 20
-
-type service struct {
-	store  blob.Store
-	tokens []string
-}
-
 func main() {
-	addr := envOr("FARFIELD_BLOBS_ADDR", "127.0.0.1:8789")
-	if mb, err := strconv.Atoi(os.Getenv("FARFIELD_BLOBS_MAX_UPLOAD_MB")); err == nil && mb > 0 {
-		maxUpload = int64(mb) << 20
+	_ = store.LoadEnv()
+	slog.SetDefault(slog.New(slog.NewTextHandler(os.Stderr, nil)))
+
+	cmd := "serve"
+	if len(os.Args) > 1 {
+		cmd = os.Args[1]
 	}
 
-	store, desc, err := openStore()
-	if err != nil {
-		log.Fatalf("opening blob store: %v", err)
-	}
-	svc := &service{store: store, tokens: tokensFromEnv()}
-	log.Printf("blob backend: %s", desc)
-
-	mux := http.NewServeMux()
-	mux.HandleFunc("GET /{$}", svc.root)
-	mux.HandleFunc("GET /status", svc.status)
-	mux.HandleFunc("GET /blobs", svc.list)
-	mux.HandleFunc("POST /blobs", svc.upload)
-	mux.HandleFunc("GET /blobs/{cid}", svc.getBlob)
-	mux.HandleFunc("GET /blobs/{cid}/meta", svc.getMeta)
-
-	log.Printf("farfield-blobs listening on http://%s", addr)
-	log.Fatal(http.ListenAndServe(addr, mux))
-}
-
-// openStore picks the blob backend. FARFIELD_BLOBS_BACKEND is "local"
-// (default) or "r2"; the R2 backend reads its credentials from R2_* env vars.
-func openStore() (blob.Store, string, error) {
-	switch envOr("FARFIELD_BLOBS_BACKEND", "local") {
-	case "local":
-		dir := envOr("FARFIELD_BLOBS_DIR", "farfield-blobs-data")
-		s, err := blob.OpenLocalDir(dir)
-		return s, "local:" + dir, err
-	case "r2":
-		bucket := os.Getenv("R2_BUCKET")
-		s, err := blob.NewR2(blob.R2Config{
-			AccountID:       os.Getenv("R2_ACCOUNT_ID"),
-			AccessKeyID:     os.Getenv("R2_ACCESS_KEY_ID"),
-			SecretAccessKey: os.Getenv("R2_SECRET_ACCESS_KEY"),
-			Bucket:          bucket,
-		})
-		return s, "r2:" + bucket, err
+	switch cmd {
+	case "serve":
+		host := store.Env("HOST", "127.0.0.1")
+		port := store.Env("BLOBS_PORT", "8789")
+		if err := run(host, port); err != nil {
+			slog.Error("fatal", "err", err)
+			os.Exit(1)
+		}
+	case "import-sidecars":
+		if err := runMigration(false, false); err != nil {
+			slog.Error("import-sidecars failed", "err", err)
+			os.Exit(1)
+		}
+	case "prune-sidecars":
+		confirm := len(os.Args) > 2 && os.Args[2] == "--confirm"
+		if err := runMigration(true, confirm); err != nil {
+			slog.Error("prune-sidecars failed", "err", err)
+			os.Exit(1)
+		}
 	default:
-		return nil, "", fmt.Errorf("unknown FARFIELD_BLOBS_BACKEND (want local|r2)")
+		fmt.Fprintln(os.Stderr,
+			"usage: blobs [serve | import-sidecars | prune-sidecars [--confirm]]")
+		os.Exit(2)
 	}
 }
 
-func (s *service) root(w http.ResponseWriter, _ *http.Request) {
-	httpkit.WriteJSON(w, 200, map[string]any{
-		"service": "farfield-blobs",
-		"ok":      true,
-		"endpoints": []string{
-			"GET    /status",
-			"GET    /blobs",
-			"GET    /blobs/{cid}",
-			"GET    /blobs/{cid}/meta",
-			"POST   /blobs            (auth)",
-		},
-	})
-}
-
-func (s *service) status(w http.ResponseWriter, _ *http.Request) {
-	cids, err := s.store.List()
+// runMigration opens the database and byte store, then runs a sidecar
+// migration. prune=false runs the import; prune=true runs the prune (a dry
+// run unless confirm is set).
+func runMigration(prune, confirm bool) error {
+	db, err := openDB(store.Env("BLOBS_DB_PATH", "blobs.sqlite"))
 	if err != nil {
-		httpkit.WriteError(w, httpkit.Internal(err.Error()))
-		return
+		return err
 	}
-	httpkit.WriteJSON(w, 200, map[string]any{"service": "farfield-blobs", "ok": true, "blobs": len(cids)})
-}
+	defer db.Close()
 
-func (s *service) list(w http.ResponseWriter, _ *http.Request) {
-	cids, err := s.store.List()
+	bs, desc, err := openStore()
 	if err != nil {
-		httpkit.WriteError(w, httpkit.Internal(err.Error()))
-		return
+		return err
 	}
-	if cids == nil {
-		cids = []string{}
-	}
-	httpkit.WriteJSON(w, 200, map[string]any{"blobs": cids})
-}
+	slog.Info("blob store", "backend", desc)
 
-func (s *service) upload(w http.ResponseWriter, r *http.Request) {
-	if e := httpkit.VerifyBearer(r, s.tokens); e != nil {
-		httpkit.WriteError(w, e)
-		return
+	if prune {
+		return pruneSidecars(db, bs, confirm)
 	}
-	r.Body = http.MaxBytesReader(w, r.Body, maxUpload)
-	data, err := io.ReadAll(r.Body)
-	if err != nil {
-		httpkit.WriteError(w, &httpkit.APIError{
-			Status: http.StatusRequestEntityTooLarge, Code: "blob_too_large",
-			Message: fmt.Sprintf("upload exceeds the %d MiB cap", maxUpload>>20),
-		})
-		return
-	}
-	if len(data) == 0 {
-		httpkit.WriteError(w, httpkit.BadRequest("empty_blob", "no bytes uploaded"))
-		return
-	}
-	meta, err := blob.DeriveMetadata(data)
-	if err != nil {
-		httpkit.WriteError(w, httpkit.BadRequest("invalid_media", err.Error()))
-		return
-	}
-	if err := s.store.Put(meta, data); err != nil {
-		httpkit.WriteError(w, httpkit.Internal(err.Error()))
-		return
-	}
-	httpkit.WriteJSON(w, 200, meta)
-}
-
-func (s *service) getBlob(w http.ResponseWriter, r *http.Request) {
-	cid := r.PathValue("cid")
-	if !validCID(cid) {
-		httpkit.WriteError(w, httpkit.BadRequest("invalid_cid", "malformed CID"))
-		return
-	}
-	data, err := s.store.GetBytes(cid)
-	if err != nil {
-		httpkit.WriteError(w, httpkit.Internal(err.Error()))
-		return
-	}
-	if data == nil {
-		httpkit.WriteError(w, httpkit.NotFound("blob "+cid))
-		return
-	}
-	mime := "application/octet-stream"
-	if m, _ := s.store.GetMeta(cid); m != nil {
-		mime = m.Mime
-	}
-	w.Header().Set("Content-Type", mime)
-	// Content-addressed: the bytes for a CID never change.
-	w.Header().Set("Cache-Control", "public, max-age=31536000, immutable")
-	_, _ = w.Write(data)
-}
-
-func (s *service) getMeta(w http.ResponseWriter, r *http.Request) {
-	cid := r.PathValue("cid")
-	if !validCID(cid) {
-		httpkit.WriteError(w, httpkit.BadRequest("invalid_cid", "malformed CID"))
-		return
-	}
-	meta, err := s.store.GetMeta(cid)
-	if err != nil {
-		httpkit.WriteError(w, httpkit.Internal(err.Error()))
-		return
-	}
-	if meta == nil {
-		httpkit.WriteError(w, httpkit.NotFound("blob "+cid))
-		return
-	}
-	httpkit.WriteJSON(w, 200, meta)
-}
-
-// validCID accepts only the base32 CIDv1 alphabet, so a CID path segment can
-// never be a path-traversal payload.
-func validCID(cid string) bool {
-	if len(cid) < 1 || len(cid) > 80 {
-		return false
-	}
-	for _, c := range cid {
-		if !((c >= 'a' && c <= 'z') || (c >= '0' && c <= '9')) {
-			return false
-		}
-	}
-	return true
-}
-
-func envOr(key, def string) string {
-	if v := os.Getenv(key); v != "" {
-		return v
-	}
-	return def
-}
-
-func tokensFromEnv() []string {
-	var tokens []string
-	for _, v := range []string{"FARFIELD_TOKEN", "FARFIELD_TOKEN_PREVIOUS"} {
-		if t := os.Getenv(v); t != "" {
-			tokens = append(tokens, t)
-		}
-	}
-	if len(tokens) == 0 {
-		log.Println("warning: FARFIELD_TOKEN unset — using 'dev-token' (local dev only)")
-		tokens = []string{"dev-token"}
-	}
-	return tokens
+	return importSidecars(db, bs)
 }

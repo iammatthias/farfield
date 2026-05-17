@@ -1,9 +1,0 @@
-{
-  "id": "farfield-publisher",
-  "name": "Farfield Publisher",
-  "version": "0.4.0",
-  "minAppVersion": "1.4.0",
-  "description": "Publish notes and a feed to a Farfield backend over its HTTP API, and upload pasted media to its blob store. Works on desktop and mobile.",
-  "author": "iammatthias",
-  "isDesktopOnly": false
-}

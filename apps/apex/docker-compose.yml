@@ -1,0 +1,16 @@
+# Local-dev compose for the apex app. Run from the repo root so Compose
+# interpolates ${...} from the root .env:
+#   docker compose -f apps/apex/docker-compose.yml up --build
+#
+# apex is stateless — the site is embedded in the binary; no volume.
+services:
+  apex:
+    build:
+      context: ../..
+      dockerfile: apps/apex/Dockerfile
+    ports:
+      - "${APEX_PORT:-8790}:8790"
+    environment:
+      - HOST=0.0.0.0
+      - APEX_PORT=8790
+    restart: unless-stopped

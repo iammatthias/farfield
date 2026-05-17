@@ -1,0 +1,71 @@
+{{define "base"}}<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>{{block "title" .}}farfield · blobs{{end}}</title>
+  <meta name="theme-color" content="#121113">
+  <link rel="stylesheet" href="/static/styles.css">
+  <style>
+    /* blobs admin — full-width, not the theme's narrow reading column. */
+    .container { max-width: 86rem; }
+    .prose { max-width: 34rem; margin: 0 auto; }
+
+    header { display: flex; justify-content: space-between; align-items: baseline;
+      gap: 1rem 1.5rem; flex-wrap: wrap; margin-bottom: 1.5rem; }
+    header h1 { font-size: 1.05rem; margin: 0; }
+    .toolbar { display: flex; gap: 1.25rem; align-items: baseline; flex-wrap: wrap; }
+
+    /* table */
+    .table-wrap { overflow-x: auto; border: 1px solid var(--border);
+      border-radius: var(--radius); }
+    table.blobs { width: 100%; border-collapse: collapse; font-size: 0.9rem; }
+    table.blobs th, table.blobs td { padding: 0.55rem 0.85rem; text-align: left;
+      border-bottom: 1px solid var(--border); white-space: nowrap; }
+    table.blobs th { color: var(--muted); font-weight: 600; font-size: 0.72rem;
+      text-transform: uppercase; letter-spacing: 0.05em; }
+    table.blobs tbody tr:last-child td { border-bottom: 0; }
+    table.blobs tbody tr:hover { background: var(--surface); }
+    table.blobs td.shrink { width: 1%; }
+    a.row { color: var(--text); text-decoration: none; display: block; }
+    a.row:hover { color: var(--accent); }
+    .thumb { width: 56px; height: 56px; object-fit: cover; border-radius: 6px;
+      display: block; background: var(--surface); }
+    .cid { font-family: var(--mono); font-size: 0.78rem; }
+    .swatch { display: inline-block; width: 0.95rem; height: 0.95rem; border-radius: 3px;
+      vertical-align: -2px; border: 1px solid var(--border); }
+    .pager { display: flex; gap: 1.5rem; justify-content: center; align-items: baseline;
+      margin-top: 2rem; }
+
+    /* :target modal viewer — no JavaScript */
+    .modal { display: none; position: fixed; inset: 0; z-index: 50; }
+    .modal:target { display: flex; align-items: center; justify-content: center; padding: 1.5rem; }
+    .modal .backdrop { position: absolute; inset: 0; background: rgba(0,0,0,0.78); }
+    .modal .card { position: relative; z-index: 1; width: 100%; max-width: 58rem;
+      max-height: 88vh; overflow: auto; background: var(--bg);
+      border: 1px solid var(--border); border-radius: var(--radius);
+      display: grid; grid-template-columns: minmax(0,1fr) 19rem; }
+    .modal .card img { width: 100%; height: 100%; max-height: 88vh;
+      object-fit: contain; background: var(--surface); }
+    .modal .detail { padding: 1.25rem 1.4rem; min-width: 0; }
+    .modal .detail h2 { font-size: 0.95rem; margin: 0 0 0.75rem; }
+    .modal .detail dl { display: grid; grid-template-columns: auto minmax(0,1fr);
+      gap: 0.4rem 1rem; margin: 0 0 1.1rem; font-size: 0.85rem; }
+    .modal .detail dt { color: var(--muted); }
+    .modal .detail dd { margin: 0; word-break: break-all; }
+    .modal .close { position: absolute; top: 0.6rem; right: 0.7rem; z-index: 2;
+      width: 2rem; height: 2rem; display: flex; align-items: center; justify-content: center;
+      font-size: 1.4rem; line-height: 1; text-decoration: none; color: var(--text);
+      background: var(--bg); border: 1px solid var(--border); border-radius: 6px; }
+    @media (max-width: 46rem) {
+      .modal .card { grid-template-columns: 1fr; }
+      .modal .card img { max-height: 50vh; }
+    }
+  </style>
+</head>
+<body>
+  <main class="container">
+    {{block "content" .}}{{end}}
+  </main>
+</body>
+</html>{{end}}

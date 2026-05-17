@@ -1,0 +1,93 @@
+{{define "title"}}Blobs · farfield{{end}}
+{{define "content"}}
+  <header id="grid">
+    <h1>farfield · blobs</h1>
+    <div class="toolbar">
+      <span class="muted">{{.Total}} blob{{if ne .Total 1}}s{{end}}</span>
+      <a href="/upload">Upload</a>
+      <a href="/logout">Log out</a>
+    </div>
+  </header>
+
+  {{if .Blobs}}
+    <div class="table-wrap">
+      <table class="blobs">
+        <thead>
+          <tr>
+            <th></th><th>CID</th><th>Type</th><th>Dimensions</th>
+            <th>Size</th><th>Color</th><th>Added</th>
+          </tr>
+        </thead>
+        <tbody>
+          {{range .Blobs}}
+            <tr>
+              <td class="shrink">
+                <a class="row" href="#m-{{.CID}}">
+                  <img class="thumb" src="/blobs/{{.CID}}" loading="lazy" alt=""
+                       {{if .DominantColor}}style="background:{{.DominantColor}}"{{end}}>
+                </a>
+              </td>
+              <td><a class="row cid" href="#m-{{.CID}}">{{slice .CID 0 24}}…</a></td>
+              <td>{{.Mime}}</td>
+              <td>{{if .Width}}{{.Width}} × {{.Height}}{{else}}—{{end}}</td>
+              <td>{{humanSize .Size}}</td>
+              <td>
+                {{if .DominantColor}}
+                  <span class="swatch" style="background:{{.DominantColor}}"></span>
+                  {{.DominantColor}}
+                {{else}}—{{end}}
+              </td>
+              <td>{{shortDate .CreatedAt}}</td>
+            </tr>
+          {{end}}
+        </tbody>
+      </table>
+    </div>
+
+    {{if gt .Pages 1}}
+      <nav class="pager">
+        {{if .HasPrev}}<a href="/?page={{.Prev}}">← Prev</a>{{else}}<span class="muted">← Prev</span>{{end}}
+        <span class="muted">Page {{.Page}} of {{.Pages}}</span>
+        {{if .HasNext}}<a href="/?page={{.Next}}">Next →</a>{{else}}<span class="muted">Next →</span>{{end}}
+      </nav>
+    {{end}}
+
+    {{/* one modal viewer per blob — opened by #m-<cid> */}}
+    {{range .Blobs}}
+      <div class="modal" id="m-{{.CID}}">
+        <a class="backdrop" href="#grid" aria-label="Close"></a>
+        <div class="card">
+          <a class="close" href="#grid" aria-label="Close">×</a>
+          <img src="/blobs/{{.CID}}" loading="lazy" alt="">
+          <div class="detail">
+            <h2>{{.Mime}}</h2>
+            <dl>
+              <dt>CID</dt><dd class="cid">{{.CID}}</dd>
+              <dt>Size</dt><dd>{{humanSize .Size}} ({{.Size}} bytes)</dd>
+              <dt>Dimensions</dt><dd>{{if .Width}}{{.Width}} × {{.Height}}{{else}}—{{end}}</dd>
+              <dt>Color</dt>
+              <dd>
+                {{if .DominantColor}}
+                  <span class="swatch" style="background:{{.DominantColor}}"></span>
+                  {{.DominantColor}}
+                {{else}}—{{end}}
+              </dd>
+              <dt>Blurhash</dt><dd class="cid">{{if .Blurhash}}{{.Blurhash}}{{else}}—{{end}}</dd>
+              <dt>Added</dt><dd>{{.CreatedAt}}</dd>
+            </dl>
+            <p>
+              <a href="/blobs/{{.CID}}" target="_blank" rel="noopener">Raw bytes ↗</a>
+              · <a href="/blobs/{{.CID}}/meta" target="_blank" rel="noopener">Meta JSON ↗</a>
+            </p>
+            <form method="post" action="/blobs/{{.CID}}/delete"
+                  onsubmit="return confirm('Delete this blob? It is removed from the store.')">
+              <button type="submit">Delete blob</button>
+            </form>
+          </div>
+        </div>
+      </div>
+    {{end}}
+  {{else}}
+    <p class="muted">No blobs in the store. <a href="/upload">Upload one.</a></p>
+  {{end}}
+{{end}}

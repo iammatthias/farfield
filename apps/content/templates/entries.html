@@ -1,0 +1,20 @@
+{{define "title"}}Entries · farfield{{end}}
+{{define "content"}}
+  {{template "topbar" .}}
+
+  <div class="section-head">
+    <h2>Entries{{if .Filter}} · {{.Filter}}{{end}}</h2>
+    <a href="/entries/new">New entry</a>
+  </div>
+
+  <p class="muted">
+    Filter: <a href="/entries">all</a>
+    {{range .Collections}} · <a href="/entries?collection={{.Slug}}">{{.Name}}</a>{{end}}
+  </p>
+
+  {{if .Entries}}
+    {{template "entry_table" .}}
+  {{else}}
+    <p class="muted">No entries{{if .Filter}} in this collection{{end}}.</p>
+  {{end}}
+{{end}}

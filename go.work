@@ -1,0 +1,13 @@
+go 1.25.0
+
+use (
+	./apps/apex
+	./apps/backup
+	./apps/blobs
+	./apps/content
+	./apps/feed
+	./lib/auth
+	./lib/backup
+	./lib/store
+	./lib/theme
+)

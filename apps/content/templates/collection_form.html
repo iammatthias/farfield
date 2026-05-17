@@ -1,0 +1,41 @@
+{{define "title"}}{{if .IsNew}}New collection{{else}}Edit collection{{end}} · farfield{{end}}
+{{define "content"}}
+  {{template "topbar" .}}
+  <h2 style="font-size:1rem">{{if .IsNew}}New collection{{else}}Edit collection{{end}}</h2>
+  {{with .Error}}<p class="error">{{.}}</p>{{end}}
+
+  <form method="post" action="{{.Action}}" class="prose">
+    <div class="field">
+      <label for="name">Name</label>
+      <input type="text" id="name" name="name" value="{{.Collection.Name}}" required>
+    </div>
+    {{if .IsNew}}
+      <div class="field">
+        <label for="slug">Slug</label>
+        <input type="text" id="slug" name="slug" value="{{.Collection.Slug}}">
+        <p class="hint">URL key. Leave blank to derive from the name. Immutable once set.</p>
+      </div>
+    {{else}}
+      <div class="field">
+        <label>Slug</label>
+        <p><code>{{.Collection.Slug}}</code> <span class="hint">— immutable</span></p>
+      </div>
+    {{end}}
+    <div class="field">
+      <label for="description">Description</label>
+      <input type="text" id="description" name="description" value="{{.Collection.Description}}">
+    </div>
+    <div class="actions">
+      <button type="submit">{{if .IsNew}}Create collection{{else}}Save changes{{end}}</button>
+      <a href="/">Cancel</a>
+    </div>
+  </form>
+
+  {{if not .IsNew}}
+    <form method="post" action="/collections/{{.Collection.Slug}}/delete" class="prose"
+          style="margin-top:1.25rem"
+          onsubmit="return confirm('Delete this collection and ALL of its entries?')">
+      <button class="danger" type="submit">Delete collection</button>
+    </form>
+  {{end}}
+{{end}}

@@ -1,0 +1,50 @@
+{{define "title"}}{{if .IsNew}}New entry{{else}}Edit entry{{end}} · farfield{{end}}
+{{define "content"}}
+  {{template "topbar" .}}
+  <h2 style="font-size:1rem">{{if .IsNew}}New entry{{else}}Edit entry{{end}}</h2>
+  {{with .Error}}<p class="error">{{.}}</p>{{end}}
+
+  <form method="post" action="{{.Action}}">
+    <div class="field">
+      <label for="collection">Collection</label>
+      <select id="collection" name="collection" required>
+        {{range .Collections}}
+          <option value="{{.Slug}}"
+            {{if eq .Slug $.Entry.Collection}}selected{{end}}>{{.Name}}</option>
+        {{end}}
+      </select>
+    </div>
+    <div class="field">
+      <label for="title">Title</label>
+      <input type="text" id="title" name="title" value="{{.Entry.Title}}" required>
+    </div>
+    <div class="field">
+      <label for="slug">Slug</label>
+      <input type="text" id="slug" name="slug" value="{{.Entry.Slug}}">
+      <p class="hint">URL key. Leave blank to derive it from the title.</p>
+    </div>
+    <div class="field">
+      <label for="excerpt">Excerpt</label>
+      <input type="text" id="excerpt" name="excerpt" value="{{.Entry.Excerpt}}">
+    </div>
+    <div class="field">
+      <label for="tags">Tags</label>
+      <input type="text" id="tags" name="tags" value="{{.TagsText}}">
+      <p class="hint">Comma-separated.</p>
+    </div>
+    <div class="field">
+      <label for="body">Body (markdown)</label>
+      <textarea id="body" name="body">{{.Entry.Body}}</textarea>
+      <p class="hint">Reference images as blob://&lt;cid&gt; — resolved against the blobs service.</p>
+    </div>
+    <div class="field check">
+      <input type="checkbox" id="published" name="published" value="1"
+        {{if .Entry.Published}}checked{{end}}>
+      <label for="published" style="margin:0">Published</label>
+    </div>
+    <div class="actions">
+      <button type="submit">{{if .IsNew}}Create entry{{else}}Save changes{{end}}</button>
+      <a href="/entries">Cancel</a>
+    </div>
+  </form>
+{{end}}

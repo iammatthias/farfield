@@ -1,44 +1,68 @@
-// Command apex serves the Farfield apex site — farfield.systems, the public
-// face of the project.
-//
-// The site's assets are embedded into the binary, so it is self-contained:
-// no volume, no external files. It will grow over time; for now it is a
-// single page.
+// Command apex serves the farfield apex site — farfield.systems, the public
+// face of the project. Its assets are embedded into the binary, so the
+// service is self-contained: no database, no volume, no external files. For
+// now the site is a single scalable SVG.
 package main
 
 import (
+	"context"
 	"embed"
 	"io/fs"
-	"log"
+	"log/slog"
+	"net"
 	"net/http"
 	"os"
+	"os/signal"
+	"syscall"
+	"time"
+
+	"github.com/iammatthias/farfield/lib/store"
 )
 
 //go:embed web
 var webFS embed.FS
 
 func main() {
-	addr := envOr("FARFIELD_APEX_ADDR", "127.0.0.1:8790")
-	h, err := handler()
-	if err != nil {
-		log.Fatalf("loading embedded site: %v", err)
-	}
-	log.Printf("farfield-apex listening on http://%s", addr)
-	log.Fatal(http.ListenAndServe(addr, h))
-}
+	_ = store.LoadEnv() // finds the root .env, wherever the app is run from
+	slog.SetDefault(slog.New(slog.NewTextHandler(os.Stderr, nil)))
 
-// handler serves the embedded web/ directory; "/" resolves to index.html.
-func handler() (http.Handler, error) {
+	host := store.Env("HOST", "127.0.0.1")
+	port := store.Env("APEX_PORT", "8790")
+
 	site, err := fs.Sub(webFS, "web")
 	if err != nil {
-		return nil, err
+		slog.Error("loading embedded site", "err", err)
+		os.Exit(1)
 	}
-	return http.FileServer(http.FS(site)), nil
+
+	srv := &http.Server{
+		Addr:    net.JoinHostPort(host, port),
+		Handler: logRequests(http.FileServerFS(site)),
+	}
+
+	go func() {
+		slog.Info("listening", "addr", srv.Addr)
+		if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+			slog.Error("server failed", "err", err)
+			os.Exit(1)
+		}
+	}()
+
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
+	<-ctx.Done()
+
+	slog.Info("shutting down")
+	shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	_ = srv.Shutdown(shutdownCtx)
 }
 
-func envOr(key, def string) string {
-	if v := os.Getenv(key); v != "" {
-		return v
-	}
-	return def
+func logRequests(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		start := time.Now()
+		next.ServeHTTP(w, r)
+		slog.Info("request",
+			"method", r.Method, "path", r.URL.Path, "dur", time.Since(start))
+	})
 }

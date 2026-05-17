@@ -1,0 +1,13 @@
+{{define "title"}}Upload · farfield{{end}}
+{{define "content"}}
+  <section class="prose">
+    <p><a href="/">← Blobs</a></p>
+    <h1>Upload a blob</h1>
+    {{with .Error}}<p class="error">{{.}}</p>{{end}}
+    <form method="post" action="/upload" enctype="multipart/form-data">
+      <label for="file">File</label>
+      <input type="file" id="file" name="file" required>
+      <p><button type="submit">Upload</button></p>
+    </form>
+  </section>
+{{end}}

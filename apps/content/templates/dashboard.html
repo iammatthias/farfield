@@ -1,0 +1,39 @@
+{{define "title"}}Content · farfield{{end}}
+{{define "content"}}
+  {{template "topbar" .}}
+
+  <div class="section-head">
+    <h2>Collections</h2>
+    <a href="/collections/new">New collection</a>
+  </div>
+  {{if .Collections}}
+    <div class="cards">
+      {{range .Collections}}
+        <div class="card">
+          <h3>{{.Name}}</h3>
+          <p class="muted"><code>{{.Slug}}</code> ·
+            {{.EntryCount}} entr{{if eq .EntryCount 1}}y{{else}}ies{{end}}</p>
+          {{if .Description}}<p>{{.Description}}</p>{{end}}
+          <p><a href="/entries?collection={{.Slug}}">Entries</a> ·
+             <a href="/collections/{{.Slug}}/edit">Edit</a></p>
+        </div>
+      {{end}}
+    </div>
+  {{else}}
+    <p class="muted">No collections yet.
+      <a href="/collections/new">Create one</a> to start adding entries.</p>
+  {{end}}
+
+  <div class="section-head">
+    <h2>Recent entries</h2>
+    <a href="/entries/new">New entry</a>
+  </div>
+  {{if .Entries}}
+    {{template "entry_table" .}}
+    {{if gt .TotalCount 12}}
+      <p style="margin-top:1rem"><a href="/entries">All {{.TotalCount}} entries →</a></p>
+    {{end}}
+  {{else}}
+    <p class="muted">No entries yet.</p>
+  {{end}}
+{{end}}

@@ -1,30 +1,60 @@
-// Command feed is the Farfield feed service (feed.farfield.systems).
+// Command feed is the farfield feed service — a single stream of ephemeral,
+// short-form posts ("thoughts"). It is content's stripped-down sibling: no
+// collections, no titles — just dated markdown notes with an optional link
+// and tags. It serves an HTML admin UI and a public JSON read API.
 //
-// Identical in behaviour to the content service — the shared records engine —
-// serving the feed collection from its own SQLite database. RSS and rendering
-// are the website's job, not the backend's.
+// Usage:
+//
+//	feed                          serve the HTTP service (default)
+//	feed import-vault <dir>        import a directory of feed .md files
 package main
 
 import (
-	"log"
+	"fmt"
+	"log/slog"
 	"os"
 
-	"github.com/iammatthias/farfield/lib/records"
+	"github.com/iammatthias/farfield/lib/store"
 )
 
 func main() {
-	log.Fatal(records.Serve(records.Config{
-		Addr:        envOr("FARFIELD_FEED_ADDR", "127.0.0.1:8788"),
-		DBPath:      envOr("FARFIELD_FEED_DB", "farfield-feed.db"),
-		SchemaDir:   envOr("FARFIELD_FEED_SCHEMAS", "schemas/feed"),
-		Tokens:      records.TokensFromEnv(),
-		ServiceName: "feed",
-	}))
+	_ = store.LoadEnv() // finds the root .env, wherever the app is run from
+	slog.SetDefault(slog.New(slog.NewTextHandler(os.Stderr, nil)))
+
+	cmd := "serve"
+	if len(os.Args) > 1 {
+		cmd = os.Args[1]
+	}
+
+	switch cmd {
+	case "serve":
+		host := store.Env("HOST", "127.0.0.1")
+		port := store.Env("FEED_PORT", "8788")
+		if err := run(host, port); err != nil {
+			slog.Error("fatal", "err", err)
+			os.Exit(1)
+		}
+	case "import-vault":
+		if len(os.Args) < 3 {
+			fmt.Fprintln(os.Stderr, "usage: feed import-vault <dir>")
+			os.Exit(2)
+		}
+		if err := runImportVault(os.Args[2]); err != nil {
+			slog.Error("import-vault failed", "err", err)
+			os.Exit(1)
+		}
+	default:
+		fmt.Fprintln(os.Stderr, "usage: feed [serve | import-vault <dir>]")
+		os.Exit(2)
+	}
 }
 
-func envOr(key, def string) string {
-	if v := os.Getenv(key); v != "" {
-		return v
+// runImportVault opens the database and imports a directory of feed files.
+func runImportVault(dir string) error {
+	db, err := openDB(store.Env("FEED_DB_PATH", "feed.sqlite"))
+	if err != nil {
+		return err
 	}
-	return def
+	defer db.Close()
+	return importVault(db, dir)
 }

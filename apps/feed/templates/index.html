@@ -1,0 +1,24 @@
+{{define "title"}}Feed · farfield{{end}}
+{{define "content"}}
+  {{template "topbar" .}}
+  {{if .Posts}}
+    {{range .Posts}}
+      <article class="post">
+        <div class="post-meta">
+          <span class="when">{{slice .CreatedAt 0 10}}</span>
+          {{range .Tags}}<span class="tag">#{{.}}</span>{{end}}
+        </div>
+        <div class="post-body">{{.Body}}</div>
+        <div class="post-actions">
+          <a href="/posts/{{.ID}}/edit">Edit</a>
+          <form method="post" action="/posts/{{.ID}}/delete"
+                onsubmit="return confirm('Delete this post?')">
+            <button class="danger" type="submit">Delete</button>
+          </form>
+        </div>
+      </article>
+    {{end}}
+  {{else}}
+    <p class="muted">No posts yet. <a href="/new">Write one.</a></p>
+  {{end}}
+{{end}}

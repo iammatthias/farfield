@@ -1,0 +1,29 @@
+# Local-dev compose for the blobs app. Run from the repo root so Compose
+# interpolates ${...} from the root .env:
+#   docker compose -f apps/blobs/docker-compose.yml up --build
+services:
+  blobs:
+    build:
+      context: ../..
+      dockerfile: apps/blobs/Dockerfile
+    ports:
+      - "${BLOBS_PORT:-8789}:8789"
+    environment:
+      - HOST=0.0.0.0
+      - BLOBS_PORT=8789
+      - BLOBS_DB_PATH=/data/blobs.sqlite
+      - BLOBS_BACKEND=${BLOBS_BACKEND:-local}
+      - BLOBS_DIR=/data/blobs
+      - PASSWORD=${PASSWORD:-changeme}
+      - BLOBS_API_KEY=${BLOBS_API_KEY:-}
+      - R2_ACCOUNT_ID=${R2_ACCOUNT_ID:-}
+      - R2_BUCKET=${R2_BUCKET:-}
+      - R2_ACCESS_KEY_ID=${R2_ACCESS_KEY_ID:-}
+      - R2_SECRET_ACCESS_KEY=${R2_SECRET_ACCESS_KEY:-}
+      - COOKIE_SECURE=false
+    volumes:
+      - blobs-data:/data
+    restart: unless-stopped
+
+volumes:
+  blobs-data:

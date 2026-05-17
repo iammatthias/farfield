@@ -1,30 +1,63 @@
-// Command content is the Farfield content service (content.farfield.systems).
+// Command content is the farfield content service — durable, long-form
+// content organised into user-managed collections. It exposes an HTML admin
+// UI for writing, editing, publishing, and moderating entries, and a public
+// JSON read API for consumers. Ephemeral short-form posts live in a separate
+// app (feed); content is for collections that are meant to last.
 //
-// A thin binary over the shared records engine: it serves the posts,
-// open-source, recipes, art, melange, media, and series collections from its
-// own SQLite database. Configured by environment for local dev.
+// Usage:
+//
+//	content                       serve the HTTP service (default)
+//	content import-vault <dir>     import an Obsidian content vault — each
+//	                               subfolder is a collection, each .md file
+//	                               an entry with YAML frontmatter
 package main
 
 import (
-	"log"
+	"fmt"
+	"log/slog"
 	"os"
 
-	"github.com/iammatthias/farfield/lib/records"
+	"github.com/iammatthias/farfield/lib/store"
 )
 
 func main() {
-	log.Fatal(records.Serve(records.Config{
-		Addr:        envOr("FARFIELD_CONTENT_ADDR", "127.0.0.1:8787"),
-		DBPath:      envOr("FARFIELD_CONTENT_DB", "farfield-content.db"),
-		SchemaDir:   envOr("FARFIELD_CONTENT_SCHEMAS", "schemas/content"),
-		Tokens:      records.TokensFromEnv(),
-		ServiceName: "content",
-	}))
+	_ = store.LoadEnv() // finds the root .env, wherever the app is run from
+	slog.SetDefault(slog.New(slog.NewTextHandler(os.Stderr, nil)))
+
+	cmd := "serve"
+	if len(os.Args) > 1 {
+		cmd = os.Args[1]
+	}
+
+	switch cmd {
+	case "serve":
+		host := store.Env("HOST", "127.0.0.1")
+		port := store.Env("CONTENT_PORT", "8787")
+		if err := run(host, port); err != nil {
+			slog.Error("fatal", "err", err)
+			os.Exit(1)
+		}
+	case "import-vault":
+		if len(os.Args) < 3 {
+			fmt.Fprintln(os.Stderr, "usage: content import-vault <dir>")
+			os.Exit(2)
+		}
+		if err := runImportVault(os.Args[2]); err != nil {
+			slog.Error("import-vault failed", "err", err)
+			os.Exit(1)
+		}
+	default:
+		fmt.Fprintln(os.Stderr, "usage: content [serve | import-vault <dir>]")
+		os.Exit(2)
+	}
 }
 
-func envOr(key, def string) string {
-	if v := os.Getenv(key); v != "" {
-		return v
+// runImportVault opens the database and imports an Obsidian content vault.
+func runImportVault(dir string) error {
+	db, err := openDB(store.Env("CONTENT_DB_PATH", "content.sqlite"))
+	if err != nil {
+		return err
 	}
-	return def
+	defer db.Close()
+	return importVault(db, dir)
 }

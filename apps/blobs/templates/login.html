@@ -1,0 +1,12 @@
+{{define "title"}}Log in · farfield{{end}}
+{{define "content"}}
+  <section class="prose">
+    <h1>farfield · blobs</h1>
+    {{with .Error}}<p class="error">{{.}}</p>{{end}}
+    <form method="post" action="/login">
+      <label for="password">Password</label>
+      <input type="password" id="password" name="password" required autofocus>
+      <p><button type="submit">Log in</button></p>
+    </form>
+  </section>
+{{end}}

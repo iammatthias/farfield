@@ -1,0 +1,34 @@
+name: Docker
+
+on:
+  push:
+    branches: [master]
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    strategy:
+      fail-fast: false
+      matrix:
+        # Add each app here as it is created — this is the one wiring step CI
+        # needs per app (see .claude/skills/farfield-stack/SKILL.md).
+        app: [blobs, content, feed, apex, backup]
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: apps/${{ matrix.app }}/Dockerfile
+          push: true
+          tags: ghcr.io/iammatthias/farfield/${{ matrix.app }}:latest

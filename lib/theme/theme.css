@@ -1,0 +1,126 @@
+/* farfield shared theme — a small, dependency-free dark stylesheet. */
+
+:root {
+	--bg: #121113;
+	--surface: #1c1b1e;
+	--border: #2c2a2f;
+	--text: #ededed;
+	--muted: #8f8b94;
+	--accent: #7c9cf5;
+	--error: #f57c7c;
+	--radius: 8px;
+	--font: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto,
+		"Helvetica Neue", Arial, sans-serif;
+	--mono: ui-monospace, "SF Mono", SFMono-Regular, Menlo, Consolas, monospace;
+}
+
+* {
+	box-sizing: border-box;
+}
+
+html {
+	-webkit-text-size-adjust: 100%;
+}
+
+body {
+	margin: 0;
+	background: var(--bg);
+	color: var(--text);
+	font-family: var(--font);
+	font-size: 16px;
+	line-height: 1.6;
+}
+
+.container {
+	max-width: 44rem;
+	margin: 0 auto;
+	padding: 2.5rem 1.25rem;
+}
+
+h1, h2, h3 {
+	line-height: 1.25;
+	font-weight: 600;
+}
+
+a {
+	color: var(--accent);
+	text-decoration: none;
+}
+
+a:hover {
+	text-decoration: underline;
+}
+
+p {
+	margin: 0.75rem 0;
+}
+
+.muted {
+	color: var(--muted);
+}
+
+article {
+	border: 1px solid var(--border);
+	background: var(--surface);
+	border-radius: var(--radius);
+	padding: 1rem 1.25rem;
+	margin: 0.75rem 0;
+}
+
+input, textarea, button {
+	font: inherit;
+	color: var(--text);
+	background: var(--surface);
+	border: 1px solid var(--border);
+	border-radius: var(--radius);
+	padding: 0.5rem 0.75rem;
+}
+
+input, textarea {
+	width: 100%;
+}
+
+textarea {
+	min-height: 8rem;
+	resize: vertical;
+}
+
+button {
+	cursor: pointer;
+	background: var(--accent);
+	color: var(--bg);
+	border-color: transparent;
+	font-weight: 600;
+}
+
+button:hover {
+	opacity: 0.9;
+}
+
+label {
+	display: block;
+	margin: 1rem 0 0.25rem;
+	color: var(--muted);
+	font-size: 0.9rem;
+}
+
+.error {
+	color: var(--error);
+	border: 1px solid var(--error);
+	border-radius: var(--radius);
+	padding: 0.5rem 0.75rem;
+	background: rgba(245, 124, 124, 0.08);
+}
+
+code, pre {
+	font-family: var(--mono);
+	font-size: 0.9em;
+}
+
+pre {
+	background: var(--surface);
+	border: 1px solid var(--border);
+	border-radius: var(--radius);
+	padding: 1rem;
+	overflow-x: auto;
+}

@@ -1,8 +1,11 @@
 .git
-*.db
-*.db-wal
-*.db-shm
-farfield-blobs-data/
-deploy/.env
-docs/
+.github
+.claude
 README.md
+.env
+**/.env
+*.sqlite
+*.sqlite-shm
+*.sqlite-wal
+data/
+.DS_Store

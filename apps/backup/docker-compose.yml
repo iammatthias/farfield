@@ -1,0 +1,25 @@
+# Local-dev compose for the backup app. It needs read access to every other
+# app's SQLite database, so it bind-mounts the shared repo data directory.
+# Run from the repo root:
+#   docker compose -f apps/backup/docker-compose.yml up --build
+services:
+  backup:
+    build:
+      context: ../..
+      dockerfile: apps/backup/Dockerfile
+    ports:
+      - "${BACKUP_PORT:-8791}:8791"
+    environment:
+      - HOST=0.0.0.0
+      - BACKUP_PORT=8791
+      - BACKUP_DB_PATH=/data/backup.sqlite
+      - PASSWORD=${PASSWORD:-changeme}
+      - CONTENT_DB_PATH=/data/content.sqlite
+      - FEED_DB_PATH=/data/feed.sqlite
+      - BLOBS_DB_PATH=/data/blobs.sqlite
+      - BLOBS_URL=${BLOBS_URL:-http://host.docker.internal:8789}
+      - BLOBS_API_KEY=${BLOBS_API_KEY:-}
+      - COOKIE_SECURE=false
+    volumes:
+      - ../../data:/data
+    restart: unless-stopped

@@ -1,0 +1,24 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.25"
+
+      # `go list -m` enumerates every module in the go.work workspace, so this
+      # builds and tests apps and libs alike with no per-app list to maintain.
+      - name: Build, vet, test
+        run: |
+          for dir in $(go list -m -f '{{.Dir}}'); do
+            echo "==> $dir"
+            (cd "$dir" && go build ./... && go vet ./... && go test ./...)
+          done

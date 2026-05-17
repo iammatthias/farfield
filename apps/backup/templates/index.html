@@ -1,0 +1,44 @@
+{{define "title"}}Backups · farfield{{end}}
+{{define "content"}}
+  {{template "topbar" .}}
+  {{with .Notice}}<p class="muted">{{.}}</p>{{end}}
+
+  <div class="section-head">
+    <h2>Snapshots</h2>
+    <form method="post" action="/snapshot">
+      <button type="submit">Snapshot now</button>
+    </form>
+  </div>
+  <p class="muted">
+    Covers: {{range $i, $t := .Targets}}{{if $i}}, {{end}}{{$t.Name}}{{end}}.
+    Snapshots are stored in R2 via the blobs service.
+  </p>
+
+  {{if .Backups}}
+    <div class="table-wrap">
+      <table class="rows">
+        <thead>
+          <tr><th>App</th><th>CID</th><th>Size</th><th>Taken</th><th></th></tr>
+        </thead>
+        <tbody>
+          {{range .Backups}}
+            <tr>
+              <td>{{.App}}</td>
+              <td class="cid">{{slice .CID 0 20}}…</td>
+              <td>{{humanSize .Size}}</td>
+              <td class="muted">{{slice .CreatedAt 0 16}}</td>
+              <td>
+                <form method="post" action="/backups/{{.ID}}/delete"
+                      onsubmit="return confirm('Delete this snapshot?')">
+                  <button class="danger" type="submit">Delete</button>
+                </form>
+              </td>
+            </tr>
+          {{end}}
+        </tbody>
+      </table>
+    </div>
+  {{else}}
+    <p class="muted">No snapshots yet. Hit “Snapshot now” to take the first.</p>
+  {{end}}
+{{end}}

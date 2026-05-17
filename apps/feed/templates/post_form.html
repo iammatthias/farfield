@@ -1,0 +1,22 @@
+{{define "title"}}{{if .IsNew}}New post{{else}}Edit post{{end}} · farfield{{end}}
+{{define "content"}}
+  {{template "topbar" .}}
+  <h2 style="font-size:1rem">{{if .IsNew}}New post{{else}}Edit post{{end}}</h2>
+  {{with .Error}}<p class="error">{{.}}</p>{{end}}
+
+  <form method="post" action="{{.Action}}">
+    <div class="field">
+      <label for="body">Body (markdown)</label>
+      <textarea id="body" name="body" required autofocus>{{.Post.Body}}</textarea>
+    </div>
+    <div class="field">
+      <label for="tags">Tags</label>
+      <input type="text" id="tags" name="tags" value="{{.TagsText}}">
+      <p class="hint">Comma-separated.</p>
+    </div>
+    <div class="actions">
+      <button type="submit">{{if .IsNew}}Post{{else}}Save changes{{end}}</button>
+      <a href="/">Cancel</a>
+    </div>
+  </form>
+{{end}}
