@@ -1,10 +1,17 @@
-# Production compose for farfield apps. Interpolates ${...} from the root .env.
-# Add a service block per app as it is created — see
-# .claude/skills/farfield-stack/SKILL.md, "Wiring up a new app".
+# Production compose for farfield apps. Built from source on the host —
+# `gnar-deploy farfield` runs `docker compose up -d --build` here.
+#
+# Every app shares a bind-mounted ./data directory (gitignored, host-side, so
+# it survives rebuilds). Each app owns its own <app>.sqlite within it; the
+# backup app reads them all. Secrets like ${PASSWORD} come from a .env beside
+# this file.
 
 services:
   blobs:
-    image: ghcr.io/iammatthias/farfield/blobs:latest
+    build:
+      context: .
+      dockerfile: apps/blobs/Dockerfile
+    image: farfield-blobs
     restart: unless-stopped
     ports:
       - "${BLOBS_PORT:-8789}:8789"
@@ -22,10 +29,13 @@ services:
       - R2_SECRET_ACCESS_KEY=${R2_SECRET_ACCESS_KEY:-}
       - COOKIE_SECURE=true
     volumes:
-      - blobs-data:/data
+      - ./data:/data
 
   content:
-    image: ghcr.io/iammatthias/farfield/content:latest
+    build:
+      context: .
+      dockerfile: apps/content/Dockerfile
+    image: farfield-content
     restart: unless-stopped
     ports:
       - "${CONTENT_PORT:-8787}:8787"
@@ -37,10 +47,13 @@ services:
       - CONTENT_API_KEY=${CONTENT_API_KEY:-}
       - COOKIE_SECURE=true
     volumes:
-      - content-data:/data
+      - ./data:/data
 
   feed:
-    image: ghcr.io/iammatthias/farfield/feed:latest
+    build:
+      context: .
+      dockerfile: apps/feed/Dockerfile
+    image: farfield-feed
     restart: unless-stopped
     ports:
       - "${FEED_PORT:-8788}:8788"
@@ -52,10 +65,13 @@ services:
       - FEED_API_KEY=${FEED_API_KEY:-}
       - COOKIE_SECURE=true
     volumes:
-      - feed-data:/data
+      - ./data:/data
 
   apex:
-    image: ghcr.io/iammatthias/farfield/apex:latest
+    build:
+      context: .
+      dockerfile: apps/apex/Dockerfile
+    image: farfield-apex
     restart: unless-stopped
     ports:
       - "${APEX_PORT:-8790}:8790"
@@ -63,9 +79,11 @@ services:
       - HOST=0.0.0.0
       - APEX_PORT=8790
 
-  # backup mounts every other app's data volume so it can snapshot their DBs.
   backup:
-    image: ghcr.io/iammatthias/farfield/backup:latest
+    build:
+      context: .
+      dockerfile: apps/backup/Dockerfile
+    image: farfield-backup
     restart: unless-stopped
     ports:
       - "${BACKUP_PORT:-8791}:8791"
@@ -73,21 +91,12 @@ services:
       - HOST=0.0.0.0
       - BACKUP_PORT=8791
       - BACKUP_DB_PATH=/data/backup.sqlite
+      - CONTENT_DB_PATH=/data/content.sqlite
+      - FEED_DB_PATH=/data/feed.sqlite
+      - BLOBS_DB_PATH=/data/blobs.sqlite
       - PASSWORD=${PASSWORD:-changeme}
-      - CONTENT_DB_PATH=/content/content.sqlite
-      - FEED_DB_PATH=/feed/feed.sqlite
-      - BLOBS_DB_PATH=/blobs/blobs.sqlite
       - BLOBS_URL=http://blobs:8789
       - BLOBS_API_KEY=${BLOBS_API_KEY:-}
       - COOKIE_SECURE=true
     volumes:
-      - backup-data:/data
-      - content-data:/content
-      - feed-data:/feed
-      - blobs-data:/blobs
-
-volumes:
-  blobs-data:
-  content-data:
-  feed-data:
-  backup-data:
+      - ./data:/data
