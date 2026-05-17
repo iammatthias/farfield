@@ -43,7 +43,7 @@ The `backup` service is internal (tailnet-only) and has no public API.
 | `POST /api/series`                   | create a series fragment — `X-API-Key`   |
 
 Collections are managed in the admin UI. `POST /api/series` always assigns a
-fresh rkey (slugified from the title) and returns the created fragment — it is
+fresh slug (slugified from the title) and returns the created fragment — it is
 how the feed editor builds galleries that live in content.
 
 ## feed — `https://feed.farfield.systems`
@@ -179,9 +179,9 @@ async function replaceAsync(
 }
 
 export async function resolveBody(markdown: string): Promise<string> {
-  // 1. splice series fragments in (the whole ![](series://rkey) → the fragment)
+  // 1. splice series fragments in (the whole ![](series://slug) → the fragment)
   const spliced = await replaceAsync(
-    markdown, /!\[[^\]]*\]\(series:\/\/([a-z0-9]+)\)/g,
+    markdown, /!\[[^\]]*\]\(series:\/\/([a-z0-9-]+)\)/g,
     async (_m, slug) => (await getSeries(slug))?.body ?? "",
   );
   // 2. rewrite blob:// image URLs (in the entry and the spliced-in fragments)
