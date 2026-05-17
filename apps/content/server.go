@@ -21,6 +21,7 @@ import (
 	"time"
 
 	"github.com/iammatthias/farfield/lib/auth"
+	"github.com/iammatthias/farfield/lib/cid"
 	"github.com/iammatthias/farfield/lib/store"
 	"github.com/iammatthias/farfield/lib/theme"
 )
@@ -39,6 +40,7 @@ type Server struct {
 	blobsKey      string // blobs API key — kept server-side
 	blobsPublic   string // browser-facing blobs URL — injected into the editor
 	contentPublic string // browser-facing content URL — injected into the editor
+	assetVer      string // content hash of the static assets — cache-busts URLs
 }
 
 // run wires up the service and serves until interrupted.
@@ -64,6 +66,7 @@ func run(host, port string) error {
 		blobsKey:      store.Env("BLOBS_API_KEY", ""),
 		blobsPublic:   store.Env("BLOBS_PUBLIC_URL", "http://127.0.0.1:8789"),
 		contentPublic: store.Env("CONTENT_PUBLIC_URL", "http://127.0.0.1:8787"),
+		assetVer:      cid.Of([]byte(theme.CSS + theme.EditorJS))[:16],
 	}
 
 	srv := &http.Server{Addr: net.JoinHostPort(host, port), Handler: s.routes()}
@@ -545,6 +548,11 @@ func (s *Server) render(w http.ResponseWriter, page string, data any) {
 		slog.Error("unknown template", "page", page)
 		http.Error(w, "internal error", http.StatusInternalServerError)
 		return
+	}
+	// Stamp the static-asset version into every page so cache-busted URLs
+	// (styles.css, editor.js) update the moment a new build ships.
+	if m, ok := data.(map[string]any); ok {
+		m["AssetVer"] = s.assetVer
 	}
 	var buf bytes.Buffer
 	if err := t.ExecuteTemplate(&buf, "base", data); err != nil {
