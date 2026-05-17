@@ -24,7 +24,7 @@
           {{range .Backups}}
             <tr>
               <td>{{.App}}</td>
-              <td class="cid">{{slice .CID 0 20}}…</td>
+              <td class="mono">{{slice .CID 0 20}}…</td>
               <td>{{humanSize .Size}}</td>
               <td class="muted">{{slice .CreatedAt 0 16}}</td>
               <td>

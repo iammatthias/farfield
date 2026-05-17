@@ -1,12 +1,12 @@
 {{define "title"}}Blobs · farfield{{end}}
 {{define "content"}}
-  <header id="grid">
+  <header id="grid" class="bar">
     <h1>farfield · blobs</h1>
-    <div class="toolbar">
+    <nav>
       <span class="muted">{{.Total}} blob{{if ne .Total 1}}s{{end}}</span>
       <a href="/upload">Upload</a>
       <a href="/logout">Log out</a>
-    </div>
+    </nav>
   </header>
 
   {{if .Blobs}}
@@ -27,7 +27,7 @@
                        {{if .DominantColor}}style="background:{{.DominantColor}}"{{end}}>
                 </a>
               </td>
-              <td><a class="row cid" href="#m-{{.CID}}">{{slice .CID 0 24}}…</a></td>
+              <td><a class="row mono" href="#m-{{.CID}}">{{slice .CID 0 24}}…</a></td>
               <td>{{.Mime}}</td>
               <td>{{if .Width}}{{.Width}} × {{.Height}}{{else}}—{{end}}</td>
               <td>{{humanSize .Size}}</td>
@@ -62,7 +62,7 @@
           <div class="detail">
             <h2>{{.Mime}}</h2>
             <dl>
-              <dt>CID</dt><dd class="cid">{{.CID}}</dd>
+              <dt>CID</dt><dd class="mono">{{.CID}}</dd>
               <dt>Size</dt><dd>{{humanSize .Size}} ({{.Size}} bytes)</dd>
               <dt>Dimensions</dt><dd>{{if .Width}}{{.Width}} × {{.Height}}{{else}}—{{end}}</dd>
               <dt>Color</dt>
@@ -72,7 +72,7 @@
                   {{.DominantColor}}
                 {{else}}—{{end}}
               </dd>
-              <dt>Blurhash</dt><dd class="cid">{{if .Blurhash}}{{.Blurhash}}{{else}}—{{end}}</dd>
+              <dt>Blurhash</dt><dd class="mono">{{if .Blurhash}}{{.Blurhash}}{{else}}—{{end}}</dd>
               <dt>Added</dt><dd>{{.CreatedAt}}</dd>
             </dl>
             <p>

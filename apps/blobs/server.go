@@ -23,6 +23,7 @@ import (
 	"time"
 
 	"github.com/iammatthias/farfield/lib/auth"
+	"github.com/iammatthias/farfield/lib/cid"
 	"github.com/iammatthias/farfield/lib/store"
 	"github.com/iammatthias/farfield/lib/theme"
 )
@@ -44,6 +45,7 @@ type Server struct {
 	apiKey       string
 	cookieSecure bool
 	maxUpload    int64
+	assetVer     string // content hash of the stylesheet — cache-busts the URL
 }
 
 // openStore selects the byte-store backend from the environment.
@@ -94,6 +96,7 @@ func run(host, port string) error {
 		apiKey:       store.Env("BLOBS_API_KEY", ""),
 		cookieSecure: store.Env("COOKIE_SECURE", "false") == "true",
 		maxUpload:    defaultMaxUpload,
+		assetVer:     cid.Of([]byte(theme.CSS))[:16],
 	}
 
 	srv := &http.Server{Addr: net.JoinHostPort(host, port), Handler: s.routes()}
@@ -479,6 +482,9 @@ func (s *Server) render(w http.ResponseWriter, page string, data any) {
 		slog.Error("unknown template", "page", page)
 		http.Error(w, "internal error", http.StatusInternalServerError)
 		return
+	}
+	if m, ok := data.(map[string]any); ok {
+		m["AssetVer"] = s.assetVer
 	}
 	var buf bytes.Buffer
 	if err := t.ExecuteTemplate(&buf, "base", data); err != nil {

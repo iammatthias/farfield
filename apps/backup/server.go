@@ -208,7 +208,7 @@ func blobsKey() string { return store.Env("BLOBS_API_KEY", "") }
 
 func handleCSS(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "text/css; charset=utf-8")
-	w.Header().Set("Cache-Control", "public, max-age=3600")
+	w.Header().Set("Cache-Control", "no-cache")
 	_, _ = io.WriteString(w, theme.CSS)
 }
 
