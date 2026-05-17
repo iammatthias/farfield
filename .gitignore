@@ -1,5 +1,10 @@
 # Compiled binaries.
 /bin/
+/apps/apex/apex
+/apps/backup/backup
+/apps/blobs/blobs
+/apps/content/content
+/apps/feed/feed
 
 # Local state — never committed.
 *.sqlite
