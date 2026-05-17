@@ -41,6 +41,17 @@ type Entry struct {
 	UpdatedAt  string   `json:"updatedAt"`
 }
 
+// Series is a reusable markdown fragment — typically a gallery. An entry body
+// embeds one with series://<rkey>; the website splices the fragment's rendered
+// markdown into the parent post in its place.
+type Series struct {
+	Rkey      string `json:"rkey"`
+	Title     string `json:"title,omitempty"`
+	Body      string `json:"body"` // markdown
+	CreatedAt string `json:"createdAt"`
+	UpdatedAt string `json:"updatedAt"`
+}
+
 const schema = `
 CREATE TABLE IF NOT EXISTS collections (
 	id          INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -62,7 +73,15 @@ CREATE TABLE IF NOT EXISTS entries (
 	updated_at    TEXT NOT NULL
 );
 CREATE INDEX IF NOT EXISTS entries_by_collection ON entries (collection_id, created_at DESC);
-CREATE INDEX IF NOT EXISTS entries_by_created ON entries (created_at DESC);`
+CREATE INDEX IF NOT EXISTS entries_by_created ON entries (created_at DESC);
+
+CREATE TABLE IF NOT EXISTS series (
+	rkey       TEXT PRIMARY KEY,
+	title      TEXT NOT NULL DEFAULT '',
+	body       TEXT NOT NULL DEFAULT '',
+	created_at TEXT NOT NULL,
+	updated_at TEXT NOT NULL
+);`
 
 // openDB opens the SQLite database, applies pragmas, and migrates. Foreign
 // keys are on so deleting a collection cascades to its entries.
@@ -372,6 +391,71 @@ func collectionID(db *sql.DB, slug string) (int64, error) {
 		return 0, fmt.Errorf("unknown collection %q", slug)
 	}
 	return id, err
+}
+
+// ── series ─────────────────────────────────────────────────────────────────
+
+const seriesCols = `rkey, title, body, created_at, updated_at`
+
+func scanSeries(row interface{ Scan(...any) error }) (*Series, error) {
+	var s Series
+	if err := row.Scan(&s.Rkey, &s.Title, &s.Body, &s.CreatedAt, &s.UpdatedAt); err != nil {
+		return nil, err
+	}
+	return &s, nil
+}
+
+// listSeries returns every series fragment, newest first.
+func listSeries(db *sql.DB) ([]Series, error) {
+	rows, err := db.Query(`SELECT ` + seriesCols + ` FROM series ORDER BY created_at DESC`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []Series
+	for rows.Next() {
+		s, err := scanSeries(rows)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, *s)
+	}
+	return out, rows.Err()
+}
+
+// getSeries returns a series by rkey, or (nil, nil) if absent.
+func getSeries(db *sql.DB, rkey string) (*Series, error) {
+	s, err := scanSeries(db.QueryRow(
+		`SELECT `+seriesCols+` FROM series WHERE rkey = ?`, rkey))
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	return s, nil
+}
+
+// upsertSeries inserts or replaces a series fragment, keyed by rkey. The
+// caller sets the timestamps (now for admin edits, the original for imports).
+func upsertSeries(db *sql.DB, s *Series) error {
+	_, err := db.Exec(
+		`INSERT INTO series (rkey, title, body, created_at, updated_at)
+		 VALUES (?, ?, ?, ?, ?)
+		 ON CONFLICT(rkey) DO UPDATE SET
+		   title=excluded.title, body=excluded.body, updated_at=excluded.updated_at`,
+		s.Rkey, s.Title, s.Body, s.CreatedAt, s.UpdatedAt)
+	return err
+}
+
+// deleteSeries removes a series fragment by rkey.
+func deleteSeries(db *sql.DB, rkey string) (bool, error) {
+	res, err := db.Exec(`DELETE FROM series WHERE rkey = ?`, rkey)
+	if err != nil {
+		return false, err
+	}
+	n, _ := res.RowsAffected()
+	return n > 0, nil
 }
 
 // isUnique reports whether err is a SQLite UNIQUE-constraint violation.

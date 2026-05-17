@@ -148,7 +148,7 @@ func (s *Server) routes() http.Handler {
 	// Shared theme stylesheet.
 	mux.HandleFunc("GET /static/styles.css", handleCSS)
 
-	return logRequests(mux)
+	return cors(logRequests(mux))
 }
 
 // storeUpload derives metadata, writes the bytes to the store, and records
@@ -498,6 +498,21 @@ func writeJSON(w http.ResponseWriter, status int, v any) {
 
 func writeError(w http.ResponseWriter, status int, msg string) {
 	writeJSON(w, status, map[string]string{"error": msg})
+}
+
+// cors adds permissive CORS headers so a browser on another origin (the
+// website) can read the public API, and answers preflight requests.
+func cors(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Access-Control-Allow-Origin", "*")
+		w.Header().Set("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS")
+		w.Header().Set("Access-Control-Allow-Headers", "Content-Type, X-API-Key, Authorization")
+		if r.Method == http.MethodOptions {
+			w.WriteHeader(http.StatusNoContent)
+			return
+		}
+		next.ServeHTTP(w, r)
+	})
 }
 
 func logRequests(next http.Handler) http.Handler {

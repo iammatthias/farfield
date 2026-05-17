@@ -13,6 +13,7 @@
 package main
 
 import (
+	"database/sql"
 	"fmt"
 	"log/slog"
 	"os"
@@ -46,18 +47,38 @@ func main() {
 			slog.Error("import-vault failed", "err", err)
 			os.Exit(1)
 		}
+	case "import-series":
+		if len(os.Args) < 3 {
+			fmt.Fprintln(os.Stderr, "usage: content import-series <old-content-db>")
+			os.Exit(2)
+		}
+		if err := runImportSeries(os.Args[2]); err != nil {
+			slog.Error("import-series failed", "err", err)
+			os.Exit(1)
+		}
 	default:
-		fmt.Fprintln(os.Stderr, "usage: content [serve | import-vault <dir>]")
+		fmt.Fprintln(os.Stderr,
+			"usage: content [serve | import-vault <dir> | import-series <old-content-db>]")
 		os.Exit(2)
 	}
 }
 
-// runImportVault opens the database and imports an Obsidian content vault.
-func runImportVault(dir string) error {
+// withDB opens the content database, runs fn, and closes it.
+func withDB(fn func(*sql.DB) error) error {
 	db, err := openDB(store.Env("CONTENT_DB_PATH", "content.sqlite"))
 	if err != nil {
 		return err
 	}
 	defer db.Close()
-	return importVault(db, dir)
+	return fn(db)
+}
+
+// runImportVault imports an Obsidian content vault.
+func runImportVault(dir string) error {
+	return withDB(func(db *sql.DB) error { return importVault(db, dir) })
+}
+
+// runImportSeries imports series fragments from an old records-engine content DB.
+func runImportSeries(oldDB string) error {
+	return withDB(func(db *sql.DB) error { return importSeries(db, oldDB) })
 }

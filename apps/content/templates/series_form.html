@@ -1,0 +1,37 @@
+{{define "title"}}{{if .IsNew}}New series{{else}}Edit series{{end}} · farfield{{end}}
+{{define "content"}}
+  {{template "topbar" .}}
+  <h2 style="font-size:1rem">{{if .IsNew}}New series{{else}}Edit series{{end}}</h2>
+  {{with .Error}}<p class="error">{{.}}</p>{{end}}
+
+  <form method="post" action="{{.Action}}">
+    {{if .IsNew}}
+      <div class="field">
+        <label for="rkey">rkey</label>
+        <input type="text" id="rkey" name="rkey" value="{{.Series.Rkey}}">
+        <p class="hint">The key entries reference as series://&lt;rkey&gt;.
+          Leave blank to derive it from the title. Immutable once set.</p>
+      </div>
+    {{else}}
+      <div class="field">
+        <label>rkey</label>
+        <p><code>{{.Series.Rkey}}</code> <span class="hint">— immutable</span></p>
+      </div>
+    {{end}}
+    <div class="field">
+      <label for="title">Title</label>
+      <input type="text" id="title" name="title" value="{{.Series.Title}}">
+      <p class="hint">Optional — only for your reference in the series list.</p>
+    </div>
+    <div class="field">
+      <label for="body">Body (markdown)</label>
+      <textarea id="body" name="body">{{.Series.Body}}</textarea>
+      <p class="hint">Rendered inline wherever an entry embeds this series.
+        Images go inline as blob://&lt;cid&gt;.</p>
+    </div>
+    <div class="actions">
+      <button type="submit">{{if .IsNew}}Create series{{else}}Save changes{{end}}</button>
+      <a href="/series">Cancel</a>
+    </div>
+  </form>
+{{end}}

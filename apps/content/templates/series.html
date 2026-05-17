@@ -1,0 +1,40 @@
+{{define "title"}}Series · farfield{{end}}
+{{define "content"}}
+  {{template "topbar" .}}
+
+  <div class="section-head">
+    <h2>Series</h2>
+    <a href="/series/new">New series</a>
+  </div>
+  <p class="muted">
+    Reusable markdown fragments. Embed one in an entry body as
+    <code>![](series://&lt;rkey&gt;)</code>; the website splices it in.
+  </p>
+
+  {{if .Series}}
+    <div class="table-wrap">
+      <table class="rows">
+        <thead>
+          <tr><th>rkey</th><th>Title</th><th class="nowrap">Updated</th><th></th></tr>
+        </thead>
+        <tbody>
+          {{range .Series}}
+            <tr>
+              <td><a href="/series/{{.Rkey}}/edit"><code>{{.Rkey}}</code></a></td>
+              <td>{{if .Title}}{{.Title}}{{else}}<span class="muted">—</span>{{end}}</td>
+              <td class="nowrap muted">{{slice .UpdatedAt 0 10}}</td>
+              <td class="nowrap">
+                <form method="post" action="/series/{{.Rkey}}/delete"
+                      onsubmit="return confirm('Delete this series?')">
+                  <button class="danger" type="submit">Delete</button>
+                </form>
+              </td>
+            </tr>
+          {{end}}
+        </tbody>
+      </table>
+    </div>
+  {{else}}
+    <p class="muted">No series yet.</p>
+  {{end}}
+{{end}}

@@ -94,6 +94,12 @@ func (s *Server) routes() http.Handler {
 	mux.HandleFunc("GET /entries/{slug}/edit", s.requireSession(s.handleEditEntry))
 	mux.HandleFunc("POST /entries/{slug}", s.requireSession(s.handleUpdateEntry))
 	mux.HandleFunc("POST /entries/{slug}/delete", s.requireSession(s.handleDeleteEntry))
+	mux.HandleFunc("GET /series", s.requireSession(s.handleSeriesList))
+	mux.HandleFunc("GET /series/new", s.requireSession(s.handleNewSeries))
+	mux.HandleFunc("POST /series", s.requireSession(s.handleCreateSeries))
+	mux.HandleFunc("GET /series/{rkey}/edit", s.requireSession(s.handleEditSeries))
+	mux.HandleFunc("POST /series/{rkey}", s.requireSession(s.handleUpdateSeries))
+	mux.HandleFunc("POST /series/{rkey}/delete", s.requireSession(s.handleDeleteSeries))
 
 	// Login — public HTML.
 	mux.HandleFunc("GET /login", s.handleLoginForm)
@@ -105,6 +111,8 @@ func (s *Server) routes() http.Handler {
 	mux.HandleFunc("GET /api/collections", s.handleAPICollections)
 	mux.HandleFunc("GET /api/entries", s.handleAPIEntries)
 	mux.HandleFunc("GET /api/entries/{slug}", s.handleAPIEntry)
+	mux.HandleFunc("GET /api/series", s.handleAPISeries)
+	mux.HandleFunc("GET /api/series/{rkey}", s.handleAPISeriesOne)
 
 	// JSON write API — API-key-gated.
 	mux.HandleFunc("POST /api/entries", s.requireAPIKey(s.handleAPICreateEntry))
@@ -114,7 +122,7 @@ func (s *Server) routes() http.Handler {
 	// Shared theme stylesheet.
 	mux.HandleFunc("GET /static/styles.css", handleCSS)
 
-	return logRequests(mux)
+	return cors(logRequests(mux))
 }
 
 // ── HTML admin: dashboard ──────────────────────────────────────────────────
@@ -548,6 +556,136 @@ func firstNonEmpty(a, b string) string {
 		return a
 	}
 	return b
+}
+
+// ── series: HTML admin ─────────────────────────────────────────────────────
+
+func (s *Server) handleSeriesList(w http.ResponseWriter, r *http.Request) {
+	series, err := listSeries(s.db)
+	if err != nil {
+		s.fail(w, "list series", err)
+		return
+	}
+	s.render(w, "series.html", map[string]any{"Series": series})
+}
+
+func (s *Server) handleNewSeries(w http.ResponseWriter, r *http.Request) {
+	s.renderSeriesForm(w, &Series{}, true, "/series", "")
+}
+
+func (s *Server) handleCreateSeries(w http.ResponseWriter, r *http.Request) {
+	_ = r.ParseForm()
+	title := strings.TrimSpace(r.FormValue("title"))
+	se := &Series{
+		Rkey:  slugify(firstNonEmpty(r.FormValue("rkey"), title)),
+		Title: title,
+		Body:  r.FormValue("body"),
+	}
+	if se.Rkey == "" {
+		s.renderSeriesForm(w, se, true, "/series", "A series needs an rkey or a title.")
+		return
+	}
+	if existing, _ := getSeries(s.db, se.Rkey); existing != nil {
+		s.renderSeriesForm(w, se, true, "/series", "That rkey is already taken.")
+		return
+	}
+	now := nowRFC3339()
+	se.CreatedAt, se.UpdatedAt = now, now
+	if err := upsertSeries(s.db, se); err != nil {
+		s.fail(w, "create series", err)
+		return
+	}
+	http.Redirect(w, r, "/series", http.StatusSeeOther)
+}
+
+func (s *Server) handleEditSeries(w http.ResponseWriter, r *http.Request) {
+	se, err := getSeries(s.db, r.PathValue("rkey"))
+	if err != nil {
+		s.fail(w, "get series", err)
+		return
+	}
+	if se == nil {
+		http.NotFound(w, r)
+		return
+	}
+	s.renderSeriesForm(w, se, false, "/series/"+se.Rkey, "")
+}
+
+func (s *Server) handleUpdateSeries(w http.ResponseWriter, r *http.Request) {
+	se, err := getSeries(s.db, r.PathValue("rkey"))
+	if err != nil {
+		s.fail(w, "get series", err)
+		return
+	}
+	if se == nil {
+		http.NotFound(w, r)
+		return
+	}
+	_ = r.ParseForm()
+	se.Title = strings.TrimSpace(r.FormValue("title"))
+	se.Body = r.FormValue("body")
+	se.UpdatedAt = nowRFC3339()
+	if err := upsertSeries(s.db, se); err != nil {
+		s.fail(w, "update series", err)
+		return
+	}
+	http.Redirect(w, r, "/series", http.StatusSeeOther)
+}
+
+func (s *Server) handleDeleteSeries(w http.ResponseWriter, r *http.Request) {
+	if _, err := deleteSeries(s.db, r.PathValue("rkey")); err != nil {
+		s.fail(w, "delete series", err)
+		return
+	}
+	http.Redirect(w, r, "/series", http.StatusSeeOther)
+}
+
+func (s *Server) renderSeriesForm(w http.ResponseWriter, se *Series, isNew bool, action, errMsg string) {
+	s.render(w, "series_form.html", map[string]any{
+		"Series": se, "IsNew": isNew, "Action": action, "Error": errMsg,
+	})
+}
+
+// ── series: public JSON ────────────────────────────────────────────────────
+
+func (s *Server) handleAPISeries(w http.ResponseWriter, r *http.Request) {
+	series, err := listSeries(s.db)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "could not list series")
+		return
+	}
+	if series == nil {
+		series = []Series{}
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"series": series})
+}
+
+func (s *Server) handleAPISeriesOne(w http.ResponseWriter, r *http.Request) {
+	se, err := getSeries(s.db, r.PathValue("rkey"))
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "could not read series")
+		return
+	}
+	if se == nil {
+		writeError(w, http.StatusNotFound, "series not found")
+		return
+	}
+	writeJSON(w, http.StatusOK, se)
+}
+
+// cors adds permissive CORS headers so a browser on another origin (the
+// website) can read the public API, and answers preflight requests.
+func cors(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Access-Control-Allow-Origin", "*")
+		w.Header().Set("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS")
+		w.Header().Set("Access-Control-Allow-Headers", "Content-Type, X-API-Key, Authorization")
+		if r.Method == http.MethodOptions {
+			w.WriteHeader(http.StatusNoContent)
+			return
+		}
+		next.ServeHTTP(w, r)
+	})
 }
 
 func logRequests(next http.Handler) http.Handler {

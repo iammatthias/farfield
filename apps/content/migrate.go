@@ -2,6 +2,7 @@ package main
 
 import (
 	"database/sql"
+	"encoding/json"
 	"fmt"
 	"log/slog"
 	"os"
@@ -12,6 +13,74 @@ import (
 
 	"gopkg.in/yaml.v3"
 )
+
+// importSeries reads the series records from an old records-engine content
+// database and writes them as markdown fragments — each ref becomes a
+// blob://<cid> image line. Keyed by rkey, so re-running is idempotent.
+func importSeries(db *sql.DB, oldDBPath string) error {
+	old, err := sql.Open("sqlite", "file:"+oldDBPath+"?mode=ro")
+	if err != nil {
+		return err
+	}
+	defer old.Close()
+
+	rows, err := old.Query(`SELECT rkey, value FROM records WHERE collection = 'series'`)
+	if err != nil {
+		return fmt.Errorf("reading old series records: %w", err)
+	}
+	defer rows.Close()
+
+	var imported, failed int
+	for rows.Next() {
+		var rkey, value string
+		if err := rows.Scan(&rkey, &value); err != nil {
+			return err
+		}
+		var old struct {
+			Created     string   `json:"created"`
+			Title       string   `json:"title"`
+			Description string   `json:"description"`
+			Refs        []string `json:"refs"`
+		}
+		if err := json.Unmarshal([]byte(value), &old); err != nil {
+			slog.Error("import-series: unparseable record", "rkey", rkey, "err", err)
+			failed++
+			continue
+		}
+		var b strings.Builder
+		if old.Description != "" {
+			b.WriteString(old.Description)
+			b.WriteString("\n\n")
+		}
+		for _, ref := range old.Refs {
+			b.WriteString("![](blob://")
+			b.WriteString(ref)
+			b.WriteString(")\n\n")
+		}
+		created := normalizeTime(old.Created)
+		if created == "" {
+			created = nowRFC3339()
+		}
+		s := &Series{
+			Rkey:      rkey,
+			Title:     old.Title,
+			Body:      strings.TrimSpace(b.String()),
+			CreatedAt: created,
+			UpdatedAt: created,
+		}
+		if err := upsertSeries(db, s); err != nil {
+			slog.Error("import-series: upsert failed", "rkey", rkey, "err", err)
+			failed++
+			continue
+		}
+		imported++
+	}
+	slog.Info("import-series complete", "imported", imported, "failed", failed)
+	if failed > 0 {
+		return fmt.Errorf("%d series failed to import", failed)
+	}
+	return rows.Err()
+}
 
 // vaultFront is the YAML frontmatter of an Obsidian content file.
 type vaultFront struct {
