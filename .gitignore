@@ -22,3 +22,6 @@ PLAN.md
 
 # Local operational skill — deploy runbook, not part of the shipped repo.
 .claude/skills/farfield-deploy/
+
+# Personal Claude Code permission overrides — not team-wide.
+.claude/settings.local.json
