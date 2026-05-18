@@ -19,6 +19,10 @@ SQLite driver — no cgo, so every build is a static binary. HTTP is `net/http`,
 templates are `html/template`, assets are embedded with `embed`, logging is
 `log/slog`. No web framework, no ORM, no router library.
 
+That shape — standard library first, one deliberate dependency — is a Go
+adaptation of [andromeda](https://github.com/stevedylandev/andromeda), the
+standard-library-first Rust stack it started from.
+
 Three ideas run through every app:
 
 - **Content-addressed.** Every record carries a CID — a sha-256 hash of its
