@@ -19,3 +19,6 @@
 .DS_Store
 PLAN.md
 .gstack/
+
+# Local operational skill — deploy runbook, not part of the shipped repo.
+.claude/skills/farfield-deploy/
