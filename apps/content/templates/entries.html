@@ -7,10 +7,13 @@
     <a href="/entries/new">New entry</a>
   </div>
 
-  <p class="muted">
-    Filter: <a href="/entries">all</a>
-    {{range .Collections}} · <a href="/entries?collection={{.Slug}}">{{.Name}}</a>{{end}}
-  </p>
+  {{if .Collections}}
+    <nav class="filter-bar" aria-label="Filter by collection">
+      <span class="label">Filter</span>
+      <a href="/entries"{{if not .Filter}} class="on"{{end}}>all</a>
+      {{range .Collections}}<a href="/entries?collection={{.Slug}}"{{if eq $.Filter .Slug}} class="on"{{end}}>{{.Name}}</a>{{end}}
+    </nav>
+  {{end}}
 
   {{if .Entries}}
     {{template "entry_table" .}}
