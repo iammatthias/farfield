@@ -35,8 +35,14 @@ Apps live under `apps/`. Shared libraries live under `lib/` as their own
 modules, joined into one build by a root `go.work` workspace:
 
 - `lib/auth` — password verify, session token, cookie helpers (zero deps)
-- `lib/store` — DB open helper, env loader, short-ID, session table helpers (zero deps)
-- `lib/theme` — shared CSS, embedded (zero deps)
+- `lib/store` — env loader, short-ID, session table helpers (zero deps)
+- `lib/theme` — shared CSS + editor JS, embedded (zero deps)
+- `lib/cid` — content-addressed identifiers (zero deps)
+
+**Companion skills.** `content-addressing` covers the `cid` every record
+carries — verification, ETags, the key-vs-CID distinction. `self-migrating-sqlite`
+covers an `openDB` that migrates its own schema. `farfield-style` covers the
+shared visual system. Reach for them when scaffolding.
 
 ## Project Structure
 
@@ -78,9 +84,9 @@ farfield/
 
 ## The workspace (go.work)
 
-The root `go.work` lists every module. Workspace mode resolves cross-module
-imports against local source — so apps import `lib/*` packages directly with
-no `replace` directives and no published versions.
+The root `go.work` lists every module, joining them into one build for
+in-workspace tooling. Cross-module imports resolve to local source — never to
+a published version.
 
 Note: `./...` from the bare workspace root does **not** span modules — the
 root is not itself a module. To act on every module, iterate `go list -m`,
@@ -109,8 +115,8 @@ Commit `go.work` and `go.work.sum` — this is an app monorepo, not a library.
 
 Each module's `go.mod` declares its path. The `lib/*` modules have **no
 `require` block at all** — they are pure standard library. An app's `go.mod`
-requires the libs at a placeholder version (`v0.0.0`); the workspace resolves
-them to the local source, so the version string is never used:
+requires the libs at a placeholder version (`v0.0.0`) **and** carries a
+`replace` directive pointing each at its local path:
 
 ```
 module github.com/iammatthias/farfield/apps/app-name
@@ -119,13 +125,26 @@ go 1.25.0
 
 require (
 	github.com/iammatthias/farfield/lib/auth v0.0.0
+	github.com/iammatthias/farfield/lib/cid v0.0.0
 	github.com/iammatthias/farfield/lib/store v0.0.0
 	github.com/iammatthias/farfield/lib/theme v0.0.0
 	modernc.org/sqlite v1.50.1
 )
+
+// The lib/* modules are never published — resolve them from the local tree.
+replace (
+	github.com/iammatthias/farfield/lib/auth => ../../lib/auth
+	github.com/iammatthias/farfield/lib/cid => ../../lib/cid
+	github.com/iammatthias/farfield/lib/store => ../../lib/store
+	github.com/iammatthias/farfield/lib/theme => ../../lib/theme
+)
 ```
 
-Only the app pulls in `modernc.org/sqlite`. The libs stay dependency-free.
+The `replace` block is **not optional**. `go.work` joins the modules for
+in-workspace tooling, but a bare `v0.0.0` require still needs the `replace` to
+resolve to source — without it, builds (per-module commands, the Docker build)
+fail looking for a published `v0.0.0`. Every app `go.mod` carries both blocks.
+Only the app pulls in `modernc.org/sqlite`; the libs stay dependency-free.
 
 Do not add other modules. No web framework, no router, no ORM, no config
 library, no logging library, no UUID library — see **What NOT to include**.
@@ -182,7 +201,9 @@ func openDB(path string) (*sql.DB, error) {
 	if _, err := db.Exec(schema); err != nil {
 		return nil, err
 	}
-	// Add store.SessionSchema here too if the app uses session auth.
+	// Session auth: also run db.Exec(store.SessionSchema) here.
+	// Evolving schema: run column migrations + backfills here too —
+	// see the self-migrating-sqlite skill.
 	return db, nil
 }
 
@@ -595,7 +616,24 @@ func logRequests(next http.Handler) http.Handler {
 			"method", r.Method, "path", r.URL.Path, "dur", time.Since(start))
 	})
 }
+
+// cors lets a browser on another origin (the website) read the public API
+// and answers preflight. Wrap the mux in it for any app with a public API.
+func cors(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Access-Control-Allow-Origin", "*")
+		w.Header().Set("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS")
+		w.Header().Set("Access-Control-Allow-Headers", "Content-Type, X-API-Key, Authorization")
+		if r.Method == http.MethodOptions {
+			w.WriteHeader(http.StatusNoContent)
+			return
+		}
+		next.ServeHTTP(w, r)
+	})
+}
 ```
+
+`routes()` returns `cors(logRequests(mux))` for any app with a public API.
 
 ### Handlers
 
@@ -823,7 +861,7 @@ default and an overridable slot:
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>{{block "title" .}}Farfield{{end}}</title>
   <meta name="theme-color" content="#121113">
-  <link rel="stylesheet" href="/static/styles.css">
+  <link rel="stylesheet" href="/static/styles.css?v={{.AssetVer}}">
 </head>
 <body>
   <main class="container">
@@ -849,6 +887,36 @@ default and an overridable slot:
 
 `html/template` escapes all interpolation by default — XSS-safe. For
 pre-rendered trusted HTML, pass a `template.HTML` value (never user input).
+
+## The shared stylesheet
+
+`lib/theme` holds the workspace CSS (embedded as `theme.CSS`). Each app serves
+it from a tiny handler, not from the per-app `static/` tree:
+
+```go
+func handleCSS(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "text/css; charset=utf-8")
+	w.Header().Set("Cache-Control", "public, max-age=3600")
+	_, _ = io.WriteString(w, theme.CSS)
+}
+// mux.HandleFunc("GET /static/styles.css", handleCSS)
+```
+
+A CDN caches that response, so a deploy of new CSS is invisible for up to an
+hour. Fix it by **fingerprinting the URL** — hash the stylesheet once at
+startup and stamp it into every page:
+
+```go
+// at startup:  s.assetVer = cid.Of([]byte(theme.CSS))[:16]
+// in render(), before executing the template:
+if m, ok := data.(map[string]any); ok {
+	m["AssetVer"] = s.assetVer
+}
+```
+
+base.html then references `/static/styles.css?v={{.AssetVer}}`. New build →
+new hash → new URL → the CDN fetches fresh. `http.FileServerFS(assets)` still
+serves any genuinely app-specific files under `/static/`.
 
 ## main.go
 
@@ -980,7 +1048,8 @@ builds only when your shell is inside its directory, and `./...` skips it.
 
 ### 2. Add dependencies to the app `go.mod`
 
-Require the `lib/*` modules at `v0.0.0` and `modernc.org/sqlite`, then sync:
+Require the `lib/*` modules at `v0.0.0` with matching `replace` directives,
+plus `modernc.org/sqlite`, then sync:
 
 ```sh
 go work sync
@@ -1033,7 +1102,7 @@ When scaffolding a new app:
 
 1. `mkdir -p apps/APP_NAME && cd apps/APP_NAME && go mod init github.com/iammatthias/farfield/apps/APP_NAME`
 2. `go work use ./apps/APP_NAME` from the repo root
-3. Add `require` entries (`lib/auth`, `lib/store`, `lib/theme`, `modernc.org/sqlite`) to the app `go.mod`
+3. Add `require` entries (`lib/*`, `modernc.org/sqlite`) **and matching `replace` directives** to the app `go.mod`
 4. Write `db.go` — schema, model, CRUD (plus `store.SessionSchema` if auth)
 5. Write `auth.go` — `requireAuth` middleware (if session auth is needed)
 6. Write `server.go` — embed, `Server` struct, `run`, routes, `render`, handlers
