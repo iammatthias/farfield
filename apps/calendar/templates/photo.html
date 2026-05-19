@@ -1,20 +1,14 @@
 {{define "title"}}{{with .Photo}}{{.Title}} · {{end}}farfield calendar{{end}}
 {{define "content"}}
   <header class="bar">
-    <h1><a href="{{.HomeURL}}">farfield · calendar</a></h1>
+    <h1><a href="/">farfield · calendar</a></h1>
     <nav>
       <a href="{{.ArchiveURL}}">Archive</a>
       <a href="{{.JSONURL}}">JSON</a>
     </nav>
   </header>
 
-  <p class="label source-eyebrow">{{.SourceLabel}}</p>
-
-  {{if .IsUFO}}
-    <p class="notice">Alternate source — declassified UAP/UFO imagery published
-    by the U.S. Department of War at war.gov/UFO, mirrored and cached here.
-    <a href="/">Return to NASA APOD ↩</a></p>
-  {{end}}
+  <p class="label source-eyebrow">NASA · Astronomy Picture of the Day</p>
 
   {{with .Photo}}
     <figure class="plate">
@@ -37,25 +31,14 @@
           <div class="placeholder">Video —
             <a href="{{.ImageURL}}" target="_blank" rel="noopener">watch ↗</a></div>
         {{end}}
-      {{else if eq .MediaType "audio"}}
-        {{if .ThumbURL}}<img src="{{.ThumbURL}}" alt="{{.Title}}">{{end}}
-        <audio controls preload="metadata" src="{{.ImageURL}}">
-          <a href="{{.ImageURL}}" target="_blank" rel="noopener">Download audio ↗</a>
-        </audio>
       {{else}}
         <div class="placeholder">{{.Title}}</div>
       {{end}}
       <figcaption>
         <span>{{.Date}}</span>
-        <span class="muted">{{.MediaType}}{{if .Placeholder}} · placeholder{{end}}{{if .Repeated}} · encore{{end}}</span>
+        <span class="muted">{{.MediaType}}{{if .Placeholder}} · placeholder{{end}}</span>
       </figcaption>
     </figure>
-
-    {{if .Repeated}}
-      <p class="notice">Encore — the war.gov/UFO release has fewer items than the
-      calendar has days, so this day reuses earlier imagery rather than leaving
-      a gap.</p>
-    {{end}}
 
     <div class="cal-body">
       <h2>{{.Title}}</h2>
@@ -63,13 +46,13 @@
       <p class="cal-credit muted">
         {{with .Credit}}Credit: {{.}} · {{end}}
         {{with .ImageURL}}<a href="{{.}}" target="_blank" rel="noopener">Media file ↗</a> · {{end}}
-        <a href="{{.SourceURL}}" target="_blank" rel="noopener">{{if $.IsUFO}}war.gov/UFO page ↗{{else}}APOD page ↗{{end}}</a>
+        <a href="{{.SourceURL}}" target="_blank" rel="noopener">APOD page ↗</a>
       </p>
     </div>
   {{else}}
-    <p class="notice">No photo is available for this
-    {{if .IsUFO}}entry{{else}}day{{end}} yet. The calendar serves from its
-    SQLite cache and will pick this one up once the upstream responds.</p>
+    <p class="notice">No photo is available for this day yet. The calendar
+    serves from its SQLite cache and will pick this one up once APOD
+    responds.</p>
   {{end}}
 
   <nav class="stepper">

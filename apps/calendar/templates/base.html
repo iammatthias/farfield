@@ -13,7 +13,6 @@
     figure.plate { border: 1px solid var(--ink); background: var(--wash); }
     figure.plate img { width: 100%; display: block; }
     figure.plate video { width: 100%; display: block; background: #000; }
-    figure.plate audio { width: 100%; display: block; padding: 0.7rem; }
     figure.plate a { display: block; }
     figure.plate .placeholder {
       display: flex; align-items: center; justify-content: center;
@@ -29,7 +28,6 @@
     }
 
     .source-eyebrow { margin-bottom: 0.85rem; }
-    .source-eyebrow + .notice { margin-top: 0; margin-bottom: 1.25rem; }
 
     .cal-body { margin-top: 1.5rem; }
     .cal-body h2 { margin-bottom: 0.5rem; }
@@ -63,18 +61,18 @@
     .archive a:hover { outline: 2px solid var(--ink); outline-offset: -3px; }
     .archive .frame { position: relative; aspect-ratio: 3 / 2; background: var(--wash); }
     .archive .frame img { width: 100%; height: 100%; object-fit: cover; }
+    .archive .frame .placeholder {
+      width: 100%; height: 100%;
+      display: flex; align-items: center; justify-content: center;
+      font: 500 0.7rem/1 var(--font-mono);
+      text-transform: uppercase; letter-spacing: 0.07em; opacity: 0.4;
+    }
     .media-tag {
       position: absolute; left: 0; bottom: 0;
       padding: 0.18rem 0.4rem;
       background: var(--ink); color: var(--surface);
       font: 500 0.58rem/1 var(--font-mono);
       text-transform: uppercase; letter-spacing: 0.06em;
-    }
-    .archive .frame .placeholder {
-      width: 100%; height: 100%;
-      display: flex; align-items: center; justify-content: center;
-      font: 500 0.7rem/1 var(--font-mono);
-      text-transform: uppercase; letter-spacing: 0.07em; opacity: 0.4;
     }
     .archive .cap { padding: 0.5rem 0.65rem; border-top: 1px solid var(--ink); }
     .archive .cap .date {
@@ -99,12 +97,7 @@
       text-transform: uppercase; letter-spacing: 0.08em;
     }
     .cal-foot a { text-decoration: none; }
-    /* the easter egg — a faint reticle; it surfaces only on hover */
-    .cal-foot a.reticle {
-      opacity: 0.18; font-size: 1rem; letter-spacing: 0;
-      transition: opacity 0.12s ease-out, color 0.12s ease-out;
-    }
-    .cal-foot a.reticle:hover { opacity: 1; color: var(--accent); }
+    .cal-foot a:hover { color: var(--accent); }
   </style>
 </head>
 <body>
@@ -117,10 +110,6 @@
 {{define "foot"}}
   <footer class="cal-foot">
     <span>farfield calendar</span>
-    {{if .IsUFO}}
-      <a href="{{.SwitchURL}}">NASA · APOD ↩</a>
-    {{else}}
-      <a class="reticle" href="{{.SwitchURL}}" aria-label="alternate source">⌖</a>
-    {{end}}
+    <a href="https://apod.nasa.gov/apod/" target="_blank" rel="noopener">APOD ↗</a>
   </footer>
 {{end}}

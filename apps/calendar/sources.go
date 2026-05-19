@@ -7,75 +7,20 @@ import (
 	"time"
 )
 
-// Source identifiers. nasa is the default; ufo is the easter-egg source.
-const (
-	sourceNASA = "nasa"
-	sourceUFO  = "ufo"
-)
+// sourceNASA tags every cached photo. The calendar has a single source — NASA's
+// Astronomy Picture of the Day — but the cache still keys on (source, date).
+const sourceNASA = "nasa"
 
-// userAgent identifies the calendar service to the upstreams it polls.
+// userAgent identifies the calendar service to the APOD upstream.
 const userAgent = "farfield-calendar/1.0 (+https://farfield.systems)"
 
-// Resilience tuning — these keep the service from hammering rate-limited
-// upstreams. Cache-first reads mean upstreams are touched only on a miss; on
-// top of that a failure trips a cooldown and a negative cache.
+// Resilience tuning — these keep the service from hammering a rate-limited
+// upstream. Cache-first reads mean APOD is touched only on a miss; on top of
+// that a failure trips a cooldown and a negative cache.
 const (
-	nasaCooldown      = 10 * time.Minute // pause upstream calls after a failure
-	negativeTTL       = 2 * time.Hour    // remember a failed date for this long
-	ufoScrapeInterval = 12 * time.Hour   // minimum gap between UFO scrapes
+	nasaCooldown = 10 * time.Minute // pause upstream calls after a failure
+	negativeTTL  = 2 * time.Hour    // remember a failed date for this long
 )
-
-// SourceInfo describes a selectable photo source for the API and the UI.
-type SourceInfo struct {
-	Name        string `json:"name"`
-	Label       string `json:"label"`
-	Description string `json:"description"`
-}
-
-// sources is the source registry, in display order.
-var sources = []SourceInfo{
-	{
-		Name:        sourceNASA,
-		Label:       "NASA · Astronomy Picture of the Day",
-		Description: "A new astronomy image every day since 1995, from NASA's APOD.",
-	},
-	{
-		Name:        sourceUFO,
-		Label:       "Dept. of War · UFO Imagery",
-		Description: "Declassified UAP/UFO imagery published at war.gov/UFO.",
-	},
-}
-
-// canonicalSource normalises a requested source name to a known identifier,
-// defaulting to NASA. It accepts a few friendly aliases.
-func canonicalSource(s string) string {
-	switch s {
-	case sourceUFO, "war", "uap", "dod":
-		return sourceUFO
-	case sourceNASA, "apod", "":
-		return sourceNASA
-	default:
-		return sourceNASA
-	}
-}
-
-// sourceInfo returns the registry entry for a source name.
-func sourceInfo(name string) SourceInfo {
-	for _, s := range sources {
-		if s.Name == name {
-			return s
-		}
-	}
-	return sources[0]
-}
-
-// otherSource returns the source to switch to — the basis of the UI easter egg.
-func otherSource(name string) string {
-	if name == sourceUFO {
-		return sourceNASA
-	}
-	return sourceUFO
-}
 
 // fetcher performs upstream HTTP calls and tracks the state that keeps the
 // service resilient: a cooldown after failures and a per-date negative cache.
@@ -85,8 +30,7 @@ type fetcher struct {
 
 	mu             sync.Mutex
 	nasaCooldownAt time.Time            // upstream NASA calls paused until here
-	negative       map[string]time.Time // "source:date" -> when the fetch failed
-	lastUFOAttempt time.Time            // when the UFO page was last scraped
+	negative       map[string]time.Time // date -> when its fetch last failed
 }
 
 // newFetcher builds a fetcher with a bounded HTTP timeout.
@@ -114,82 +58,62 @@ func (f *fetcher) noteNASAError() {
 	f.mu.Unlock()
 }
 
-// markNegative records that a specific date failed, so it is not retried on
-// every request for the next negativeTTL.
-func (f *fetcher) markNegative(source, date string) {
+// markNegative records that a date failed, so it is not retried on every
+// request for the next negativeTTL.
+func (f *fetcher) markNegative(date string) {
 	f.mu.Lock()
-	f.negative[source+":"+date] = time.Now()
+	f.negative[date] = time.Now()
 	f.mu.Unlock()
 }
 
 // negativeHit reports whether a date failed recently enough to skip retrying.
-func (f *fetcher) negativeHit(source, date string) bool {
+func (f *fetcher) negativeHit(date string) bool {
 	f.mu.Lock()
 	defer f.mu.Unlock()
-	at, ok := f.negative[source+":"+date]
+	at, ok := f.negative[date]
 	return ok && time.Since(at) < negativeTTL
 }
 
 // ── orchestration: cache-first reads with resilient upstream fallback ───────
 
-// photoForDate returns the photo for one (source, date), fetching it from the
-// upstream only on a cache miss. A failed fetch returns (nil, nil) — the
-// caller renders a not-found rather than an error.
-func (s *Server) photoForDate(source, date string) (*Photo, error) {
-	p, err := getPhoto(s.db, source, date)
+// photoForDate returns the photo for a date, fetching it from APOD only on a
+// cache miss. A failed fetch returns (nil, nil) — the caller renders a
+// not-found rather than an error.
+func (s *Server) photoForDate(date string) (*Photo, error) {
+	p, err := getPhoto(s.db, sourceNASA, date)
 	if err != nil || p != nil {
 		return p, err
 	}
-	switch source {
-	case sourceNASA:
-		return s.nasaEnsureDay(date)
-	case sourceUFO:
-		if err := s.ufoEnsure(); err != nil {
-			slog.Warn("ufo ensure failed", "err", err)
-		}
-		return getPhoto(s.db, sourceUFO, date)
-	}
-	return nil, nil
+	return s.nasaEnsureDay(date)
 }
 
-// todayPhoto returns the most recent photo for a source. For NASA it walks
-// back a few days, since the current day's APOD is sometimes posted late.
-func (s *Server) todayPhoto(source string) (*Photo, string, error) {
-	switch source {
-	case sourceUFO:
-		if err := s.ufoEnsure(); err != nil {
-			slog.Warn("ufo ensure failed", "err", err)
+// todayPhoto returns the most recent photo. It walks back a few days, since
+// the current day's APOD is sometimes posted late, then falls back to the
+// newest cached day.
+func (s *Server) todayPhoto() (*Photo, string, error) {
+	now := time.Now().UTC()
+	for back := 0; back < 4; back++ {
+		date := now.AddDate(0, 0, -back).Format(dateLayout)
+		p, err := s.photoForDate(date)
+		if err != nil {
+			return nil, date, err
 		}
-		p, err := latestPhoto(s.db, sourceUFO)
-		if err != nil || p == nil {
-			return nil, todayUTC(), err
+		if p != nil {
+			return p, date, nil
 		}
-		return p, p.Date, nil
-	default:
-		now := time.Now().UTC()
-		for back := 0; back < 4; back++ {
-			date := now.AddDate(0, 0, -back).Format(dateLayout)
-			p, err := s.photoForDate(sourceNASA, date)
-			if err != nil {
-				return nil, date, err
-			}
-			if p != nil {
-				return p, date, nil
-			}
-		}
-		// Nothing fresh upstream — fall back to the newest cached day.
-		p, err := latestPhoto(s.db, sourceNASA)
-		if err != nil || p == nil {
-			return nil, todayUTC(), err
-		}
-		return p, p.Date, nil
 	}
+	// Nothing fresh upstream — fall back to the newest cached day.
+	p, err := latestPhoto(s.db, sourceNASA)
+	if err != nil || p == nil {
+		return nil, todayUTC(), err
+	}
+	return p, p.Date, nil
 }
 
-// nasaEnsureDay fetches and caches one NASA day, honouring the cooldown and
+// nasaEnsureDay fetches and caches one APOD day, honouring the cooldown and
 // negative cache. A miss or a failure yields (nil, nil).
 func (s *Server) nasaEnsureDay(date string) (*Photo, error) {
-	if !nasaDateInRange(date) || s.fetcher.negativeHit(sourceNASA, date) {
+	if !nasaDateInRange(date) || s.fetcher.negativeHit(date) {
 		return nil, nil
 	}
 	if !s.fetcher.nasaAllowed() {
@@ -198,7 +122,7 @@ func (s *Server) nasaEnsureDay(date string) (*Photo, error) {
 	p, err := s.fetcher.nasaDay(date)
 	if err != nil {
 		slog.Warn("nasa day fetch failed", "date", date, "err", err)
-		s.fetcher.markNegative(sourceNASA, date)
+		s.fetcher.markNegative(date)
 		s.fetcher.noteNASAError()
 		return nil, nil
 	}
@@ -230,69 +154,6 @@ func (s *Server) nasaEnsureRange(start, end string) error {
 	}
 	for i := range photos {
 		if err := upsertPhoto(s.db, &photos[i]); err != nil {
-			return err
-		}
-	}
-	return nil
-}
-
-// ufoEnsure makes sure the UFO source has cached entries, scraping war.gov at
-// most once per ufoScrapeInterval. A failed scrape with an empty cache seeds
-// placeholder items; a failed scrape with a warm cache leaves it untouched.
-func (s *Server) ufoEnsure() error {
-	n, err := countPhotos(s.db, sourceUFO)
-	if err != nil {
-		return err
-	}
-	s.fetcher.mu.Lock()
-	recent := !s.fetcher.lastUFOAttempt.IsZero() &&
-		time.Since(s.fetcher.lastUFOAttempt) < ufoScrapeInterval
-	s.fetcher.mu.Unlock()
-	if n >= daysBetween(calendarStart, todayUTC()) && recent {
-		return nil // cache is warm enough
-	}
-
-	s.fetcher.mu.Lock()
-	s.fetcher.lastUFOAttempt = time.Now()
-	s.fetcher.mu.Unlock()
-
-	photos, err := s.fetcher.ufoScrape()
-	if err != nil {
-		slog.Warn("ufo scrape failed", "err", err)
-		if n > 0 {
-			return nil // keep the existing cache
-		}
-		return s.storeUFO(ufoPlaceholders(), false)
-	}
-	slog.Info("ufo scrape ok", "items", len(photos))
-	return s.storeUFO(photos, true)
-}
-
-// storeUFO writes scraped UFO items, assigning each a synthetic date counting
-// back from today to calendarStart so they form a consecutive calendar. The
-// upstream release is a finite set: once it is exhausted the calendar reuses
-// earlier items to fill the remaining days rather than leaving them empty, and
-// every reused day is flagged Repeated so the UI can mark it as an encore. A
-// real scrape replaces the whole source; a placeholder seed only inserts.
-func (s *Server) storeUFO(photos []Photo, replace bool) error {
-	if len(photos) == 0 {
-		return nil
-	}
-	if replace {
-		if _, err := s.db.Exec(`DELETE FROM photos WHERE source = ?`, sourceUFO); err != nil {
-			return err
-		}
-	}
-	now := time.Now().UTC()
-	want := daysBetween(calendarStart, todayUTC())
-	for i := 0; i < want; i++ {
-		p := photos[i%len(photos)]
-		p.Source = sourceUFO
-		p.Date = now.AddDate(0, 0, -i).Format(dateLayout)
-		// The first pass through the release is unique; every day past it is
-		// a recycled item — flag it rather than pass it off as a new day.
-		p.Repeated = i >= len(photos)
-		if err := upsertPhoto(s.db, &p); err != nil {
 			return err
 		}
 	}

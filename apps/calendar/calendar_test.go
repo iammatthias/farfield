@@ -3,44 +3,7 @@ package main
 import (
 	"path/filepath"
 	"testing"
-	"time"
 )
-
-func TestCanonicalSource(t *testing.T) {
-	cases := map[string]string{
-		"":     sourceNASA,
-		"nasa": sourceNASA,
-		"apod": sourceNASA,
-		"ufo":  sourceUFO,
-		"war":  sourceUFO,
-		"uap":  sourceUFO,
-		"dod":  sourceUFO,
-		"junk": sourceNASA, // unknown names fall back to the default
-	}
-	for in, want := range cases {
-		if got := canonicalSource(in); got != want {
-			t.Errorf("canonicalSource(%q) = %q, want %q", in, got, want)
-		}
-	}
-}
-
-func TestOtherSource(t *testing.T) {
-	if otherSource(sourceNASA) != sourceUFO {
-		t.Error("nasa should toggle to ufo")
-	}
-	if otherSource(sourceUFO) != sourceNASA {
-		t.Error("ufo should toggle to nasa")
-	}
-}
-
-func TestSourceQuery(t *testing.T) {
-	if sourceQuery(sourceNASA) != "" {
-		t.Error("the default source needs no query string")
-	}
-	if sourceQuery(sourceUFO) != "?source=ufo" {
-		t.Error("the ufo source must carry ?source=ufo")
-	}
-}
 
 func TestValidDateAndRange(t *testing.T) {
 	if !validDate("2024-01-02") {
@@ -71,13 +34,29 @@ func TestDaysBetween(t *testing.T) {
 
 func TestPageCount(t *testing.T) {
 	if pageCount(0) != 1 {
-		t.Error("an empty source should still report one page")
+		t.Error("an empty archive should still report one page")
 	}
 	if pageCount(pageSize) != 1 {
 		t.Errorf("exactly one page = %d, want 1", pageCount(pageSize))
 	}
 	if pageCount(pageSize+1) != 2 {
 		t.Errorf("one item over = %d, want 2", pageCount(pageSize+1))
+	}
+}
+
+func TestMediaKind(t *testing.T) {
+	cases := map[string]string{
+		"https://apod.nasa.gov/a.jpg":     "image",
+		"https://apod.nasa.gov/a.PNG?x=1": "image",
+		"https://x/clip.mp4":              "video",
+		"https://x/clip.webm":             "video",
+		"https://youtube.com/embed/abc":   "",
+		"https://x/page.html":             "",
+	}
+	for u, want := range cases {
+		if got := mediaKind(u); got != want {
+			t.Errorf("mediaKind(%q) = %q, want %q", u, got, want)
+		}
 	}
 }
 
@@ -88,9 +67,9 @@ func TestNASAArchivePaginatesCachedPhotosOnly(t *testing.T) {
 	}
 	defer db.Close()
 
-	// Simulate a partially warmed NASA cache: the app has recent APOD records,
-	// but the full Jan 1 -> today archive has not been backfilled yet. The
-	// archive should not advertise empty pages for theoretical calendar days.
+	// Simulate a partially warmed cache: recent APOD records exist, but the
+	// full Jan 1 -> today archive has not been backfilled. The archive must
+	// not advertise empty pages for theoretical calendar days.
 	for _, d := range []string{"2026-05-06", "2026-05-07", "2026-05-08"} {
 		if err := upsertPhoto(db, &Photo{
 			Source: sourceNASA, Date: d, Title: "day " + d,
@@ -101,10 +80,9 @@ func TestNASAArchivePaginatesCachedPhotosOnly(t *testing.T) {
 	}
 
 	s := &Server{db: db, fetcher: newFetcher("DEMO_KEY")}
-	// Keep the test offline and cache-only.
-	s.fetcher.noteNASAError()
+	s.fetcher.noteNASAError() // keep the test offline and cache-only
 
-	res, err := s.archive(sourceNASA, 1)
+	res, err := s.archive(1)
 	if err != nil {
 		t.Fatalf("archive: %v", err)
 	}
@@ -114,109 +92,6 @@ func TestNASAArchivePaginatesCachedPhotosOnly(t *testing.T) {
 	}
 	if len(res.Photos) != 3 || res.Photos[0].Date != "2026-05-08" || res.Photos[2].Date != "2026-05-06" {
 		t.Fatalf("archive photos = %+v, want cached photos newest-first", res.Photos)
-	}
-}
-
-func TestMediaKind(t *testing.T) {
-	cases := map[string]string{
-		"https://war.gov/a.jpg":     "image",
-		"https://war.gov/a.PNG?x=1": "image",
-		"https://war.gov/clip.mp4":  "video",
-		"https://war.gov/clip.webm": "video",
-		"https://war.gov/brief.mp3": "audio",
-		"https://war.gov/tape.WAV":  "audio",
-		"https://war.gov/page.html": "",
-		"https://war.gov/doc.pdf":   "",
-	}
-	for u, want := range cases {
-		if got := mediaKind(u); got != want {
-			t.Errorf("mediaKind(%q) = %q, want %q", u, got, want)
-		}
-	}
-}
-
-func TestResolveURL(t *testing.T) {
-	cases := map[string]string{
-		"/UFO/a.jpg":               ufoOrigin + "/UFO/a.jpg",
-		"https://x.gov/b.jpg":      "https://x.gov/b.jpg",
-		"//cdn.gov/c.jpg":          "https://cdn.gov/c.jpg",
-		"#frag":                    "",
-		"javascript:void(0)":       "",
-		"data:image/png;base64,xx": "",
-	}
-	for in, want := range cases {
-		if got := resolveURL(in); got != want {
-			t.Errorf("resolveURL(%q) = %q, want %q", in, got, want)
-		}
-	}
-}
-
-func TestTitleFromURL(t *testing.T) {
-	if got := titleFromURL("https://war.gov/UFO/gimbal-footage.mp4"); got != "gimbal footage" {
-		t.Errorf("titleFromURL = %q, want %q", got, "gimbal footage")
-	}
-}
-
-func TestParseUFOHTML(t *testing.T) {
-	html := `<html><body>
-	  <img src="/UFO/uap-one.jpg" alt="UAP One">
-	  <img src="/UFO/uap-one.jpg" alt="dup — should dedupe">
-	  <a href="https://www.war.gov/UFO/clip.mp4">video</a>
-	  <a href="/UFO/notes.html">not media</a>
-	  <img src="data:image/png;base64,zz">
-	</body></html>`
-	photos := parseUFOHTML(html)
-	if len(photos) != 2 {
-		t.Fatalf("got %d photos, want 2 (dedupe + skip non-media)", len(photos))
-	}
-	if photos[0].Title != "UAP One" {
-		t.Errorf("first title = %q, want %q", photos[0].Title, "UAP One")
-	}
-	if photos[0].MediaType != "image" || photos[1].MediaType != "video" {
-		t.Errorf("media types = %q / %q, want image / video",
-			photos[0].MediaType, photos[1].MediaType)
-	}
-	for _, p := range photos {
-		if p.Source != sourceUFO {
-			t.Errorf("photo source = %q, want %q", p.Source, sourceUFO)
-		}
-	}
-}
-
-func TestStoreUFOFlagsEncores(t *testing.T) {
-	db, err := openDB(filepath.Join(t.TempDir(), "cal.sqlite"))
-	if err != nil {
-		t.Fatalf("openDB: %v", err)
-	}
-	defer db.Close()
-	s := &Server{db: db, fetcher: newFetcher("DEMO_KEY")}
-
-	// Two scraped items, but the calendar spans many more days — so every day
-	// past the second reuses an earlier item and must be flagged as an encore.
-	src := []Photo{
-		{Title: "alpha", ImageURL: "https://war.gov/a.jpg", MediaType: "image"},
-		{Title: "beta", ImageURL: "https://war.gov/b.jpg", MediaType: "image"},
-	}
-	if err := s.storeUFO(src, true); err != nil {
-		t.Fatalf("storeUFO: %v", err)
-	}
-
-	now := time.Now().UTC()
-	day := func(back int) string { return now.AddDate(0, 0, -back).Format(dateLayout) }
-
-	first, err := getPhoto(db, sourceUFO, day(0))
-	if err != nil || first == nil {
-		t.Fatalf("getPhoto today = %v, err %v", first, err)
-	}
-	if first.Repeated {
-		t.Error("the first unique item should not be flagged as an encore")
-	}
-	encore, err := getPhoto(db, sourceUFO, day(2))
-	if err != nil || encore == nil {
-		t.Fatalf("getPhoto today-2 = %v, err %v", encore, err)
-	}
-	if !encore.Repeated {
-		t.Error("a day past the release length should be flagged as an encore")
 	}
 }
 
@@ -266,22 +141,10 @@ func TestPhotoCID(t *testing.T) {
 	}
 	// the key, fetch time, and placeholder flag are excluded from the CID
 	c := a
-	c.Date, c.Source = "2024-01-01", sourceUFO
-	c.FetchedAt, c.Placeholder, c.Repeated = nowRFC3339(), true, true
+	c.Date, c.Source = "2024-01-01", sourceNASA
+	c.FetchedAt, c.Placeholder = nowRFC3339(), true
 	if photoCID(&a) != photoCID(&c) {
 		t.Error("non-content fields must not affect the CID")
-	}
-}
-
-func TestUFOPlaceholders(t *testing.T) {
-	items := ufoPlaceholders()
-	if len(items) == 0 {
-		t.Fatal("expected placeholder items")
-	}
-	for _, p := range items {
-		if !p.Placeholder || p.Source != sourceUFO {
-			t.Errorf("placeholder not flagged correctly: %+v", p)
-		}
 	}
 }
 

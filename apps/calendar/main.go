@@ -1,9 +1,8 @@
 // Command calendar is the farfield calendar service — a daily photo calendar.
-// Each day has one image: by default NASA's Astronomy Picture of the Day, with
-// a hidden alternate source (?source=ufo) serving declassified Dept. of War
-// UFO imagery. It exposes HTML pages for browsing and a public JSON API the
-// website can read. Photos are cached in SQLite, so upstreams are touched only
-// on a cache miss and an upstream outage never breaks the calendar.
+// Each day shows NASA's Astronomy Picture of the Day. It exposes HTML pages for
+// browsing and a public JSON API the website can read. Photos are cached in
+// SQLite, so APOD is touched only on a cache miss and an upstream outage never
+// breaks the calendar.
 //
 // Usage:
 //

@@ -28,7 +28,7 @@ import (
 //go:embed templates
 var assets embed.FS
 
-// pageSize is how many days (NASA) or items (UFO) one archive page shows.
+// pageSize is how many days one archive page shows.
 const pageSize = 14
 
 // publicMaxAge is the Cache-Control lifetime on the public read endpoints — a
@@ -69,21 +69,17 @@ func backfillCommand(start, end string) error {
 	if err := s.nasaEnsureRange(start, end); err != nil {
 		return err
 	}
-	slog.Info("backfill complete", "source", sourceNASA, "start", start, "end", end)
+	slog.Info("backfill complete", "start", start, "end", end)
 	return nil
 }
 
-// backfillOnStartup warms the NASA archive across the full calendar range and
-// scrapes the UFO source once, so a freshly deployed instance is populated
-// without waiting for the first visitor. NASA needs a real NASA_API_KEY to
-// fill; with DEMO_KEY the range call rate-limits and the cache fills lazily as
-// pages are viewed instead.
+// backfillOnStartup warms the APOD archive across the full calendar range so a
+// freshly deployed instance is populated without waiting for the first
+// visitor. NASA needs a real NASA_API_KEY to fill; with DEMO_KEY the range call
+// rate-limits and the cache fills lazily as pages are viewed instead.
 func (s *Server) backfillOnStartup() {
 	if err := s.nasaEnsureRange(calendarStart, todayUTC()); err != nil {
 		slog.Warn("startup nasa backfill failed", "err", err)
-	}
-	if err := s.ufoEnsure(); err != nil {
-		slog.Warn("startup ufo backfill failed", "err", err)
 	}
 }
 
@@ -139,9 +135,8 @@ func (s *Server) routes() http.Handler {
 	mux.HandleFunc("GET /day/{date}", s.handleDay)
 	mux.HandleFunc("GET /archive", s.handleArchive)
 
-	// Public JSON API — the photo/photos/sources reads are cacheable for a day.
+	// Public JSON API — the photo and photos reads are cacheable for a day.
 	mux.HandleFunc("GET /status", s.handleStatus)
-	mux.HandleFunc("GET /api/sources", s.handleAPISources)
 	mux.HandleFunc("GET /api/photo", s.handleAPIToday)
 	mux.HandleFunc("GET /api/photo/{date}", s.handleAPIDay)
 	mux.HandleFunc("GET /api/photos", s.handleAPIPhotos)
@@ -164,34 +159,14 @@ type archiveResult struct {
 	HasNext bool
 }
 
-// archive returns one page of photos for a source, newest first. For NASA it
-// warms a real calendar range in a single upstream call, then reads it from
-// cache; for UFO it pages the synthetic-dated scrape. Page 1 is the newest.
-func (s *Server) archive(source string, page int) (archiveResult, error) {
+// archive returns one page of photos, newest first. Page 1 ends today; each
+// older page steps back pageSize days. It warms the real calendar range for
+// the requested page in one upstream call, then paginates over the cache.
+func (s *Server) archive(page int) (archiveResult, error) {
 	if page < 1 {
 		page = 1
 	}
-	if source == sourceUFO {
-		if err := s.ufoEnsure(); err != nil {
-			slog.Warn("ufo ensure failed", "err", err)
-		}
-		total, err := countPhotos(s.db, sourceUFO)
-		if err != nil {
-			return archiveResult{}, err
-		}
-		photos, err := listPhotos(s.db, sourceUFO, pageSize, (page-1)*pageSize)
-		if err != nil {
-			return archiveResult{}, err
-		}
-		pages := pageCount(total)
-		return archiveResult{
-			Photos: photos, Page: page, Pages: pages, Total: total,
-			HasPrev: page > 1, HasNext: page < pages,
-		}, nil
-	}
-
-	// NASA: page 1 ends today; each older page steps back pageSize days. Farfield
-	// intentionally starts at calendarStart rather than APOD's 1995 archive.
+	// Farfield intentionally starts at calendarStart, not APOD's 1995 archive.
 	today, _ := time.Parse(dateLayout, todayUTC())
 	epoch, _ := time.Parse(dateLayout, calendarStart)
 	end := today.AddDate(0, 0, -(page-1)*pageSize)
@@ -199,10 +174,8 @@ func (s *Server) archive(source string, page int) (archiveResult, error) {
 	if start.Before(epoch) {
 		start = epoch
 	}
-	// Warm the real calendar range for the requested page, but paginate over the
-	// cache that actually exists. NASA can rate-limit DEMO_KEY/backfills; if the
-	// cache is only partially warm, the archive must not advertise empty pages for
-	// days we do not have yet.
+	// NASA can rate-limit DEMO_KEY / backfills; if the cache is only partially
+	// warm, the archive must not advertise empty pages for days we lack.
 	if !end.Before(epoch) {
 		startS, endS := start.Format(dateLayout), end.Format(dateLayout)
 		if err := s.nasaEnsureRange(startS, endS); err != nil {
@@ -234,15 +207,14 @@ func pageCount(total int) int {
 
 // ── HTML handlers ──────────────────────────────────────────────────────────
 
-// handleIndex renders the current day's photo for the selected source.
+// handleIndex renders the current day's photo.
 func (s *Server) handleIndex(w http.ResponseWriter, r *http.Request) {
-	source := canonicalSource(r.URL.Query().Get("source"))
-	photo, date, err := s.todayPhoto(source)
+	photo, date, err := s.todayPhoto()
 	if err != nil {
 		s.fail(w, "today photo", err)
 		return
 	}
-	s.renderPhoto(w, source, photo, date, true)
+	s.renderPhoto(w, photo, date, true)
 }
 
 // handleDay renders one specific day's photo.
@@ -252,84 +224,65 @@ func (s *Server) handleDay(w http.ResponseWriter, r *http.Request) {
 		http.NotFound(w, r)
 		return
 	}
-	source := canonicalSource(r.URL.Query().Get("source"))
-	photo, err := s.photoForDate(source, date)
+	photo, err := s.photoForDate(date)
 	if err != nil {
 		s.fail(w, "day photo", err)
 		return
 	}
-	s.renderPhoto(w, source, photo, date, false)
+	s.renderPhoto(w, photo, date, false)
 }
 
-// renderPhoto renders the photo page for one (source, date). isToday suppresses
-// the "next" step, since nothing is newer than the current day.
-func (s *Server) renderPhoto(w http.ResponseWriter, source string, photo *Photo, date string, isToday bool) {
-	prev, err := neighborDate(s.db, source, date, true)
+// renderPhoto renders the photo page for one date. isToday suppresses the
+// "next" step, since nothing is newer than the current day.
+func (s *Server) renderPhoto(w http.ResponseWriter, photo *Photo, date string, isToday bool) {
+	prev, err := neighborDate(s.db, sourceNASA, date, true)
 	if err != nil {
 		s.fail(w, "prev date", err)
 		return
 	}
 	next := ""
 	if !isToday {
-		if next, err = neighborDate(s.db, source, date, false); err != nil {
+		if next, err = neighborDate(s.db, sourceNASA, date, false); err != nil {
 			s.fail(w, "next date", err)
 			return
 		}
 	}
-	info := sourceInfo(source)
-	sq := sourceQuery(source)
-	jsonURL := "/api/photo" + sq
+	jsonURL := "/api/photo"
 	if !isToday {
-		jsonURL = "/api/photo/" + date + sq
+		jsonURL = "/api/photo/" + date
 	}
 	s.render(w, "photo.html", map[string]any{
-		"Photo":       photo,
-		"Date":        date,
-		"SourceLabel": info.Label,
-		"IsUFO":       source == sourceUFO,
-		"HomeURL":     "/" + sq,
-		"ArchiveURL":  "/archive" + sq,
-		"JSONURL":     jsonURL,
-		"SwitchURL":   "/" + sourceQuery(otherSource(source)),
-		"PrevURL":     dayURL(prev, source),
-		"NextURL":     dayURL(next, source),
+		"Photo":      photo,
+		"Date":       date,
+		"ArchiveURL": "/archive",
+		"JSONURL":    jsonURL,
+		"PrevURL":    dayURL(prev),
+		"NextURL":    dayURL(next),
 	})
 }
 
-// handleArchive renders a paginated grid of previous days/items.
+// handleArchive renders a paginated grid of previous days.
 func (s *Server) handleArchive(w http.ResponseWriter, r *http.Request) {
-	source := canonicalSource(r.URL.Query().Get("source"))
-	res, err := s.archive(source, pageParam(r))
+	res, err := s.archive(pageParam(r))
 	if err != nil {
 		s.fail(w, "archive", err)
 		return
 	}
-	unit := "days"
-	if source == sourceUFO {
-		unit = "items"
-	}
 	prevURL, nextURL := "", ""
 	if res.HasPrev {
-		prevURL = archiveURL(source, res.Page-1)
+		prevURL = archiveURL(res.Page - 1)
 	}
 	if res.HasNext {
-		nextURL = archiveURL(source, res.Page+1)
+		nextURL = archiveURL(res.Page + 1)
 	}
-	sq := sourceQuery(source)
 	s.render(w, "archive.html", map[string]any{
-		"Photos":      res.Photos,
-		"Page":        res.Page,
-		"Pages":       res.Pages,
-		"Total":       res.Total,
-		"Unit":        unit,
-		"SourceLabel": sourceInfo(source).Label,
-		"SourceQuery": sq,
-		"IsUFO":       source == sourceUFO,
-		"HomeURL":     "/" + sq,
-		"JSONURL":     "/api/photos" + sq,
-		"SwitchURL":   "/" + sourceQuery(otherSource(source)),
-		"PrevURL":     prevURL,
-		"NextURL":     nextURL,
+		"Photos":  res.Photos,
+		"Page":    res.Page,
+		"Pages":   res.Pages,
+		"Total":   res.Total,
+		"JSONURL": "/api/photos",
+		"PrevURL": prevURL,
+		"NextURL": nextURL,
 	})
 }
 
@@ -341,29 +294,18 @@ func (s *Server) handleStatus(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, "could not read index")
 		return
 	}
-	ufo, err := countPhotos(s.db, sourceUFO)
-	if err != nil {
-		writeError(w, http.StatusInternalServerError, "could not read index")
-		return
-	}
 	writeJSON(w, http.StatusOK, map[string]any{
-		"service": "calendar", "ok": true, "nasa": nasa, "ufo": ufo,
+		"service": "calendar", "ok": true, "nasa": nasa,
 	})
 }
 
-func (s *Server) handleAPISources(w http.ResponseWriter, r *http.Request) {
-	cacheable(w)
-	writeJSON(w, http.StatusOK, map[string]any{"sources": sources})
-}
-
 func (s *Server) handleAPIToday(w http.ResponseWriter, r *http.Request) {
-	source := canonicalSource(r.URL.Query().Get("source"))
-	photo, _, err := s.todayPhoto(source)
+	photo, _, err := s.todayPhoto()
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "could not load photo")
 		return
 	}
-	s.writePhoto(w, r, source, photo)
+	s.writePhoto(w, r, photo)
 }
 
 func (s *Server) handleAPIDay(w http.ResponseWriter, r *http.Request) {
@@ -372,25 +314,23 @@ func (s *Server) handleAPIDay(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "malformed date — expected YYYY-MM-DD")
 		return
 	}
-	source := canonicalSource(r.URL.Query().Get("source"))
-	photo, err := s.photoForDate(source, date)
+	photo, err := s.photoForDate(date)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "could not load photo")
 		return
 	}
-	s.writePhoto(w, r, source, photo)
+	s.writePhoto(w, r, photo)
 }
 
 func (s *Server) handleAPIPhotos(w http.ResponseWriter, r *http.Request) {
-	source := canonicalSource(r.URL.Query().Get("source"))
-	res, err := s.archive(source, pageParam(r))
+	res, err := s.archive(pageParam(r))
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "could not list photos")
 		return
 	}
 	cacheable(w)
 	writeJSON(w, http.StatusOK, map[string]any{
-		"source": source,
+		"source": sourceNASA,
 		"page":   res.Page,
 		"pages":  res.Pages,
 		"total":  res.Total,
@@ -401,14 +341,14 @@ func (s *Server) handleAPIPhotos(w http.ResponseWriter, r *http.Request) {
 // writePhoto emits one photo as JSON, cacheable for a day. When the photo
 // exists its content CID is sent as a strong ETag, so a client holding the
 // current version gets a 304.
-func (s *Server) writePhoto(w http.ResponseWriter, r *http.Request, source string, photo *Photo) {
+func (s *Server) writePhoto(w http.ResponseWriter, r *http.Request, photo *Photo) {
 	cacheable(w)
 	if photo == nil {
 		writeError(w, http.StatusNotFound, "no photo for that date")
 		return
 	}
-	prev, _ := neighborDate(s.db, source, photo.Date, true)
-	next, _ := neighborDate(s.db, source, photo.Date, false)
+	prev, _ := neighborDate(s.db, sourceNASA, photo.Date, true)
+	next, _ := neighborDate(s.db, sourceNASA, photo.Date, false)
 	etag := `"` + photo.CID + `"`
 	w.Header().Set("ETag", etag)
 	if r.Header.Get("If-None-Match") == etag {
@@ -416,7 +356,7 @@ func (s *Server) writePhoto(w http.ResponseWriter, r *http.Request, source strin
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{
-		"source": source,
+		"source": sourceNASA,
 		"photo":  photo,
 		"prev":   prev,
 		"next":   next,
@@ -433,30 +373,17 @@ func pageParam(r *http.Request) int {
 	return 1
 }
 
-// sourceQuery returns the query string that selects a source — empty for the
-// default NASA source, "?source=ufo" for the UFO source.
-func sourceQuery(source string) string {
-	if source == sourceUFO {
-		return "?source=ufo"
-	}
-	return ""
-}
-
 // dayURL builds a /day link for a date, or "" when there is no such date.
-func dayURL(date, source string) string {
+func dayURL(date string) string {
 	if date == "" {
 		return ""
 	}
-	return "/day/" + date + sourceQuery(source)
+	return "/day/" + date
 }
 
-// archiveURL builds an /archive link for a page, carrying the source.
-func archiveURL(source string, page int) string {
-	u := "/archive?page=" + strconv.Itoa(page)
-	if source == sourceUFO {
-		u += "&source=ufo"
-	}
-	return u
+// archiveURL builds an /archive link for a page.
+func archiveURL(page int) string {
+	return "/archive?page=" + strconv.Itoa(page)
 }
 
 // cacheable marks a response publicly cacheable for publicMaxAge seconds.
@@ -470,9 +397,8 @@ func handleCSS(w http.ResponseWriter, r *http.Request) {
 	_, _ = io.WriteString(w, theme.CSS)
 }
 
-// calendarFuncs are the template helpers. mediaKind lets a template branch on
-// whether a media URL is a directly-playable file (so video/audio render with
-// native players) versus an embed or off-site link.
+// calendarFuncs are the template helpers. mediaKind lets the photo template
+// branch on whether a video URL is a directly-playable file versus an embed.
 var calendarFuncs = template.FuncMap{"mediaKind": mediaKind}
 
 func parseTemplates() (map[string]*template.Template, error) {

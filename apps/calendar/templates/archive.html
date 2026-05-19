@@ -1,33 +1,32 @@
 {{define "title"}}Archive · farfield calendar{{end}}
 {{define "content"}}
   <header class="bar">
-    <h1><a href="{{.HomeURL}}">farfield · calendar</a></h1>
+    <h1><a href="/">farfield · calendar</a></h1>
     <nav>
-      <a href="{{.HomeURL}}">Today</a>
+      <a href="/">Today</a>
       <a href="{{.JSONURL}}">JSON</a>
     </nav>
   </header>
 
   <div class="section-head">
-    <h2>{{.SourceLabel}}</h2>
-    <span class="label">Page {{.Page}} / {{.Pages}} · {{.Total}} {{.Unit}}</span>
+    <h2>NASA · Astronomy Picture of the Day</h2>
+    <span class="label">Page {{.Page}} / {{.Pages}} · {{.Total}} days</span>
   </div>
 
   {{if .Photos}}
     <div class="archive">
       {{range .Photos}}
-        <a href="/day/{{.Date}}{{$.SourceQuery}}">
+        <a href="/day/{{.Date}}">
           <div class="frame">
             {{if .ThumbURL}}
               <img src="{{.ThumbURL}}" alt="{{.Title}}" loading="lazy">
             {{else}}
               <div class="placeholder">{{.MediaType}}</div>
             {{end}}
-            {{if eq .MediaType "video"}}<span class="media-tag">▶ video</span>
-            {{else if eq .MediaType "audio"}}<span class="media-tag">♪ audio</span>{{end}}
+            {{if eq .MediaType "video"}}<span class="media-tag">▶ video</span>{{end}}
           </div>
           <div class="cap">
-            <span class="date">{{.Date}}{{if .Repeated}} · encore{{end}}</span>
+            <span class="date">{{.Date}}</span>
             <span class="ttl">{{.Title}}</span>
           </div>
         </a>

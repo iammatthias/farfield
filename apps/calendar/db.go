@@ -29,7 +29,6 @@ type Photo struct {
 	Credit      string `json:"credit"`
 	SourceURL   string `json:"sourceUrl"`
 	Placeholder bool   `json:"placeholder"` // true when upstream was unavailable
-	Repeated    bool   `json:"repeated"`    // true when an item recurs to fill a day
 	FetchedAt   string `json:"fetchedAt"`
 }
 
@@ -46,7 +45,6 @@ CREATE TABLE IF NOT EXISTS photos (
 	credit      TEXT NOT NULL DEFAULT '',
 	source_url  TEXT NOT NULL DEFAULT '',
 	placeholder INTEGER NOT NULL DEFAULT 0,
-	repeated    INTEGER NOT NULL DEFAULT 0,
 	fetched_at  TEXT NOT NULL,
 	PRIMARY KEY (source, date)
 );
@@ -54,7 +52,7 @@ CREATE INDEX IF NOT EXISTS photos_by_date ON photos (source, date DESC);`
 
 // photoCols is the column list, in Photo-field order, shared by every query.
 const photoCols = `source, date, cid, title, explanation, image_url, thumb_url, ` +
-	`media_type, credit, source_url, placeholder, repeated, fetched_at`
+	`media_type, credit, source_url, placeholder, fetched_at`
 
 // openDB opens the SQLite database, applies pragmas, and migrates the schema.
 // The migration sequence is idempotent — it brings any database, fresh or old,
@@ -82,7 +80,6 @@ func openDB(path string) (*sql.DB, error) {
 		{"credit", "TEXT NOT NULL DEFAULT ''"},
 		{"source_url", "TEXT NOT NULL DEFAULT ''"},
 		{"placeholder", "INTEGER NOT NULL DEFAULT 0"},
-		{"repeated", "INTEGER NOT NULL DEFAULT 0"},
 	} {
 		if err := ensureColumn(db, "photos", c.col, c.decl); err != nil {
 			return nil, err
@@ -170,14 +167,13 @@ type scanner interface{ Scan(...any) error }
 
 func scanPhoto(row scanner) (*Photo, error) {
 	var p Photo
-	var placeholder, repeated int
+	var placeholder int
 	if err := row.Scan(&p.Source, &p.Date, &p.CID, &p.Title, &p.Explanation,
 		&p.ImageURL, &p.ThumbURL, &p.MediaType, &p.Credit, &p.SourceURL,
-		&placeholder, &repeated, &p.FetchedAt); err != nil {
+		&placeholder, &p.FetchedAt); err != nil {
 		return nil, err
 	}
 	p.Placeholder = placeholder != 0
-	p.Repeated = repeated != 0
 	return &p, nil
 }
 
@@ -209,21 +205,17 @@ func upsertPhoto(db *sql.DB, p *Photo) error {
 	if p.Placeholder {
 		placeholder = 1
 	}
-	repeated := 0
-	if p.Repeated {
-		repeated = 1
-	}
 	_, err := db.Exec(
 		`INSERT INTO photos (`+photoCols+`)
-		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 		 ON CONFLICT(source, date) DO UPDATE SET
 		   cid=excluded.cid, title=excluded.title, explanation=excluded.explanation,
 		   image_url=excluded.image_url, thumb_url=excluded.thumb_url,
 		   media_type=excluded.media_type, credit=excluded.credit,
 		   source_url=excluded.source_url, placeholder=excluded.placeholder,
-		   repeated=excluded.repeated, fetched_at=excluded.fetched_at`,
+		   fetched_at=excluded.fetched_at`,
 		p.Source, p.Date, p.CID, p.Title, p.Explanation, p.ImageURL, p.ThumbURL,
-		p.MediaType, p.Credit, p.SourceURL, placeholder, repeated, p.FetchedAt)
+		p.MediaType, p.Credit, p.SourceURL, placeholder, p.FetchedAt)
 	return err
 }
 
