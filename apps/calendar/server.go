@@ -73,6 +73,20 @@ func backfillCommand(start, end string) error {
 	return nil
 }
 
+// backfillOnStartup warms the NASA archive across the full calendar range and
+// scrapes the UFO source once, so a freshly deployed instance is populated
+// without waiting for the first visitor. NASA needs a real NASA_API_KEY to
+// fill; with DEMO_KEY the range call rate-limits and the cache fills lazily as
+// pages are viewed instead.
+func (s *Server) backfillOnStartup() {
+	if err := s.nasaEnsureRange(calendarStart, todayUTC()); err != nil {
+		slog.Warn("startup nasa backfill failed", "err", err)
+	}
+	if err := s.ufoEnsure(); err != nil {
+		slog.Warn("startup ufo backfill failed", "err", err)
+	}
+}
+
 // run wires up the service and serves until interrupted.
 func run(host, port string) error {
 	db, err := openDB(store.Env("CALENDAR_DB_PATH", "calendar.sqlite"))
@@ -92,6 +106,10 @@ func run(host, port string) error {
 		templates: tmpl,
 		assetVer:  cid.Of([]byte(theme.CSS))[:16],
 	}
+
+	// Backfill the whole calendar — Jan 1 through today — in the background so
+	// a fresh deploy is populated without blocking startup.
+	go s.backfillOnStartup()
 
 	srv := &http.Server{Addr: net.JoinHostPort(host, port), Handler: s.routes()}
 
@@ -452,6 +470,11 @@ func handleCSS(w http.ResponseWriter, r *http.Request) {
 	_, _ = io.WriteString(w, theme.CSS)
 }
 
+// calendarFuncs are the template helpers. mediaKind lets a template branch on
+// whether a media URL is a directly-playable file (so video/audio render with
+// native players) versus an embed or off-site link.
+var calendarFuncs = template.FuncMap{"mediaKind": mediaKind}
+
 func parseTemplates() (map[string]*template.Template, error) {
 	pages, err := fs.Glob(assets, "templates/*.html")
 	if err != nil {
@@ -463,7 +486,8 @@ func parseTemplates() (map[string]*template.Template, error) {
 		if name == "base.html" {
 			continue
 		}
-		t, err := template.New("base.html").ParseFS(assets, "templates/base.html", page)
+		t, err := template.New("base.html").Funcs(calendarFuncs).ParseFS(
+			assets, "templates/base.html", page)
 		if err != nil {
 			return nil, err
 		}

@@ -270,9 +270,10 @@ func (s *Server) ufoEnsure() error {
 
 // storeUFO writes scraped UFO items, assigning each a synthetic date counting
 // back from today to calendarStart so they form a consecutive calendar. The
-// upstream release is a finite set, so if the calendar eventually grows past the
-// release length, entries repeat rather than leaving future days empty. A real
-// scrape replaces the whole source; a placeholder seed only inserts.
+// upstream release is a finite set: once it is exhausted the calendar reuses
+// earlier items to fill the remaining days rather than leaving them empty, and
+// every reused day is flagged Repeated so the UI can mark it as an encore. A
+// real scrape replaces the whole source; a placeholder seed only inserts.
 func (s *Server) storeUFO(photos []Photo, replace bool) error {
 	if len(photos) == 0 {
 		return nil
@@ -288,6 +289,9 @@ func (s *Server) storeUFO(photos []Photo, replace bool) error {
 		p := photos[i%len(photos)]
 		p.Source = sourceUFO
 		p.Date = now.AddDate(0, 0, -i).Format(dateLayout)
+		// The first pass through the release is unique; every day past it is
+		// a recycled item — flag it rather than pass it off as a new day.
+		p.Repeated = i >= len(photos)
 		if err := upsertPhoto(s.db, &p); err != nil {
 			return err
 		}

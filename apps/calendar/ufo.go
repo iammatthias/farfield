@@ -1,7 +1,6 @@
 package main
 
 import (
-	"encoding/json"
 	"fmt"
 	"io"
 	"net/http"
@@ -11,22 +10,14 @@ import (
 )
 
 // ufoPageURL is the Department of War's public UFO imagery index. The scraper
-// reads the server-rendered HTML only — it never executes page JavaScript.
+// reads that page's server-rendered HTML only — it never executes page
+// JavaScript and never ingests a third-party mirror of the release. If the
+// page is unreachable or changes shape, the calendar falls back to placeholder
+// entries (see ufoPlaceholders) rather than trusting an outside source.
 const ufoPageURL = "https://www.war.gov/UFO/"
-
-// ufoManifestURL is a public, static index of the same war.gov/ufo release. The
-// official Akamai edge blocks some server-side fetches, so the scraper first
-// tries war.gov HTML and then falls back to this manifest while preserving the
-// original war.gov/DVIDS media URLs.
-const ufoManifestURL = "https://raw.githubusercontent.com/vng9trmgr8-pixel/war-gov-ufo-release-1/refs/heads/main/data.json"
 
 // ufoOrigin is the scheme+host used to resolve relative links found on the page.
 const ufoOrigin = "https://www.war.gov"
-
-// ufoAssetsOrigin is the image CDN used by uapufo.org. Its raw/image filenames
-// mirror the war.gov release thumbnail filenames, and unlike war.gov's Akamai
-// edge it is fetchable by normal browsers and server-side clients.
-const ufoAssetsOrigin = "https://assets.uapufo.org"
 
 // ufoMaxItems caps how many media items one scrape will keep — a conservative
 // bound so a runaway page cannot flood the cache.
@@ -42,34 +33,22 @@ var (
 	altAttr  = regexp.MustCompile(`(?is)\balt\s*=\s*["']([^"']*)["']`)
 )
 
-// imageExts and videoExts classify a media URL by its file extension.
+// imageExts, videoExts, and audioExts classify a media URL by file extension.
 var (
 	imageExts = map[string]bool{".jpg": true, ".jpeg": true, ".png": true,
 		".gif": true, ".webp": true, ".avif": true, ".bmp": true}
 	videoExts = map[string]bool{".mp4": true, ".mov": true, ".webm": true,
 		".m4v": true, ".ogv": true}
+	audioExts = map[string]bool{".mp3": true, ".wav": true, ".ogg": true,
+		".oga": true, ".m4a": true, ".flac": true, ".aac": true}
 )
 
 // ufoScrape fetches the war.gov UFO page and parses its media entries. A
 // non-2xx response, a transport error, or a page with no recognisable media
 // all return an error — the caller then falls back to placeholder items so
-// the app never fails because an upstream changed shape.
+// the app never fails because an upstream changed shape. The scraper reads
+// only war.gov's own server-rendered HTML; there is no third-party fallback.
 func (f *fetcher) ufoScrape() ([]Photo, error) {
-	photos, err := f.ufoScrapeHTML()
-	if err == nil && len(photos) > 0 {
-		return photos, nil
-	}
-	manifestPhotos, manifestErr := f.ufoScrapeManifest()
-	if manifestErr == nil && len(manifestPhotos) > 0 {
-		return manifestPhotos, nil
-	}
-	if err != nil {
-		return nil, err
-	}
-	return nil, manifestErr
-}
-
-func (f *fetcher) ufoScrapeHTML() ([]Photo, error) {
 	req, err := http.NewRequest(http.MethodGet, ufoPageURL, nil)
 	if err != nil {
 		return nil, err
@@ -93,152 +72,6 @@ func (f *fetcher) ufoScrapeHTML() ([]Photo, error) {
 		return nil, fmt.Errorf("war.gov UFO page yielded no media")
 	}
 	return photos, nil
-}
-
-type ufoManifest struct {
-	Images []ufoManifestRecord `json:"images"`
-	Videos []ufoManifestRecord `json:"videos"`
-}
-
-type ufoManifestRecord struct {
-	Title      string `json:"title"`
-	Blurb      string `json:"blurb"`
-	URL        string `json:"url"`
-	Thumb      string `json:"thumb"`
-	VideoID    string `json:"videoId"`
-	VideoTitle string `json:"videoTitle"`
-	Agency     string `json:"agency"`
-}
-
-func (f *fetcher) ufoScrapeManifest() ([]Photo, error) {
-	req, err := http.NewRequest(http.MethodGet, ufoManifestURL, nil)
-	if err != nil {
-		return nil, err
-	}
-	req.Header.Set("User-Agent", userAgent)
-	resp, err := f.client.Do(req)
-	if err != nil {
-		return nil, err
-	}
-	defer resp.Body.Close()
-	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("UFO manifest HTTP %d", resp.StatusCode)
-	}
-	body, err := io.ReadAll(io.LimitReader(resp.Body, 8<<20))
-	if err != nil {
-		return nil, err
-	}
-	var manifest ufoManifest
-	if err := json.Unmarshal(body, &manifest); err != nil {
-		return nil, fmt.Errorf("decoding UFO manifest: %w", err)
-	}
-	photos := photosFromUFOManifest(manifest)
-	if len(photos) == 0 {
-		return nil, fmt.Errorf("UFO manifest yielded no media")
-	}
-	return photos, nil
-}
-
-func photosFromUFOManifest(manifest ufoManifest) []Photo {
-	photos := make([]Photo, 0, len(manifest.Images)+len(manifest.Videos))
-	seen := map[string]bool{}
-	add := func(p Photo) {
-		key := p.ImageURL
-		if key == "" {
-			key = p.ThumbURL
-		}
-		if key == "" || seen[key] || len(photos) >= ufoMaxItems {
-			return
-		}
-		seen[key] = true
-		photos = append(photos, p)
-	}
-	for _, r := range manifest.Images {
-		officialImage := strings.TrimSpace(r.URL)
-		assetName := ufoAssetName(r.Thumb)
-		if assetName == "" {
-			assetName = ufoAssetName(r.URL)
-		}
-		if mediaKind(officialImage) != "image" && assetName == "" {
-			continue
-		}
-		image, thumb := officialImage, strings.TrimSpace(r.Thumb)
-		if assetName != "" {
-			image = ufoAssetImageURL(assetName, 1600)
-			thumb = ufoAssetImageURL(assetName, 640)
-		}
-		if thumb == "" {
-			thumb = image
-		}
-		add(ufoManifestPhoto(r, image, thumb, "image", officialImage))
-	}
-	for _, r := range manifest.Videos {
-		thumb := strings.TrimSpace(r.Thumb)
-		if thumb == "" || mediaKind(thumb) != "image" {
-			continue
-		}
-		video := ufoVideoURL(r.VideoID)
-		if video == "" {
-			video = strings.TrimSpace(r.URL)
-		}
-		add(ufoManifestPhoto(r, video, thumb, "video", video))
-	}
-	return photos
-}
-
-func ufoManifestPhoto(r ufoManifestRecord, image, thumb, media, sourceURL string) Photo {
-	title := strings.TrimSpace(r.Title)
-	if title == "" {
-		title = strings.TrimSpace(r.VideoTitle)
-	}
-	if title == "" {
-		title = titleFromURL(image)
-	}
-	credit := "U.S. Department of War"
-	if agency := strings.TrimSpace(r.Agency); agency != "" {
-		credit = agency + " · " + credit
-	}
-	if sourceURL == "" {
-		sourceURL = ufoPageURL
-	}
-	return Photo{
-		Source:      sourceUFO,
-		Title:       title,
-		Explanation: strings.TrimSpace(r.Blurb),
-		ImageURL:    image,
-		ThumbURL:    thumb,
-		MediaType:   media,
-		Credit:      credit,
-		SourceURL:   sourceURL,
-	}
-}
-
-func ufoVideoURL(videoID string) string {
-	videoID = strings.TrimSpace(videoID)
-	if videoID == "" {
-		return ""
-	}
-	return "https://www.dvidshub.net/video/" + videoID
-}
-
-func ufoAssetName(rawURL string) string {
-	rawURL = strings.TrimSpace(rawURL)
-	if rawURL == "" {
-		return ""
-	}
-	name := path.Base(strings.Split(strings.Split(rawURL, "?")[0], "#")[0])
-	if name == "." || name == "/" || name == "" {
-		return ""
-	}
-	if strings.EqualFold(path.Ext(name), ".png") {
-		name = strings.TrimSuffix(name, path.Ext(name)) + ".jpg"
-	}
-	return name
-}
-
-func ufoAssetImageURL(name string, width int) string {
-	return fmt.Sprintf("%s/cdn-cgi/image/width=%d,quality=82,format=auto/raw/image/%s",
-		ufoAssetsOrigin, width, name)
 }
 
 // parseUFOHTML extracts media entries from war.gov UFO page HTML. It is a pure
@@ -319,8 +152,8 @@ func resolveURL(ref string) string {
 	}
 }
 
-// mediaKind classifies a URL as "image" or "video" by extension, or "" when it
-// is not a recognised media file.
+// mediaKind classifies a URL as "image", "video", or "audio" by extension, or
+// "" when it is not a recognised media file.
 func mediaKind(u string) string {
 	clean := u
 	if i := strings.IndexAny(clean, "?#"); i >= 0 {
@@ -332,6 +165,8 @@ func mediaKind(u string) string {
 		return "image"
 	case videoExts[ext]:
 		return "video"
+	case audioExts[ext]:
+		return "audio"
 	default:
 		return ""
 	}

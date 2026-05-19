@@ -3,6 +3,7 @@ package main
 import (
 	"path/filepath"
 	"testing"
+	"time"
 )
 
 func TestCanonicalSource(t *testing.T) {
@@ -121,6 +122,9 @@ func TestMediaKind(t *testing.T) {
 		"https://war.gov/a.jpg":     "image",
 		"https://war.gov/a.PNG?x=1": "image",
 		"https://war.gov/clip.mp4":  "video",
+		"https://war.gov/clip.webm": "video",
+		"https://war.gov/brief.mp3": "audio",
+		"https://war.gov/tape.WAV":  "audio",
 		"https://war.gov/page.html": "",
 		"https://war.gov/doc.pdf":   "",
 	}
@@ -179,20 +183,40 @@ func TestParseUFOHTML(t *testing.T) {
 	}
 }
 
-func TestUFOManifestUsesSiteAssetImages(t *testing.T) {
-	photos := photosFromUFOManifest(ufoManifest{Images: []ufoManifestRecord{{
-		Title: "FBI Photo A1",
-		URL:   "https://www.war.gov/medialink/ufo/release_1/fbi-photo-a1.png",
-		Thumb: "https://www.war.gov/medialink/ufo/release_1/thumbnail/fbi-photo-a1.jpg",
-	}}})
-	if len(photos) != 1 {
-		t.Fatalf("got %d photos, want 1", len(photos))
+func TestStoreUFOFlagsEncores(t *testing.T) {
+	db, err := openDB(filepath.Join(t.TempDir(), "cal.sqlite"))
+	if err != nil {
+		t.Fatalf("openDB: %v", err)
 	}
-	if got := photos[0].ImageURL; got != "https://assets.uapufo.org/cdn-cgi/image/width=1600,quality=82,format=auto/raw/image/fbi-photo-a1.jpg" {
-		t.Errorf("image URL = %q", got)
+	defer db.Close()
+	s := &Server{db: db, fetcher: newFetcher("DEMO_KEY")}
+
+	// Two scraped items, but the calendar spans many more days — so every day
+	// past the second reuses an earlier item and must be flagged as an encore.
+	src := []Photo{
+		{Title: "alpha", ImageURL: "https://war.gov/a.jpg", MediaType: "image"},
+		{Title: "beta", ImageURL: "https://war.gov/b.jpg", MediaType: "image"},
 	}
-	if got := photos[0].SourceURL; got != "https://www.war.gov/medialink/ufo/release_1/fbi-photo-a1.png" {
-		t.Errorf("source URL = %q", got)
+	if err := s.storeUFO(src, true); err != nil {
+		t.Fatalf("storeUFO: %v", err)
+	}
+
+	now := time.Now().UTC()
+	day := func(back int) string { return now.AddDate(0, 0, -back).Format(dateLayout) }
+
+	first, err := getPhoto(db, sourceUFO, day(0))
+	if err != nil || first == nil {
+		t.Fatalf("getPhoto today = %v, err %v", first, err)
+	}
+	if first.Repeated {
+		t.Error("the first unique item should not be flagged as an encore")
+	}
+	encore, err := getPhoto(db, sourceUFO, day(2))
+	if err != nil || encore == nil {
+		t.Fatalf("getPhoto today-2 = %v, err %v", encore, err)
+	}
+	if !encore.Repeated {
+		t.Error("a day past the release length should be flagged as an encore")
 	}
 }
 
@@ -243,7 +267,7 @@ func TestPhotoCID(t *testing.T) {
 	// the key, fetch time, and placeholder flag are excluded from the CID
 	c := a
 	c.Date, c.Source = "2024-01-01", sourceUFO
-	c.FetchedAt, c.Placeholder = nowRFC3339(), true
+	c.FetchedAt, c.Placeholder, c.Repeated = nowRFC3339(), true, true
 	if photoCID(&a) != photoCID(&c) {
 		t.Error("non-content fields must not affect the CID")
 	}

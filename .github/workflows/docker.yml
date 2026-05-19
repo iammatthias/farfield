@@ -16,7 +16,7 @@ jobs:
       matrix:
         # Add each app here as it is created — this is the one wiring step CI
         # needs per app (see .claude/skills/farfield-stack/SKILL.md).
-        app: [blobs, content, feed, apex, backup]
+        app: [blobs, calendar, content, feed, apex, backup]
     steps:
       - uses: actions/checkout@v4
 

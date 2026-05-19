@@ -24,21 +24,38 @@
                alt="{{.Title}}">
         </a>
       {{else if eq .MediaType "video"}}
-        {{if .ThumbURL}}
+        {{if eq (mediaKind .ImageURL) "video"}}
+          <video controls preload="metadata"
+                 {{with .ThumbURL}}poster="{{.}}"{{end}}>
+            <source src="{{.ImageURL}}">
+            <a href="{{.ImageURL}}" target="_blank" rel="noopener">Download video ↗</a>
+          </video>
+        {{else if .ThumbURL}}
           <a href="{{.ImageURL}}" target="_blank" rel="noopener">
             <img src="{{.ThumbURL}}" alt="{{.Title}}"></a>
         {{else}}
           <div class="placeholder">Video —
             <a href="{{.ImageURL}}" target="_blank" rel="noopener">watch ↗</a></div>
         {{end}}
+      {{else if eq .MediaType "audio"}}
+        {{if .ThumbURL}}<img src="{{.ThumbURL}}" alt="{{.Title}}">{{end}}
+        <audio controls preload="metadata" src="{{.ImageURL}}">
+          <a href="{{.ImageURL}}" target="_blank" rel="noopener">Download audio ↗</a>
+        </audio>
       {{else}}
         <div class="placeholder">{{.Title}}</div>
       {{end}}
       <figcaption>
         <span>{{.Date}}</span>
-        <span class="muted">{{.MediaType}}{{if .Placeholder}} · placeholder{{end}}</span>
+        <span class="muted">{{.MediaType}}{{if .Placeholder}} · placeholder{{end}}{{if .Repeated}} · encore{{end}}</span>
       </figcaption>
     </figure>
+
+    {{if .Repeated}}
+      <p class="notice">Encore — the war.gov/UFO release has fewer items than the
+      calendar has days, so this day reuses earlier imagery rather than leaving
+      a gap.</p>
+    {{end}}
 
     <div class="cal-body">
       <h2>{{.Title}}</h2>
