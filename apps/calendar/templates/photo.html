@@ -62,7 +62,8 @@
       {{with .Explanation}}<p>{{.}}</p>{{end}}
       <p class="cal-credit muted">
         {{with .Credit}}Credit: {{.}} · {{end}}
-        <a href="{{.SourceURL}}" target="_blank" rel="noopener">Source ↗</a>
+        {{with .ImageURL}}<a href="{{.}}" target="_blank" rel="noopener">Media file ↗</a> · {{end}}
+        <a href="{{.SourceURL}}" target="_blank" rel="noopener">{{if $.IsUFO}}war.gov/UFO page ↗{{else}}APOD page ↗{{end}}</a>
       </p>
     </div>
   {{else}}
