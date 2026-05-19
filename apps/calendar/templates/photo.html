@@ -1,0 +1,66 @@
+{{define "title"}}{{with .Photo}}{{.Title}} · {{end}}farfield calendar{{end}}
+{{define "content"}}
+  <header class="bar">
+    <h1><a href="{{.HomeURL}}">farfield · calendar</a></h1>
+    <nav>
+      <a href="{{.ArchiveURL}}">Archive</a>
+      <a href="{{.JSONURL}}">JSON</a>
+    </nav>
+  </header>
+
+  <p class="label source-eyebrow">{{.SourceLabel}}</p>
+
+  {{if .IsUFO}}
+    <p class="notice">Alternate source — declassified UAP/UFO imagery published
+    by the U.S. Department of War at war.gov/UFO, mirrored and cached here.
+    <a href="/">Return to NASA APOD ↩</a></p>
+  {{end}}
+
+  {{with .Photo}}
+    <figure class="plate">
+      {{if eq .MediaType "image"}}
+        <a href="{{.ImageURL}}" target="_blank" rel="noopener">
+          <img src="{{if .ImageURL}}{{.ImageURL}}{{else}}{{.ThumbURL}}{{end}}"
+               alt="{{.Title}}">
+        </a>
+      {{else if eq .MediaType "video"}}
+        {{if .ThumbURL}}
+          <a href="{{.ImageURL}}" target="_blank" rel="noopener">
+            <img src="{{.ThumbURL}}" alt="{{.Title}}"></a>
+        {{else}}
+          <div class="placeholder">Video —
+            <a href="{{.ImageURL}}" target="_blank" rel="noopener">watch ↗</a></div>
+        {{end}}
+      {{else}}
+        <div class="placeholder">{{.Title}}</div>
+      {{end}}
+      <figcaption>
+        <span>{{.Date}}</span>
+        <span class="muted">{{.MediaType}}{{if .Placeholder}} · placeholder{{end}}</span>
+      </figcaption>
+    </figure>
+
+    <div class="cal-body">
+      <h2>{{.Title}}</h2>
+      {{with .Explanation}}<p>{{.}}</p>{{end}}
+      <p class="cal-credit muted">
+        {{with .Credit}}Credit: {{.}} · {{end}}
+        <a href="{{.SourceURL}}" target="_blank" rel="noopener">Source ↗</a>
+      </p>
+    </div>
+  {{else}}
+    <p class="notice">No photo is available for this
+    {{if .IsUFO}}entry{{else}}day{{end}} yet. The calendar serves from its
+    SQLite cache and will pick this one up once the upstream responds.</p>
+  {{end}}
+
+  <nav class="stepper">
+    {{if .PrevURL}}<a href="{{.PrevURL}}">← Previous</a>
+    {{else}}<span class="muted">← Previous</span>{{end}}
+    <a href="{{.ArchiveURL}}">Archive</a>
+    {{if .NextURL}}<a href="{{.NextURL}}">Next →</a>
+    {{else}}<span class="muted">Next →</span>{{end}}
+  </nav>
+
+  {{template "foot" .}}
+{{end}}

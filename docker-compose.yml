@@ -89,6 +89,22 @@ services:
       - HOST=0.0.0.0
       - APEX_PORT=8790
 
+  calendar:
+    build:
+      context: .
+      dockerfile: apps/calendar/Dockerfile
+    image: farfield-calendar
+    restart: unless-stopped
+    ports:
+      - "${CALENDAR_PORT:-8792}:8792"
+    environment:
+      - HOST=0.0.0.0
+      - CALENDAR_PORT=8792
+      - CALENDAR_DB_PATH=/data/calendar.sqlite
+      - NASA_API_KEY=${NASA_API_KEY:-DEMO_KEY}
+    volumes:
+      - ./data:/data
+
   backup:
     build:
       context: .

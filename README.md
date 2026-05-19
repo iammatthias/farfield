@@ -10,6 +10,7 @@ moderating content, plus a public JSON API the website reads.
 | `content` | `content.farfield.systems` | collections, entries, series fragments         |
 | `feed`    | `feed.farfield.systems`    | ephemeral short-form posts                     |
 | `blobs`   | `blobs.farfield.systems`   | image/media bytes + metadata, on Cloudflare R2 |
+| `calendar`| `calendar.farfield.systems`| daily photo calendar: NASA APOD + UFO easter egg |
 | `backup`  | tailnet-only               | snapshots every app's database into R2         |
 
 ## Stack

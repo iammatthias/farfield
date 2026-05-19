@@ -1,0 +1,47 @@
+{{define "title"}}Archive · farfield calendar{{end}}
+{{define "content"}}
+  <header class="bar">
+    <h1><a href="{{.HomeURL}}">farfield · calendar</a></h1>
+    <nav>
+      <a href="{{.HomeURL}}">Today</a>
+      <a href="{{.JSONURL}}">JSON</a>
+    </nav>
+  </header>
+
+  <div class="section-head">
+    <h2>{{.SourceLabel}}</h2>
+    <span class="label">Page {{.Page}} / {{.Pages}} · {{.Total}} {{.Unit}}</span>
+  </div>
+
+  {{if .Photos}}
+    <div class="archive">
+      {{range .Photos}}
+        <a href="/day/{{.Date}}{{$.SourceQuery}}">
+          <div class="frame">
+            {{if .ThumbURL}}
+              <img src="{{.ThumbURL}}" alt="{{.Title}}" loading="lazy">
+            {{else}}
+              <div class="placeholder">{{.MediaType}}</div>
+            {{end}}
+          </div>
+          <div class="cap">
+            <span class="date">{{.Date}}</span>
+            <span class="ttl">{{.Title}}</span>
+          </div>
+        </a>
+      {{end}}
+    </div>
+  {{else}}
+    <p class="notice">No entries are cached for this page yet.</p>
+  {{end}}
+
+  <nav class="pager">
+    {{if .PrevURL}}<a href="{{.PrevURL}}">← Newer</a>
+    {{else}}<span class="muted">← Newer</span>{{end}}
+    <span class="muted">Page {{.Page}} of {{.Pages}}</span>
+    {{if .NextURL}}<a href="{{.NextURL}}">Older →</a>
+    {{else}}<span class="muted">Older →</span>{{end}}
+  </nav>
+
+  {{template "foot" .}}
+{{end}}

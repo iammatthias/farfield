@@ -8,6 +8,7 @@ single-binary services; the website reads three of them.
 | content   | `https://content.farfield.systems`   | collections, entries, series fragments  |
 | feed      | `https://feed.farfield.systems`      | short ephemeral posts                   |
 | blobs     | `https://blobs.farfield.systems`     | image/media bytes + metadata            |
+| calendar  | `https://calendar.farfield.systems`  | daily photo calendar                    |
 | apex      | `https://farfield.systems`           | the standalone landing page (not an API)|
 
 The `backup` service is internal (tailnet-only) and has no public API.
@@ -70,6 +71,23 @@ how the feed editor builds galleries that live in content.
 
 A blob's `cid` *is* the hash of its bytes, so `/blobs/{cid}` is immutable —
 cache it forever.
+
+## calendar — `https://calendar.farfield.systems`
+
+Public read endpoints serve the daily photo calendar. The default source is
+NASA Astronomy Picture of the Day; pass `?source=ufo` (aliases: `war`, `uap`,
+`dod`) to switch to the hidden Department of War UFO/UAP imagery source.
+
+| Method & path                         | Returns                                      |
+|----------------------------------------|----------------------------------------------|
+| `GET /api/sources`                     | `{ "sources": [Source, …] }`                |
+| `GET /api/photo[?source=nasa|ufo]`     | today's `{ "source", "photo", "prev", "next" }` |
+| `GET /api/photo/{date}[?source=…]`     | one day/item, `ETag` is the photo CID        |
+| `GET /api/photos[?source=…&page=N]`    | `{ "source", "page", "pages", "total", "photos" }` |
+| `GET /status`                          | `{ "service", "ok", "nasa", "ufo" }`   |
+
+The HTML easter egg uses the same API switch: `/` is NASA, `/?source=ufo` is
+the alternate source, and archive/day links carry the selected source forward.
 
 ## Record shapes
 

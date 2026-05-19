@@ -1,0 +1,117 @@
+{{define "base"}}<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>{{block "title" .}}farfield · calendar{{end}}</title>
+  <meta name="theme-color" content="#fafaf7">
+  <link rel="stylesheet" href="/static/styles.css?v={{.AssetVer}}">
+  <style>
+    /* calendar — a single-plate viewer, one image at a time */
+    .container { max-width: 60rem; }
+
+    figure.plate { border: 1px solid var(--ink); background: var(--wash); }
+    figure.plate img { width: 100%; display: block; }
+    figure.plate a { display: block; }
+    figure.plate .placeholder {
+      display: flex; align-items: center; justify-content: center;
+      min-height: 16rem; padding: 2rem; text-align: center;
+      font: 500 0.78rem/1.6 var(--font-mono);
+      text-transform: uppercase; letter-spacing: 0.08em; opacity: 0.5;
+    }
+    figure.plate figcaption {
+      display: flex; justify-content: space-between; gap: 1rem;
+      padding: 0.55rem 0.8rem; border-top: 1px solid var(--ink);
+      font: 500 0.7rem/1 var(--font-mono);
+      text-transform: uppercase; letter-spacing: 0.07em;
+    }
+
+    .source-eyebrow { margin-bottom: 0.85rem; }
+    .source-eyebrow + .notice { margin-top: 0; margin-bottom: 1.25rem; }
+
+    .cal-body { margin-top: 1.5rem; }
+    .cal-body h2 { margin-bottom: 0.5rem; }
+    .cal-body p { margin-top: 0.9rem; }
+    .cal-credit { margin-top: 1.1rem; font-size: 0.85rem; }
+
+    .notice {
+      margin-top: 1.25rem; padding: 0.55rem 0.75rem;
+      border: 1px solid var(--hairline); font-size: 0.82rem; opacity: 0.75;
+    }
+
+    .stepper {
+      display: flex; justify-content: space-between; gap: 1rem;
+      margin-top: 1.75rem; padding-top: 0.85rem;
+      border-top: 1px solid var(--hairline);
+      font-family: var(--font-mono); font-size: 0.8rem;
+    }
+    .stepper a { text-decoration: none; }
+    .stepper a:hover { color: var(--accent); }
+    .stepper .muted { opacity: 0.3; }
+
+    /* archive — a hairline grid of day plates */
+    .archive {
+      display: grid; gap: 0.75rem;
+      grid-template-columns: repeat(auto-fill, minmax(13rem, 1fr));
+      margin-top: 1.5rem;
+    }
+    .archive a {
+      text-decoration: none; color: inherit; border: 1px solid var(--ink);
+    }
+    .archive a:hover { outline: 2px solid var(--ink); outline-offset: -3px; }
+    .archive .frame { aspect-ratio: 3 / 2; background: var(--wash); }
+    .archive .frame img { width: 100%; height: 100%; object-fit: cover; }
+    .archive .frame .placeholder {
+      width: 100%; height: 100%;
+      display: flex; align-items: center; justify-content: center;
+      font: 500 0.7rem/1 var(--font-mono);
+      text-transform: uppercase; letter-spacing: 0.07em; opacity: 0.4;
+    }
+    .archive .cap { padding: 0.5rem 0.65rem; border-top: 1px solid var(--ink); }
+    .archive .cap .date {
+      font: 500 0.68rem/1 var(--font-mono);
+      text-transform: uppercase; letter-spacing: 0.07em; opacity: 0.55;
+    }
+    .archive .cap .ttl {
+      display: block; margin-top: 0.25rem; font-size: 0.85rem;
+      white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+    }
+
+    .pager {
+      display: flex; gap: 1.5rem; justify-content: center; align-items: baseline;
+      margin-top: 2rem; font-family: var(--font-mono); font-size: 0.8rem;
+    }
+
+    .cal-foot {
+      display: flex; justify-content: space-between; align-items: baseline;
+      gap: 1rem; margin-top: 2.5rem; padding-top: 0.85rem;
+      border-top: 2px solid var(--ink);
+      font: 500 0.68rem/1 var(--font-mono);
+      text-transform: uppercase; letter-spacing: 0.08em;
+    }
+    .cal-foot a { text-decoration: none; }
+    /* the easter egg — a faint reticle; it surfaces only on hover */
+    .cal-foot a.reticle {
+      opacity: 0.18; font-size: 1rem; letter-spacing: 0;
+      transition: opacity 0.12s ease-out, color 0.12s ease-out;
+    }
+    .cal-foot a.reticle:hover { opacity: 1; color: var(--accent); }
+  </style>
+</head>
+<body>
+  <main class="container">
+    {{block "content" .}}{{end}}
+  </main>
+</body>
+</html>{{end}}
+
+{{define "foot"}}
+  <footer class="cal-foot">
+    <span>farfield calendar</span>
+    {{if .IsUFO}}
+      <a href="{{.SwitchURL}}">NASA · APOD ↩</a>
+    {{else}}
+      <a class="reticle" href="{{.SwitchURL}}" aria-label="alternate source">⌖</a>
+    {{end}}
+  </footer>
+{{end}}

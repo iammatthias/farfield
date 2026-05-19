@@ -4,6 +4,7 @@ use (
 	./apps/apex
 	./apps/backup
 	./apps/blobs
+	./apps/calendar
 	./apps/content
 	./apps/feed
 	./lib/auth
