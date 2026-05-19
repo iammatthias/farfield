@@ -181,21 +181,27 @@ func (s *Server) archive(source string, page int) (archiveResult, error) {
 	if start.Before(epoch) {
 		start = epoch
 	}
-	photos := []Photo{}
+	// Warm the real calendar range for the requested page, but paginate over the
+	// cache that actually exists. NASA can rate-limit DEMO_KEY/backfills; if the
+	// cache is only partially warm, the archive must not advertise empty pages for
+	// days we do not have yet.
 	if !end.Before(epoch) {
 		startS, endS := start.Format(dateLayout), end.Format(dateLayout)
 		if err := s.nasaEnsureRange(startS, endS); err != nil {
 			return archiveResult{}, err
 		}
-		var err error
-		if photos, err = listPhotosBetween(s.db, sourceNASA, startS, endS); err != nil {
-			return archiveResult{}, err
-		}
 	}
-	totalDays := daysBetween(calendarStart, todayUTC())
-	pages := pageCount(totalDays)
+	total, err := countPhotos(s.db, sourceNASA)
+	if err != nil {
+		return archiveResult{}, err
+	}
+	photos, err := listPhotos(s.db, sourceNASA, pageSize, (page-1)*pageSize)
+	if err != nil {
+		return archiveResult{}, err
+	}
+	pages := pageCount(total)
 	return archiveResult{
-		Photos: photos, Page: page, Pages: pages, Total: totalDays,
+		Photos: photos, Page: page, Pages: pages, Total: total,
 		HasPrev: page > 1, HasNext: page < pages,
 	}, nil
 }

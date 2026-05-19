@@ -80,6 +80,42 @@ func TestPageCount(t *testing.T) {
 	}
 }
 
+func TestNASAArchivePaginatesCachedPhotosOnly(t *testing.T) {
+	db, err := openDB(filepath.Join(t.TempDir(), "cal.sqlite"))
+	if err != nil {
+		t.Fatalf("openDB: %v", err)
+	}
+	defer db.Close()
+
+	// Simulate a partially warmed NASA cache: the app has recent APOD records,
+	// but the full Jan 1 -> today archive has not been backfilled yet. The
+	// archive should not advertise empty pages for theoretical calendar days.
+	for _, d := range []string{"2026-05-06", "2026-05-07", "2026-05-08"} {
+		if err := upsertPhoto(db, &Photo{
+			Source: sourceNASA, Date: d, Title: "day " + d,
+			ImageURL: "https://x/" + d + ".jpg", MediaType: "image",
+		}); err != nil {
+			t.Fatalf("upsert %s: %v", d, err)
+		}
+	}
+
+	s := &Server{db: db, fetcher: newFetcher("DEMO_KEY")}
+	// Keep the test offline and cache-only.
+	s.fetcher.noteNASAError()
+
+	res, err := s.archive(sourceNASA, 1)
+	if err != nil {
+		t.Fatalf("archive: %v", err)
+	}
+	if res.Total != 3 || res.Pages != 1 || res.HasNext {
+		t.Fatalf("archive metadata = total %d pages %d hasNext %v, want total 3 pages 1 no next",
+			res.Total, res.Pages, res.HasNext)
+	}
+	if len(res.Photos) != 3 || res.Photos[0].Date != "2026-05-08" || res.Photos[2].Date != "2026-05-06" {
+		t.Fatalf("archive photos = %+v, want cached photos newest-first", res.Photos)
+	}
+}
+
 func TestMediaKind(t *testing.T) {
 	cases := map[string]string{
 		"https://war.gov/a.jpg":     "image",
