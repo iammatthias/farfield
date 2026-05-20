@@ -1,0 +1,32 @@
+{{define "title"}}Bookmarks · farfield{{end}}
+{{define "content"}}
+  {{template "publicbar" .}}
+  {{if .Groups}}
+    <div class="bookmarks">
+      {{range .Groups}}
+        <section class="category">
+          <header class="category-head">
+            <span>{{.Name}}</span>
+            <span class="count">{{len .Bookmarks}}</span>
+          </header>
+          {{range .Bookmarks}}
+            <article class="bookmark">
+              {{if .Favicon}}
+                <img class="icon" src="{{.Favicon}}" alt="" loading="lazy" referrerpolicy="no-referrer">
+              {{else}}
+                <span class="icon-empty" aria-hidden="true"></span>
+              {{end}}
+              <div>
+                <h3><a href="{{.URL}}" rel="noopener noreferrer">{{if .Title}}{{.Title}}{{else}}{{.URL}}{{end}}</a></h3>
+                {{with .Description}}<p>{{.}}</p>{{end}}
+                {{with .OGSiteName}}<span class="host">{{.}}</span>{{end}}
+              </div>
+            </article>
+          {{end}}
+        </section>
+      {{end}}
+    </div>
+  {{else}}
+    <p class="muted">No bookmarks yet.</p>
+  {{end}}
+{{end}}

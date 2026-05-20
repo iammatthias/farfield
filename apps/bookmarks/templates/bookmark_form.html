@@ -1,0 +1,57 @@
+{{define "title"}}{{if .IsNew}}New bookmark{{else}}Edit bookmark{{end}} · farfield{{end}}
+{{define "content"}}
+  {{template "adminbar" .}}
+  <h2 style="font-size:1rem">{{if .IsNew}}New bookmark{{else}}Edit bookmark{{end}}</h2>
+  {{with .Error}}<p class="error">{{.}}</p>{{end}}
+
+  <form method="post" action="{{.Action}}">
+    <div class="field">
+      <label for="url">URL</label>
+      <input type="url" id="url" name="url" required autofocus value="{{.Bookmark.URL}}">
+      {{if .IsNew}}<p class="hint">We fetch OpenGraph and meta tags from this URL when you save.</p>{{end}}
+    </div>
+    <div class="field">
+      <label for="title">Title</label>
+      <input type="text" id="title" name="title" value="{{.Bookmark.Title}}">
+      <p class="hint">Leave blank to use the page's title or og:title.</p>
+    </div>
+    <div class="field">
+      <label for="description">Description</label>
+      <textarea id="description" name="description" rows="3">{{.Bookmark.Description}}</textarea>
+      <p class="hint">Leave blank to use the page's meta description.</p>
+    </div>
+    <div class="field">
+      <label for="category">Category</label>
+      <input type="text" id="category" name="category" value="{{.Bookmark.Category}}">
+    </div>
+    <div class="field">
+      <label for="admin_notes">Admin notes</label>
+      <textarea id="admin_notes" name="admin_notes" rows="3">{{.Bookmark.AdminNotes}}</textarea>
+      <p class="hint">Private. Never appears on the public site or in the public API.</p>
+    </div>
+    <div class="field check">
+      <input type="checkbox" id="public" name="public"{{if .Bookmark.Public}} checked{{end}}>
+      <label for="public" style="font:inherit;text-transform:none;letter-spacing:normal;opacity:1;margin:0">Public — show on the public index and JSON API</label>
+    </div>
+
+    {{if not .IsNew}}
+      <hr>
+      <p class="label">Fetched metadata</p>
+      <dl class="summary" style="display:grid;grid-template-columns:auto 1fr;gap:0.3rem 0.9rem;font-family:var(--font-mono);font-size:0.78rem;opacity:0.7">
+        <dt>og:title</dt><dd>{{if .Bookmark.OGTitle}}{{.Bookmark.OGTitle}}{{else}}—{{end}}</dd>
+        <dt>og:description</dt><dd>{{if .Bookmark.OGDescription}}{{.Bookmark.OGDescription}}{{else}}—{{end}}</dd>
+        <dt>og:image</dt><dd>{{if .Bookmark.OGImage}}{{.Bookmark.OGImage}}{{else}}—{{end}}</dd>
+        <dt>og:site_name</dt><dd>{{if .Bookmark.OGSiteName}}{{.Bookmark.OGSiteName}}{{else}}—{{end}}</dd>
+        <dt>og:type</dt><dd>{{if .Bookmark.OGType}}{{.Bookmark.OGType}}{{else}}—{{end}}</dd>
+        <dt>author</dt><dd>{{if .Bookmark.MetaAuthor}}{{.Bookmark.MetaAuthor}}{{else}}—{{end}}</dd>
+        <dt>favicon</dt><dd>{{if .Bookmark.Favicon}}{{.Bookmark.Favicon}}{{else}}—{{end}}</dd>
+        <dt>cid</dt><dd>{{.Bookmark.CID}}</dd>
+      </dl>
+    {{end}}
+
+    <div class="actions">
+      <button type="submit">{{if .IsNew}}Save{{else}}Save changes{{end}}</button>
+      <a href="/admin">Cancel</a>
+    </div>
+  </form>
+{{end}}

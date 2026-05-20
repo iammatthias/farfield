@@ -105,6 +105,24 @@ services:
     volumes:
       - ./data:/data
 
+  bookmarks:
+    build:
+      context: .
+      dockerfile: apps/bookmarks/Dockerfile
+    image: farfield-bookmarks
+    restart: unless-stopped
+    ports:
+      - "${BOOKMARKS_PORT:-8793}:8793"
+    environment:
+      - HOST=0.0.0.0
+      - BOOKMARKS_PORT=8793
+      - BOOKMARKS_DB_PATH=/data/bookmarks.sqlite
+      - PASSWORD=${PASSWORD:-changeme}
+      - BOOKMARKS_API_KEY=${BOOKMARKS_API_KEY:-}
+      - COOKIE_SECURE=true
+    volumes:
+      - ./data:/data
+
   backup:
     build:
       context: .

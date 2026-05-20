@@ -9,6 +9,7 @@ single-binary services; the website reads three of them.
 | feed      | `https://feed.farfield.systems`      | short ephemeral posts                   |
 | blobs     | `https://blobs.farfield.systems`     | image/media bytes + metadata            |
 | calendar  | `https://calendar.farfield.systems`  | daily photo calendar                    |
+| bookmarks | `https://bookmarks.farfield.systems` | curated link list with OG metadata      |
 | apex      | `https://farfield.systems`           | the standalone landing page (not an API)|
 
 The `backup` service is internal (tailnet-only) and has no public API.
@@ -89,6 +90,24 @@ NASA Astronomy Picture of the Day; pass `?source=ufo` (aliases: `war`, `uap`,
 The HTML easter egg uses the same API switch: `/` is NASA, `/?source=ufo` is
 the alternate source, and archive/day links carry the selected source forward.
 
+## bookmarks — `https://bookmarks.farfield.systems`
+
+Bookmarks are curated links with OpenGraph/meta metadata fetched server-side
+on save. Each carries a `public` flag — only public ones appear in the public
+API or on the public HTML index. Admin-only `adminNotes` are never returned.
+
+| Method & path                    | Returns                                          |
+|----------------------------------|--------------------------------------------------|
+| `GET /api/bookmarks`             | `{ "bookmarks": [Bookmark, …] }` — public only; `ETag` |
+| `GET /api/bookmarks/{id}`        | `Bookmark` — `404` if missing or private; `ETag` |
+| `GET /status`                    | `{ "service", "ok", "bookmarks" }`               |
+| `POST /api/bookmarks`            | create — `X-API-Key`                             |
+| `PUT /api/bookmarks/{id}`        | replace — `X-API-Key`                            |
+| `DELETE /api/bookmarks/{id}`     | delete — `X-API-Key`                             |
+
+The write API is disabled unless `BOOKMARKS_API_KEY` is set on the service.
+The HTML admin UI lives under `/admin` and is gated by the shared `PASSWORD`.
+
 ## Record shapes
 
 ```jsonc
@@ -107,6 +126,12 @@ the alternate source, and archive/day links carry the selected source forward.
 
 // BlobMeta
 { "cid", "size", "mime", "width"?, "height"?, "blurhash"?, "dominantColor"? }
+
+// Bookmark — admin-only fields (adminNotes) are stripped from public responses
+{ "id", "url", "title", "description", "category", "public", "cid",
+  "ogTitle"?, "ogDescription"?, "ogImage"?, "ogSiteName"?, "ogType"?,
+  "metaAuthor"?, "favicon"?,
+  "createdAt", "updatedAt" }
 ```
 
 ## Body URIs

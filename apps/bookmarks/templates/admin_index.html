@@ -1,0 +1,52 @@
+{{define "title"}}Admin · farfield bookmarks{{end}}
+{{define "content"}}
+  {{template "adminbar" .}}
+  <p class="summary">
+    <span>Total {{.Total}}</span>
+    <span>Public {{.Public}}</span>
+    <span>Private {{.Private}}</span>
+  </p>
+  {{if .Bookmarks}}
+    <div class="table-wrap">
+      <table class="admin">
+        <thead>
+          <tr>
+            <th>Title</th>
+            <th>URL</th>
+            <th>Category</th>
+            <th>Visibility</th>
+            <th>Actions</th>
+          </tr>
+        </thead>
+        <tbody>
+          {{range .Bookmarks}}
+            <tr>
+              <td>{{if .Title}}{{.Title}}{{else}}<span class="muted">—</span>{{end}}</td>
+              <td class="url"><a href="{{.URL}}" rel="noopener noreferrer">{{.URL}}</a></td>
+              <td class="cat">{{if .Category}}{{.Category}}{{else}}<span class="muted">—</span>{{end}}</td>
+              <td>
+                {{if .Public}}
+                  <span class="badge live">Public</span>
+                {{else}}
+                  <span class="badge draft">Private</span>
+                {{end}}
+              </td>
+              <td class="actions">
+                <a href="/admin/bookmarks/{{.ID}}/edit">Edit</a>
+                <form method="post" action="/admin/bookmarks/{{.ID}}/refetch">
+                  <button type="submit">Refetch</button>
+                </form>
+                <form method="post" action="/admin/bookmarks/{{.ID}}/delete"
+                      onsubmit="return confirm('Delete this bookmark?')">
+                  <button class="danger" type="submit">Delete</button>
+                </form>
+              </td>
+            </tr>
+          {{end}}
+        </tbody>
+      </table>
+    </div>
+  {{else}}
+    <p class="muted">No bookmarks yet. <a href="/admin/new">Add one.</a></p>
+  {{end}}
+{{end}}
