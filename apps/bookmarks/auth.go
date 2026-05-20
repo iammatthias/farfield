@@ -9,7 +9,7 @@ import (
 )
 
 // requireSession guards the HTML admin UI. An invalid or absent session
-// redirects to the admin login page.
+// redirects to the login page.
 func (s *Server) requireSession(next http.HandlerFunc) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		if token, ok := auth.Session(r); ok {
@@ -18,7 +18,7 @@ func (s *Server) requireSession(next http.HandlerFunc) http.HandlerFunc {
 				return
 			}
 		}
-		http.Redirect(w, r, "/admin/login", http.StatusSeeOther)
+		http.Redirect(w, r, "/login", http.StatusSeeOther)
 	}
 }
 
@@ -40,7 +40,7 @@ func (s *Server) requireAPIKey(next http.HandlerFunc) http.HandlerFunc {
 }
 
 // presentedKey reads the API key from either an X-API-Key header or an
-// "Authorization: Bearer <key>" header.
+// "Authorization: Bearer ***" header.
 func presentedKey(r *http.Request) string {
 	if k := r.Header.Get("X-API-Key"); k != "" {
 		return k

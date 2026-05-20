@@ -1,6 +1,6 @@
 {{define "title"}}{{if .IsNew}}New bookmark{{else}}Edit bookmark{{end}} · farfield{{end}}
 {{define "content"}}
-  {{template "adminbar" .}}
+  {{template "topbar" .}}
   <h2 style="font-size:1rem">{{if .IsNew}}New bookmark{{else}}Edit bookmark{{end}}</h2>
   {{with .Error}}<p class="error">{{.}}</p>{{end}}
 
@@ -27,11 +27,11 @@
     <div class="field">
       <label for="admin_notes">Admin notes</label>
       <textarea id="admin_notes" name="admin_notes" rows="3">{{.Bookmark.AdminNotes}}</textarea>
-      <p class="hint">Private. Never appears on the public site or in the public API.</p>
+      <p class="hint">Private. Never appears in the public JSON API.</p>
     </div>
     <div class="field check">
       <input type="checkbox" id="public" name="public"{{if .Bookmark.Public}} checked{{end}}>
-      <label for="public" style="font:inherit;text-transform:none;letter-spacing:normal;opacity:1;margin:0">Public — show on the public index and JSON API</label>
+      <label for="public" style="font:inherit;text-transform:none;letter-spacing:normal;opacity:1;margin:0">Public — include in the public JSON API</label>
     </div>
 
     {{if not .IsNew}}
@@ -51,7 +51,7 @@
 
     <div class="actions">
       <button type="submit">{{if .IsNew}}Save{{else}}Save changes{{end}}</button>
-      <a href="/admin">Cancel</a>
+      <a href="/">Cancel</a>
     </div>
   </form>
 {{end}}

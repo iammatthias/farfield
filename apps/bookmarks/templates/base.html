@@ -9,43 +9,7 @@
   <style>
     .container { max-width: 56rem; }
 
-    /* a public bookmark, grouped under a category header */
-    .bookmarks { display: flex; flex-direction: column; gap: 1.5rem; }
-    .category {
-      display: flex; flex-direction: column; gap: 0.75rem;
-      padding-top: 0.4rem;
-    }
-    .category-head {
-      display: flex; justify-content: space-between; align-items: baseline;
-      gap: 1rem; padding-bottom: 0.4rem;
-      border-bottom: 1px solid var(--hairline);
-      font: 500 0.72rem/1 var(--font-mono);
-      text-transform: uppercase; letter-spacing: 0.09em;
-    }
-    .category-head span.count { opacity: 0.5; }
-    .bookmark {
-      display: grid; grid-template-columns: auto 1fr; gap: 0.5rem 0.9rem;
-      padding: 0.6rem 0; border-bottom: 1px solid var(--hairline);
-    }
-    .bookmark:last-child { border-bottom: 0; }
-    .bookmark .icon {
-      width: 1.1rem; height: 1.1rem; margin-top: 0.25rem;
-      object-fit: contain; opacity: 0.7;
-    }
-    .bookmark .icon-empty {
-      width: 1.1rem; height: 1.1rem; margin-top: 0.25rem;
-      border: 1px solid var(--hairline);
-    }
-    .bookmark h3 { font-size: 1rem; font-weight: 500; line-height: 1.3; }
-    .bookmark h3 a { text-decoration: none; }
-    .bookmark h3 a:hover { text-decoration: underline; text-underline-offset: 0.2em; }
-    .bookmark p { font-size: 0.92rem; opacity: 0.8; margin-top: 0.2rem; }
-    .bookmark .host {
-      display: inline-block; margin-top: 0.3rem;
-      font: 0.72rem/1 var(--font-mono); opacity: 0.55;
-    }
-
-    /* the admin table: every column visible, one row per bookmark */
+    /* the bookmarks table: every column visible, one row per bookmark */
     table.admin { font-size: 0.85rem; }
     table.admin td.url { max-width: 22rem; }
     table.admin td.url a {
@@ -83,22 +47,12 @@
 </body>
 </html>{{end}}
 
-{{define "publicbar"}}
+{{define "topbar"}}
 <header class="bar">
   <h1><a href="/">farfield · bookmarks</a></h1>
   <nav>
-    <a href="/api/bookmarks">JSON</a>
-  </nav>
-</header>
-{{end}}
-
-{{define "adminbar"}}
-<header class="bar">
-  <h1><a href="/admin">farfield · bookmarks · admin</a></h1>
-  <nav>
-    <a href="/admin/new">New</a>
-    <a href="/">Public</a>
-    <a href="/admin/logout">Log out</a>
+    <a href="/new">New bookmark</a>
+    <a href="/logout">Log out</a>
   </nav>
 </header>
 {{end}}

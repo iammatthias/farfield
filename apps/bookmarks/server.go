@@ -86,28 +86,25 @@ func run(host, port string) error {
 func (s *Server) routes() http.Handler {
 	mux := http.NewServeMux()
 
-	// Public HTML.
-	mux.HandleFunc("GET /{$}", s.handlePublicIndex)
+	// HTML admin UI — session-gated.
+	mux.HandleFunc("GET /{$}", s.requireSession(s.handleIndex))
+	mux.HandleFunc("GET /new", s.requireSession(s.handleNewForm))
+	mux.HandleFunc("POST /bookmarks", s.requireSession(s.handleCreate))
+	mux.HandleFunc("GET /bookmarks/{id}/edit", s.requireSession(s.handleEditForm))
+	mux.HandleFunc("POST /bookmarks/{id}", s.requireSession(s.handleUpdate))
+	mux.HandleFunc("POST /bookmarks/{id}/delete", s.requireSession(s.handleDelete))
+	mux.HandleFunc("POST /bookmarks/{id}/refetch", s.requireSession(s.handleRefetch))
 
-	// Admin HTML — session-gated, mounted under /admin.
-	mux.HandleFunc("GET /admin", s.requireSession(s.handleAdminIndex))
-	mux.HandleFunc("GET /admin/{$}", s.requireSession(s.handleAdminIndex))
-	mux.HandleFunc("GET /admin/new", s.requireSession(s.handleNewForm))
-	mux.HandleFunc("POST /admin/bookmarks", s.requireSession(s.handleCreate))
-	mux.HandleFunc("GET /admin/bookmarks/{id}/edit", s.requireSession(s.handleEditForm))
-	mux.HandleFunc("POST /admin/bookmarks/{id}", s.requireSession(s.handleUpdate))
-	mux.HandleFunc("POST /admin/bookmarks/{id}/delete", s.requireSession(s.handleDelete))
-	mux.HandleFunc("POST /admin/bookmarks/{id}/refetch", s.requireSession(s.handleRefetch))
+	// Login — public HTML.
+	mux.HandleFunc("GET /login", s.handleLoginForm)
+	mux.HandleFunc("POST /login", s.handleLogin)
+	mux.HandleFunc("GET /logout", s.handleLogout)
 
-	// Admin login.
-	mux.HandleFunc("GET /admin/login", s.handleLoginForm)
-	mux.HandleFunc("POST /admin/login", s.handleLogin)
-	mux.HandleFunc("GET /admin/logout", s.handleLogout)
-
-	// Public JSON read API.
+	// Public JSON read API — public bookmarks only.
 	mux.HandleFunc("GET /status", s.handleStatus)
 	mux.HandleFunc("GET /api/bookmarks", s.handleAPIList)
 	mux.HandleFunc("GET /api/bookmarks/{id}", s.handleAPIGet)
+	mux.HandleFunc("GET /api/categories", s.handleAPICategories)
 
 	// API-key-gated write API.
 	mux.HandleFunc("POST /api/bookmarks", s.requireAPIKey(s.handleAPICreate))
@@ -120,24 +117,9 @@ func (s *Server) routes() http.Handler {
 	return cors(logRequests(mux))
 }
 
-// ── public HTML ─────────────────────────────────────────────────────────────
+// ── HTML admin handlers ────────────────────────────────────────────────────
 
-func (s *Server) handlePublicIndex(w http.ResponseWriter, r *http.Request) {
-	bs, err := listPublicBookmarks(s.db)
-	if err != nil {
-		s.fail(w, "list public bookmarks", err)
-		return
-	}
-	groups := groupByCategory(publicList(bs))
-	s.render(w, "public_index.html", map[string]any{
-		"Groups": groups,
-		"Total":  len(bs),
-	})
-}
-
-// ── admin HTML ──────────────────────────────────────────────────────────────
-
-func (s *Server) handleAdminIndex(w http.ResponseWriter, r *http.Request) {
+func (s *Server) handleIndex(w http.ResponseWriter, r *http.Request) {
 	bs, err := listBookmarks(s.db)
 	if err != nil {
 		s.fail(w, "list bookmarks", err)
@@ -149,7 +131,7 @@ func (s *Server) handleAdminIndex(w http.ResponseWriter, r *http.Request) {
 			publicN++
 		}
 	}
-	s.render(w, "admin_index.html", map[string]any{
+	s.render(w, "index.html", map[string]any{
 		"Bookmarks": bs,
 		"Total":     len(bs),
 		"Public":    publicN,
@@ -158,17 +140,17 @@ func (s *Server) handleAdminIndex(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleNewForm(w http.ResponseWriter, r *http.Request) {
-	s.renderForm(w, &Bookmark{Public: true}, true, "/admin/bookmarks", "")
+	s.renderForm(w, &Bookmark{Public: true}, true, "/bookmarks", "")
 }
 
 func (s *Server) handleCreate(w http.ResponseWriter, r *http.Request) {
 	b := bookmarkFromForm(r)
 	if b.URL == "" {
-		s.renderForm(w, b, true, "/admin/bookmarks", "URL is required.")
+		s.renderForm(w, b, true, "/bookmarks", "URL is required.")
 		return
 	}
 	if _, err := url.ParseRequestURI(b.URL); err != nil {
-		s.renderForm(w, b, true, "/admin/bookmarks", "URL is malformed.")
+		s.renderForm(w, b, true, "/bookmarks", "URL is malformed.")
 		return
 	}
 	s.fetchAndApply(r.Context(), b)
@@ -176,7 +158,7 @@ func (s *Server) handleCreate(w http.ResponseWriter, r *http.Request) {
 		s.fail(w, "create bookmark", err)
 		return
 	}
-	http.Redirect(w, r, "/admin", http.StatusSeeOther)
+	http.Redirect(w, r, "/", http.StatusSeeOther)
 }
 
 func (s *Server) handleEditForm(w http.ResponseWriter, r *http.Request) {
@@ -189,7 +171,7 @@ func (s *Server) handleEditForm(w http.ResponseWriter, r *http.Request) {
 		http.NotFound(w, r)
 		return
 	}
-	s.renderForm(w, b, false, "/admin/bookmarks/"+b.ID, "")
+	s.renderForm(w, b, false, "/bookmarks/"+b.ID, "")
 }
 
 func (s *Server) handleUpdate(w http.ResponseWriter, r *http.Request) {
@@ -216,7 +198,7 @@ func (s *Server) handleUpdate(w http.ResponseWriter, r *http.Request) {
 	b.CreatedAt = existing.CreatedAt
 	if b.URL == "" {
 		b.ID = id
-		s.renderForm(w, b, false, "/admin/bookmarks/"+id, "URL is required.")
+		s.renderForm(w, b, false, "/bookmarks/"+id, "URL is required.")
 		return
 	}
 	ok, err := updateBookmark(s.db, id, b)
@@ -228,7 +210,7 @@ func (s *Server) handleUpdate(w http.ResponseWriter, r *http.Request) {
 		http.NotFound(w, r)
 		return
 	}
-	http.Redirect(w, r, "/admin", http.StatusSeeOther)
+	http.Redirect(w, r, "/", http.StatusSeeOther)
 }
 
 func (s *Server) handleDelete(w http.ResponseWriter, r *http.Request) {
@@ -236,7 +218,7 @@ func (s *Server) handleDelete(w http.ResponseWriter, r *http.Request) {
 		s.fail(w, "delete bookmark", err)
 		return
 	}
-	http.Redirect(w, r, "/admin", http.StatusSeeOther)
+	http.Redirect(w, r, "/", http.StatusSeeOther)
 }
 
 func (s *Server) handleRefetch(w http.ResponseWriter, r *http.Request) {
@@ -260,7 +242,7 @@ func (s *Server) handleRefetch(w http.ResponseWriter, r *http.Request) {
 		s.fail(w, "update bookmark", err)
 		return
 	}
-	http.Redirect(w, r, "/admin", http.StatusSeeOther)
+	http.Redirect(w, r, "/", http.StatusSeeOther)
 }
 
 // fetchAndApply fetches the bookmark's URL and applies the extracted metadata.
@@ -288,7 +270,7 @@ func bookmarkFromForm(r *http.Request) *Bookmark {
 	}
 }
 
-// ── login ───────────────────────────────────────────────────────────────────
+// ── login ──────────────────────────────────────────────────────────────────
 
 func (s *Server) handleLoginForm(w http.ResponseWriter, r *http.Request) {
 	s.render(w, "login.html", map[string]any{"Error": r.URL.Query().Get("error")})
@@ -300,7 +282,7 @@ func (s *Server) handleLogin(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if s.password == "" || !auth.VerifyPassword(r.FormValue("password"), s.password) {
-		http.Redirect(w, r, "/admin/login?error=Invalid+password", http.StatusSeeOther)
+		http.Redirect(w, r, "/login?error=Invalid+password", http.StatusSeeOther)
 		return
 	}
 	token := auth.NewSessionToken()
@@ -309,7 +291,7 @@ func (s *Server) handleLogin(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	http.SetCookie(w, auth.SessionCookie(token, s.cookieSecure))
-	http.Redirect(w, r, "/admin", http.StatusSeeOther)
+	http.Redirect(w, r, "/", http.StatusSeeOther)
 }
 
 func (s *Server) handleLogout(w http.ResponseWriter, r *http.Request) {
@@ -317,10 +299,10 @@ func (s *Server) handleLogout(w http.ResponseWriter, r *http.Request) {
 		_ = store.DeleteSession(s.db, token)
 	}
 	http.SetCookie(w, auth.ClearCookie(s.cookieSecure))
-	http.Redirect(w, r, "/admin/login", http.StatusSeeOther)
+	http.Redirect(w, r, "/login", http.StatusSeeOther)
 }
 
-// ── public JSON read API ────────────────────────────────────────────────────
+// ── public JSON read API ───────────────────────────────────────────────────
 
 func (s *Server) handleStatus(w http.ResponseWriter, r *http.Request) {
 	bs, err := listPublicBookmarks(s.db)
@@ -362,6 +344,34 @@ func (s *Server) handleAPIGet(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeRecord(w, r, b.CID, publicView(b))
+}
+
+// handleAPICategories returns the public bookmarks grouped by category, in the
+// same order the public listing uses (categories first-seen, "Uncategorized"
+// last). Useful to clients that want to render a sectioned list without
+// re-sorting client-side.
+func (s *Server) handleAPICategories(w http.ResponseWriter, r *http.Request) {
+	bs, err := listPublicBookmarks(s.db)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "could not list bookmarks")
+		return
+	}
+	groups := groupByCategory(publicList(bs))
+	type group struct {
+		Name      string     `json:"name"`
+		Bookmarks []Bookmark `json:"bookmarks"`
+	}
+	out := make([]group, 0, len(groups))
+	for _, g := range groups {
+		out = append(out, group{Name: g.Name, Bookmarks: g.Bookmarks})
+	}
+	etag := `"` + cid.OfValue(out) + `"`
+	w.Header().Set("ETag", etag)
+	if r.Header.Get("If-None-Match") == etag {
+		w.WriteHeader(http.StatusNotModified)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"categories": out})
 }
 
 // ── API-key-gated write API ────────────────────────────────────────────────

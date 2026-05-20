@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"database/sql"
 	"encoding/json"
 	"io"
@@ -44,6 +45,35 @@ func newTestServer(t *testing.T) *Server {
 		http:         &http.Client{},
 		assetVer:     "test",
 	}
+}
+
+// noRedirectClient builds an HTTP client that does not follow redirects, so
+// tests can read 303 Location headers directly.
+func noRedirectClient() *http.Client {
+	return &http.Client{
+		CheckRedirect: func(*http.Request, []*http.Request) error {
+			return http.ErrUseLastResponse
+		},
+	}
+}
+
+// loginSession posts the correct password and returns the cookies it received.
+func loginSession(t *testing.T, ts *httptest.Server) []*http.Cookie {
+	t.Helper()
+	c := noRedirectClient()
+	resp, err := c.PostForm(ts.URL+"/login", url.Values{"password": {"secret"}})
+	if err != nil {
+		t.Fatalf("login: %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusSeeOther {
+		t.Fatalf("login status = %d, want 303", resp.StatusCode)
+	}
+	cookies := resp.Cookies()
+	if len(cookies) == 0 {
+		t.Fatal("login did not set a cookie")
+	}
+	return cookies
 }
 
 func TestBookmarkCRUD(t *testing.T) {
@@ -369,72 +399,306 @@ func TestSingleRecordETag(t *testing.T) {
 	}
 }
 
-func TestAdminAuthSmoke(t *testing.T) {
+func TestCategoriesAPIGroupsPublicOnly(t *testing.T) {
+	s := newTestServer(t)
+	mustInsert := func(b *Bookmark) {
+		if err := insertBookmark(s.db, b); err != nil {
+			t.Fatalf("insert: %v", err)
+		}
+	}
+	mustInsert(&Bookmark{URL: "https://a.example", Category: "Reference", Public: true, AdminNotes: "x"})
+	mustInsert(&Bookmark{URL: "https://b.example", Category: "Reference", Public: true})
+	mustInsert(&Bookmark{URL: "https://c.example", Category: "", Public: true})
+	mustInsert(&Bookmark{URL: "https://d.example", Category: "Hidden", Public: false, AdminNotes: "leak?"})
+
+	ts := httptest.NewServer(s.routes())
+	defer ts.Close()
+
+	resp, err := http.Get(ts.URL + "/api/categories")
+	if err != nil {
+		t.Fatalf("GET categories: %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != 200 {
+		t.Fatalf("GET categories status %d", resp.StatusCode)
+	}
+	var out struct {
+		Categories []struct {
+			Name      string     `json:"name"`
+			Bookmarks []Bookmark `json:"bookmarks"`
+		} `json:"categories"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&out); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	// Public groups: "Reference" (2) and "Uncategorized" (1) — never "Hidden".
+	names := make([]string, 0, len(out.Categories))
+	for _, g := range out.Categories {
+		names = append(names, g.Name)
+		for _, b := range g.Bookmarks {
+			if !b.Public {
+				t.Errorf("categories leaked a private bookmark: %s", b.URL)
+			}
+			if b.AdminNotes != "" {
+				t.Errorf("categories leaked AdminNotes: %q", b.AdminNotes)
+			}
+			if g.Name == "Hidden" {
+				t.Errorf("categories included a private-only category")
+			}
+		}
+	}
+	if len(out.Categories) != 2 {
+		t.Fatalf("got categories %v, want 2 (Reference, Uncategorized)", names)
+	}
+	if out.Categories[0].Name != "Reference" || len(out.Categories[0].Bookmarks) != 2 {
+		t.Errorf("Reference group = %+v", out.Categories[0])
+	}
+	if out.Categories[1].Name != "Uncategorized" || len(out.Categories[1].Bookmarks) != 1 {
+		t.Errorf("Uncategorized group = %+v", out.Categories[1])
+	}
+}
+
+func TestSessionGatedRootRedirectsUnauthenticated(t *testing.T) {
 	s := newTestServer(t)
 	ts := httptest.NewServer(s.routes())
 	defer ts.Close()
 
-	// Unauthenticated /admin redirects to /admin/login. We disable redirect
-	// following so we can read the Location header.
-	c := &http.Client{
-		CheckRedirect: func(*http.Request, []*http.Request) error {
-			return http.ErrUseLastResponse
-		},
-		Jar: nil,
-	}
-	resp, err := c.Get(ts.URL + "/admin")
+	c := noRedirectClient()
+	resp, err := c.Get(ts.URL + "/")
 	if err != nil {
-		t.Fatalf("GET /admin: %v", err)
+		t.Fatalf("GET /: %v", err)
 	}
+	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusSeeOther {
-		t.Errorf("/admin status = %d, want 303", resp.StatusCode)
+		t.Errorf("/ status = %d, want 303", resp.StatusCode)
 	}
-	if loc := resp.Header.Get("Location"); !strings.Contains(loc, "/admin/login") {
-		t.Errorf("/admin Location = %q, want /admin/login", loc)
+	if loc := resp.Header.Get("Location"); loc != "/login" {
+		t.Errorf("/ Location = %q, want /login", loc)
 	}
-	resp.Body.Close()
 
-	// A wrong password redirects back to /admin/login?error=...
-	resp2, err := c.PostForm(ts.URL+"/admin/login",
-		url.Values{"password": {"wrong"}})
+	// The form-post endpoints redirect too — they must not act on
+	// unauthenticated traffic.
+	resp2, err := c.PostForm(ts.URL+"/bookmarks",
+		url.Values{"url": {"https://no.example"}})
 	if err != nil {
-		t.Fatalf("POST wrong: %v", err)
+		t.Fatalf("POST /bookmarks: %v", err)
 	}
-	if resp2.StatusCode != http.StatusSeeOther {
-		t.Errorf("wrong login status = %d, want 303", resp2.StatusCode)
+	defer resp2.Body.Close()
+	if resp2.StatusCode != http.StatusSeeOther ||
+		resp2.Header.Get("Location") != "/login" {
+		t.Errorf("POST /bookmarks unauthed = %d %q", resp2.StatusCode, resp2.Header.Get("Location"))
 	}
-	if loc := resp2.Header.Get("Location"); !strings.Contains(loc, "error") {
-		t.Errorf("wrong login Location = %q, want error param", loc)
-	}
-	resp2.Body.Close()
+}
 
-	// Correct password sets a cookie and redirects to /admin.
-	resp3, err := c.PostForm(ts.URL+"/admin/login",
-		url.Values{"password": {"secret"}})
+func TestSessionLoginRejectsWrongPassword(t *testing.T) {
+	s := newTestServer(t)
+	ts := httptest.NewServer(s.routes())
+	defer ts.Close()
+
+	c := noRedirectClient()
+	resp, err := c.PostForm(ts.URL+"/login", url.Values{"password": {"wrong"}})
 	if err != nil {
-		t.Fatalf("POST right: %v", err)
+		t.Fatalf("POST /login wrong: %v", err)
 	}
-	if resp3.StatusCode != http.StatusSeeOther {
-		t.Errorf("login status = %d, want 303", resp3.StatusCode)
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusSeeOther {
+		t.Errorf("wrong login status = %d, want 303", resp.StatusCode)
 	}
-	cookies := resp3.Cookies()
-	resp3.Body.Close()
-	if len(cookies) == 0 {
-		t.Fatal("login did not set a cookie")
+	if loc := resp.Header.Get("Location"); !strings.Contains(loc, "/login") || !strings.Contains(loc, "error") {
+		t.Errorf("wrong login Location = %q, want /login?error=...", loc)
 	}
+}
 
-	// Use the cookie to reach /admin.
-	req, _ := http.NewRequest("GET", ts.URL+"/admin", nil)
+func TestLoggedInCRUDForms(t *testing.T) {
+	s := newTestServer(t)
+	ts := httptest.NewServer(s.routes())
+	defer ts.Close()
+
+	cookies := loginSession(t, ts)
+	c := noRedirectClient()
+
+	// Authed GET / renders 200.
+	req, _ := http.NewRequest("GET", ts.URL+"/", nil)
 	for _, ck := range cookies {
 		req.AddCookie(ck)
 	}
-	resp4, err := c.Do(req)
+	resp, err := c.Do(req)
 	if err != nil {
-		t.Fatalf("GET /admin with cookie: %v", err)
+		t.Fatalf("GET / authed: %v", err)
 	}
-	defer resp4.Body.Close()
-	if resp4.StatusCode != http.StatusOK {
-		t.Errorf("/admin authed status = %d, want 200", resp4.StatusCode)
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Errorf("/ authed status = %d, want 200", resp.StatusCode)
+	}
+
+	// Create via form post.
+	form := url.Values{
+		"url":      {"https://create.example/path"},
+		"title":    {"Create Test"},
+		"category": {"Tooling"},
+		"public":   {"on"},
+	}
+	reqCreate, _ := http.NewRequest("POST", ts.URL+"/bookmarks",
+		strings.NewReader(form.Encode()))
+	reqCreate.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	for _, ck := range cookies {
+		reqCreate.AddCookie(ck)
+	}
+	respCreate, err := c.Do(reqCreate)
+	if err != nil {
+		t.Fatalf("POST /bookmarks: %v", err)
+	}
+	respCreate.Body.Close()
+	if respCreate.StatusCode != http.StatusSeeOther ||
+		respCreate.Header.Get("Location") != "/" {
+		t.Fatalf("create redirect = %d %q", respCreate.StatusCode, respCreate.Header.Get("Location"))
+	}
+
+	bs, _ := listBookmarks(s.db)
+	if len(bs) != 1 || bs[0].Title != "Create Test" || !bs[0].Public {
+		t.Fatalf("create did not persist: %+v", bs)
+	}
+	id := bs[0].ID
+
+	// Edit form GET.
+	reqEdit, _ := http.NewRequest("GET", ts.URL+"/bookmarks/"+id+"/edit", nil)
+	for _, ck := range cookies {
+		reqEdit.AddCookie(ck)
+	}
+	respEdit, err := c.Do(reqEdit)
+	if err != nil {
+		t.Fatalf("GET edit: %v", err)
+	}
+	defer respEdit.Body.Close()
+	if respEdit.StatusCode != http.StatusOK {
+		t.Errorf("GET edit status = %d, want 200", respEdit.StatusCode)
+	}
+
+	// Update via form post (no "public" → private).
+	updForm := url.Values{
+		"url":      {"https://create.example/path"},
+		"title":    {"Edited"},
+		"category": {"Notes"},
+	}
+	reqUpd, _ := http.NewRequest("POST", ts.URL+"/bookmarks/"+id,
+		strings.NewReader(updForm.Encode()))
+	reqUpd.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	for _, ck := range cookies {
+		reqUpd.AddCookie(ck)
+	}
+	respUpd, err := c.Do(reqUpd)
+	if err != nil {
+		t.Fatalf("POST update: %v", err)
+	}
+	respUpd.Body.Close()
+	if respUpd.StatusCode != http.StatusSeeOther {
+		t.Errorf("update status = %d, want 303", respUpd.StatusCode)
+	}
+	got, _ := getBookmark(s.db, id)
+	if got == nil || got.Title != "Edited" || got.Category != "Notes" || got.Public {
+		t.Fatalf("update did not persist: %+v", got)
+	}
+
+	// Delete via form post.
+	reqDel, _ := http.NewRequest("POST", ts.URL+"/bookmarks/"+id+"/delete",
+		bytes.NewReader(nil))
+	for _, ck := range cookies {
+		reqDel.AddCookie(ck)
+	}
+	respDel, err := c.Do(reqDel)
+	if err != nil {
+		t.Fatalf("POST delete: %v", err)
+	}
+	respDel.Body.Close()
+	if respDel.StatusCode != http.StatusSeeOther {
+		t.Errorf("delete status = %d, want 303", respDel.StatusCode)
+	}
+	if g, _ := getBookmark(s.db, id); g != nil {
+		t.Errorf("delete did not remove the row: %+v", g)
+	}
+}
+
+func TestAPIKeyWriteAuth(t *testing.T) {
+	s := newTestServer(t)
+	ts := httptest.NewServer(s.routes())
+	defer ts.Close()
+
+	body := []byte(`{"url":"https://api.example/","title":"From API","public":true}`)
+
+	// Missing key → 401.
+	resp, err := http.Post(ts.URL+"/api/bookmarks", "application/json", bytes.NewReader(body))
+	if err != nil {
+		t.Fatalf("POST no key: %v", err)
+	}
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusUnauthorized {
+		t.Errorf("no-key status = %d, want 401", resp.StatusCode)
+	}
+
+	// Wrong key → 401.
+	req, _ := http.NewRequest("POST", ts.URL+"/api/bookmarks", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("X-API-Key", "nope")
+	resp2, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("POST wrong key: %v", err)
+	}
+	resp2.Body.Close()
+	if resp2.StatusCode != http.StatusUnauthorized {
+		t.Errorf("wrong-key status = %d, want 401", resp2.StatusCode)
+	}
+
+	// Right key → 201, and DELETE accepts the Bearer header form.
+	req3, _ := http.NewRequest("POST", ts.URL+"/api/bookmarks", bytes.NewReader(body))
+	req3.Header.Set("Content-Type", "application/json")
+	req3.Header.Set("X-API-Key", "k1")
+	resp3, err := http.DefaultClient.Do(req3)
+	if err != nil {
+		t.Fatalf("POST right key: %v", err)
+	}
+	defer resp3.Body.Close()
+	if resp3.StatusCode != http.StatusCreated {
+		t.Errorf("right-key status = %d, want 201", resp3.StatusCode)
+	}
+	var created Bookmark
+	if err := json.NewDecoder(resp3.Body).Decode(&created); err != nil {
+		t.Fatalf("decode created: %v", err)
+	}
+	if created.ID == "" || created.Title != "From API" {
+		t.Errorf("created = %+v", created)
+	}
+
+	// PUT updates with bearer form.
+	upd := []byte(`{"url":"https://api.example/","title":"Updated","category":"X","public":true}`)
+	reqU, _ := http.NewRequest("PUT", ts.URL+"/api/bookmarks/"+created.ID, bytes.NewReader(upd))
+	reqU.Header.Set("Content-Type", "application/json")
+	reqU.Header.Set("Authorization", "Bearer k1")
+	respU, err := http.DefaultClient.Do(reqU)
+	if err != nil {
+		t.Fatalf("PUT bearer: %v", err)
+	}
+	respU.Body.Close()
+	if respU.StatusCode != http.StatusOK {
+		t.Errorf("PUT bearer status = %d, want 200", respU.StatusCode)
+	}
+	got, _ := getBookmark(s.db, created.ID)
+	if got == nil || got.Title != "Updated" {
+		t.Errorf("PUT did not persist: %+v", got)
+	}
+
+	// DELETE with X-API-Key.
+	reqD, _ := http.NewRequest("DELETE", ts.URL+"/api/bookmarks/"+created.ID, nil)
+	reqD.Header.Set("X-API-Key", "k1")
+	respD, err := http.DefaultClient.Do(reqD)
+	if err != nil {
+		t.Fatalf("DELETE: %v", err)
+	}
+	respD.Body.Close()
+	if respD.StatusCode != http.StatusOK {
+		t.Errorf("DELETE status = %d, want 200", respD.StatusCode)
+	}
+	if g, _ := getBookmark(s.db, created.ID); g != nil {
+		t.Errorf("DELETE did not remove the row: %+v", g)
 	}
 }
 

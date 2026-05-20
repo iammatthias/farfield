@@ -1,8 +1,8 @@
 // Command bookmarks is the farfield bookmarks service — a curated list of
 // links. Each bookmark carries its URL, a category, an admin-controlled
-// public/private flag, and fetched OpenGraph metadata. It serves an HTML
-// admin UI (under /admin), a public index of public bookmarks at /, and a
-// JSON read API that hides private records and admin-only notes.
+// public/private flag, and fetched OpenGraph metadata. It serves a
+// session-gated CRUD UI at / and a JSON read API that hides private records
+// and admin-only notes.
 package main
 
 import (
