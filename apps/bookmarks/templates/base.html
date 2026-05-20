@@ -9,9 +9,18 @@
   <style>
     .container { max-width: 56rem; }
 
-    /* breathing room for native UI bits flush against the 1px black border —
-       chevron on selects, resize grip on textareas */
-    select { padding-right: 1.6rem; }
+    /* breathing room for UI bits against the 1px black border.
+       Native select arrows ignore padding in some browsers, so draw our own. */
+    select {
+      appearance: none;
+      -webkit-appearance: none;
+      padding-right: 3rem;
+      background-image: linear-gradient(45deg, transparent 50%, var(--ink) 50%),
+        linear-gradient(135deg, var(--ink) 50%, transparent 50%);
+      background-position: calc(100% - 1.25rem) 50%, calc(100% - 0.85rem) 50%;
+      background-size: 0.45rem 0.45rem, 0.45rem 0.45rem;
+      background-repeat: no-repeat;
+    }
     textarea { padding-right: 1rem; padding-bottom: 1rem; }
 
     /* the bookmarks table: every column visible, one row per bookmark */
