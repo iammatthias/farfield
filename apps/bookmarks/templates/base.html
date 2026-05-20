@@ -9,6 +9,11 @@
   <style>
     .container { max-width: 56rem; }
 
+    /* breathing room for native UI bits flush against the 1px black border —
+       chevron on selects, resize grip on textareas */
+    select { padding-right: 1.6rem; }
+    textarea { padding-right: 1rem; padding-bottom: 1rem; }
+
     /* the bookmarks table: every column visible, one row per bookmark */
     table.admin { font-size: 0.85rem; }
     table.admin td.url { max-width: 22rem; }
