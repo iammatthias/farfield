@@ -10,6 +10,7 @@ single-binary services; the website reads three of them.
 | blobs     | `https://blobs.farfield.systems`     | image/media bytes + metadata            |
 | calendar  | `https://calendar.farfield.systems`  | daily photo calendar                    |
 | bookmarks | `https://bookmarks.farfield.systems` | curated link list with OG metadata      |
+| qr        | `https://qr.farfield.systems`        | direct and editable-proxy QR codes      |
 | apex      | `https://farfield.systems`           | the standalone landing page (not an API)|
 
 The `backup` service is internal (tailnet-only) and has no public API.
@@ -108,6 +109,28 @@ API or on the public HTML index. Admin-only `adminNotes` are never returned.
 The write API is disabled unless `BOOKMARKS_API_KEY` is set on the service.
 The HTML admin UI lives under `/admin` and is gated by the shared `PASSWORD`.
 
+## qr — `https://qr.farfield.systems`
+
+QR records encode arbitrary payloads. In `direct` mode the QR carries the exact
+target string. In `proxy` mode the QR carries `https://qr.farfield.systems/r/{id}`;
+that stable URL redirects to the current target, so the destination can be
+edited without reprinting the QR. Public image and redirect endpoints only work
+for records marked both `public` and `enabled`.
+
+| Method & path                    | Returns                                          |
+|----------------------------------|--------------------------------------------------|
+| `GET /qr/{id}`                   | SVG QR image for a public/enabled record; `ETag` |
+| `GET /r/{id}`                    | `303` redirect for public/enabled proxy records  |
+| `GET /api/codes`                 | `{ "codes": [QRCode, …] }` — public/enabled only; `ETag` |
+| `GET /api/codes/{id}`            | `QRCode` — `404` if missing/private/disabled; `ETag` |
+| `GET /status`                    | `{ "service", "ok", "codes" }`               |
+| `POST /api/codes`                | create — `X-API-Key`                             |
+| `PUT /api/codes/{id}`            | replace — `X-API-Key`                            |
+| `DELETE /api/codes/{id}`         | delete — `X-API-Key`                             |
+
+The write API is disabled unless `QR_API_KEY` is set on the service. The HTML
+admin UI is rooted at `/` and gated by the shared `PASSWORD`.
+
 ## Record shapes
 
 ```jsonc
@@ -131,6 +154,10 @@ The HTML admin UI lives under `/admin` and is gated by the shared `PASSWORD`.
 { "id", "url", "title", "description", "category", "public", "cid",
   "ogTitle"?, "ogDescription"?, "ogImage"?, "ogSiteName"?, "ogType"?,
   "metaAuthor"?, "favicon"?,
+  "createdAt", "updatedAt" }
+
+// QRCode — admin-only fields (adminNotes) are stripped from public responses
+{ "id", "label", "mode", "target", "ec", "public", "enabled", "cid",
   "createdAt", "updatedAt" }
 ```
 

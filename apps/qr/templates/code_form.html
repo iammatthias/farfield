@@ -1,0 +1,88 @@
+{{define "title"}}{{if .IsNew}}New code{{else}}Edit code{{end}} · farfield qr{{end}}
+{{define "content"}}
+  {{template "topbar" .}}
+  <h2 style="font-size:1rem">{{if .IsNew}}New code{{else}}Edit code · {{.Code.ID}}{{end}}</h2>
+  {{with .Error}}<p class="error">{{.}}</p>{{end}}
+
+  <form method="post" action="{{.Action}}">
+    <div class="field">
+      <label for="label">Label</label>
+      <input type="text" id="label" name="label" value="{{.Code.Label}}" autofocus>
+      <p class="hint">Optional. A short admin-only name for this code.</p>
+    </div>
+
+    <div class="field">
+      <label for="mode">Mode</label>
+      <select id="mode" name="mode">
+        <option value="direct"{{if eq (printf "%s" .Code.Mode) "direct"}} selected{{end}}>Direct — QR encodes the target verbatim</option>
+        <option value="proxy"{{if eq (printf "%s" .Code.Mode) "proxy"}} selected{{end}}>Editable proxy — QR encodes a stable redirect URL on this service</option>
+      </select>
+      <p class="hint">A direct QR is immutable from the scanner's view. A proxy QR keeps a stable URL, so the target can be edited later without reprinting the code.</p>
+    </div>
+
+    <div class="field">
+      <label for="target">Target payload</label>
+      <textarea id="target" name="target" rows="4" required>{{.Code.Target}}</textarea>
+      <p class="hint">Anything: a URL, plain text, base64, JSON, etc. For proxy mode this is the destination the redirect resolves to and should be a URL.</p>
+    </div>
+
+    <div class="field">
+      <label for="ec">Error correction</label>
+      <select id="ec" name="ec">
+        <option value="L"{{if eq .Code.EC "L"}} selected{{end}}>L — ~7% recovery, smaller QR</option>
+        <option value="M"{{if or (eq .Code.EC "M") (eq .Code.EC "")}} selected{{end}}>M — ~15% recovery (default)</option>
+        <option value="Q"{{if eq .Code.EC "Q"}} selected{{end}}>Q — ~25% recovery</option>
+        <option value="H"{{if eq .Code.EC "H"}} selected{{end}}>H — ~30% recovery, larger QR</option>
+      </select>
+    </div>
+
+    <div class="field check">
+      <input type="checkbox" id="public" name="public"{{if .Code.Public}} checked{{end}}>
+      <label for="public" style="font:inherit;text-transform:none;letter-spacing:normal;opacity:1;margin:0">Public — expose the QR image and JSON record</label>
+    </div>
+
+    <div class="field check">
+      <input type="checkbox" id="enabled" name="enabled"{{if .Code.Enabled}} checked{{end}}>
+      <label for="enabled" style="font:inherit;text-transform:none;letter-spacing:normal;opacity:1;margin:0">Enabled — proxy redirects and public images resolve. Disable to take a live QR offline without deleting it.</label>
+    </div>
+
+    <div class="field">
+      <label for="admin_notes">Admin notes</label>
+      <textarea id="admin_notes" name="admin_notes" rows="3">{{.Code.AdminNotes}}</textarea>
+      <p class="hint">Private. Excluded from the CID and the public JSON API.</p>
+    </div>
+
+    {{if not .IsNew}}
+      <section class="qr-panel">
+        <figure>
+          {{qrFor .Code .PublicURL}}
+          <figcaption>Preview · {{.Code.Mode}} mode · EC {{.Code.EC}}</figcaption>
+        </figure>
+        <div class="qr-meta">
+          <dl>
+            <dt>id</dt><dd>{{.Code.ID}}</dd>
+            <dt>cid</dt><dd>{{.Code.CID}}</dd>
+            <dt>created</dt><dd>{{.Code.CreatedAt}}</dd>
+            <dt>updated</dt><dd>{{.Code.UpdatedAt}}</dd>
+          </dl>
+          <p class="label" style="margin-top:1rem">Endpoints</p>
+          <div class="endpoints">
+            <div>SVG · <code>{{.PublicURL}}/qr/{{.Code.ID}}.svg</code></div>
+            {{if eq (printf "%s" .Code.Mode) "proxy"}}
+              <div>Redirect · <code>{{.PublicURL}}/r/{{.Code.ID}}</code></div>
+            {{end}}
+            <div>JSON · <code>{{.PublicURL}}/api/codes/{{.Code.ID}}</code></div>
+          </div>
+          {{if not (and .Code.Public .Enabled)}}
+            <p class="hint" style="margin-top:0.85rem;opacity:0.8">Currently private or disabled — these endpoints return 404 to the public. Flip both <em>Public</em> and <em>Enabled</em> on to make them resolve.</p>
+          {{end}}
+        </div>
+      </section>
+    {{end}}
+
+    <div class="actions">
+      <button type="submit">{{if .IsNew}}Save{{else}}Save changes{{end}}</button>
+      <a href="/">Cancel</a>
+    </div>
+  </form>
+{{end}}

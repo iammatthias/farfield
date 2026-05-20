@@ -12,6 +12,7 @@ moderating content, plus a public JSON API the website reads.
 | `blobs`   | `blobs.farfield.systems`   | image/media bytes + metadata, on Cloudflare R2 |
 | `calendar`| `calendar.farfield.systems`| daily photo calendar: NASA APOD + UFO easter egg |
 | `bookmarks`| `bookmarks.farfield.systems`| curated public/private link list with OG metadata |
+| `qr`      | `qr.farfield.systems`      | direct and editable-proxy QR codes              |
 | `backup`  | tailnet-only               | snapshots every app's database into R2         |
 
 ## Stack

@@ -1,0 +1,56 @@
+{{define "title"}}Codes · farfield qr{{end}}
+{{define "content"}}
+  {{template "topbar" .}}
+  <p class="summary">
+    <span>Total {{.Total}}</span>
+    <span>Public {{.Public}}</span>
+    <span>Enabled {{.Enabled}}</span>
+  </p>
+  {{if .Codes}}
+    <div class="table-wrap">
+      <table class="admin">
+        <thead>
+          <tr>
+            <th>ID</th>
+            <th>Label</th>
+            <th>Mode</th>
+            <th>Payload</th>
+            <th>Visibility</th>
+            <th>Actions</th>
+          </tr>
+        </thead>
+        <tbody>
+          {{range .Codes}}
+            <tr>
+              <td class="id">{{.ID}}</td>
+              <td>{{if .Label}}{{.Label}}{{else}}<span class="muted">—</span>{{end}}</td>
+              <td class="mode">{{.Mode}} · {{.EC}}</td>
+              <td class="payload" title="{{.Target}}">{{if .Target}}{{.Target}}{{else}}<span class="muted">—</span>{{end}}</td>
+              <td>
+                {{if and .Public .Enabled}}
+                  <span class="badge live">Public</span>
+                {{else if .Enabled}}
+                  <span class="badge draft">Private</span>
+                {{else}}
+                  <span class="badge draft">Disabled</span>
+                {{end}}
+              </td>
+              <td class="actions">
+                <div class="action-row">
+                  <a href="/codes/{{.ID}}/edit">Edit</a>
+                  <a href="/codes/{{.ID}}/preview">Preview</a>
+                  <form method="post" action="/codes/{{.ID}}/delete"
+                        onsubmit="return confirm('Delete this code?')">
+                    <button class="danger" type="submit">Delete</button>
+                  </form>
+                </div>
+              </td>
+            </tr>
+          {{end}}
+        </tbody>
+      </table>
+    </div>
+  {{else}}
+    <p class="muted">No codes yet. <a href="/new">Add one.</a></p>
+  {{end}}
+{{end}}

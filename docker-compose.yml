@@ -123,6 +123,25 @@ services:
     volumes:
       - ./data:/data
 
+  qr:
+    build:
+      context: .
+      dockerfile: apps/qr/Dockerfile
+    image: farfield-qr
+    restart: unless-stopped
+    ports:
+      - "${QR_PORT:-8794}:8794"
+    environment:
+      - HOST=0.0.0.0
+      - QR_PORT=8794
+      - QR_DB_PATH=/data/qr.sqlite
+      - QR_API_KEY=${QR_API_KEY:-}
+      - QR_PUBLIC_URL=${QR_PUBLIC_URL:-https://qr.farfield.systems}
+      - PASSWORD=${PASSWORD:-changeme}
+      - COOKIE_SECURE=true
+    volumes:
+      - ./data:/data
+
   backup:
     build:
       context: .

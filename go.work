@@ -8,6 +8,7 @@ use (
 	./apps/calendar
 	./apps/content
 	./apps/feed
+	./apps/qr
 	./lib/auth
 	./lib/backup
 	./lib/cid
