@@ -1,0 +1,101 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>Farfield Systems — Docs</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<nav class="docs-nav" aria-label="Docs navigation">
+  <a href="/" class="brand">Farfield</a>
+  <span class="sep" aria-hidden="true">/</span>
+  <a href="index.html" aria-current="page">Docs</a>
+  <a href="apex.html">Apex</a>
+  <a href="content.html">Content</a>
+  <a href="feed.html">Feed</a>
+  <a href="blobs.html">Blobs</a>
+  <a href="calendar.html">Calendar</a>
+  <a href="bookmarks.html">Bookmarks</a>
+  <a href="qr.html">QR</a>
+  <a href="backup.html">Backup</a>
+  <a href="skills.html">Skills</a>
+</nav>
+
+<main class="page">
+  <div class="hero">
+    <h1>Farfield Systems</h1>
+    <p>The content backend for <a href="https://iammatthias.com">iammatthias.com</a> — a set of small, single-binary Go services. Each app is an HTML admin UI for writing and moderating content, plus a public JSON API the website reads.</p>
+  </div>
+
+  <h2>Stack</h2>
+  <p>The standard library plus exactly one dependency: <code>modernc.org/sqlite</code>, a pure-Go SQLite driver. No cgo, so every build is a static binary. HTTP is <code>net/http</code>, templates are <code>html/template</code>, assets are embedded with <code>embed</code>, logging is <code>log/slog</code>. No web framework, no ORM, no router library.</p>
+
+  <h2>Core Ideas</h2>
+  <ul>
+    <li><strong>Content-addressed.</strong> Every record carries a CID — a sha-256 hash of its content — for verification, change detection, and ETag caching.</li>
+    <li><strong>Self-migrating.</strong> A database migrates its own schema when it is opened; deploying new code <em>is</em> the migration step.</li>
+    <li><strong>One aesthetic.</strong> The admin UIs share a Braun × JPL × vintage-NASA instrument-panel look.</li>
+  </ul>
+
+  <h2>Services</h2>
+  <div class="app-grid">
+    <a class="app-card" href="apex.html">
+      <div class="name">apex</div>
+      <div class="url">farfield.systems</div>
+      <div class="desc">Landing page and documentation host</div>
+    </a>
+    <a class="app-card" href="content.html">
+      <div class="name">content</div>
+      <div class="url">content.farfield.systems</div>
+      <div class="desc">Collections, entries, and series fragments</div>
+    </a>
+    <a class="app-card" href="feed.html">
+      <div class="name">feed</div>
+      <div class="url">feed.farfield.systems</div>
+      <div class="desc">Ephemeral short-form posts</div>
+    </a>
+    <a class="app-card" href="blobs.html">
+      <div class="name">blobs</div>
+      <div class="url">blobs.farfield.systems</div>
+      <div class="desc">Image/media bytes + metadata, on Cloudflare R2</div>
+    </a>
+    <a class="app-card" href="calendar.html">
+      <div class="name">calendar</div>
+      <div class="url">calendar.farfield.systems</div>
+      <div class="desc">Daily photo calendar: NASA APOD + UFO easter egg</div>
+    </a>
+    <a class="app-card" href="bookmarks.html">
+      <div class="name">bookmarks</div>
+      <div class="url">bookmarks.farfield.systems</div>
+      <div class="desc">Curated public/private link list with OG metadata</div>
+    </a>
+    <a class="app-card" href="qr.html">
+      <div class="name">qr</div>
+      <div class="url">qr.farfield.systems</div>
+      <div class="desc">Direct and editable-proxy QR codes</div>
+    </a>
+    <a class="app-card" href="backup.html">
+      <div class="name">backup</div>
+      <div class="url">tailnet-only</div>
+      <div class="desc">Snapshots every app's database into R2</div>
+    </a>
+    <a class="app-card" href="skills.html">
+      <div class="name">skills</div>
+      <div class="url">.claude/skills</div>
+      <div class="desc">Content-addressing, farfield-stack, self-migrating-sqlite, farfield-style</div>
+    </a>
+  </div>
+
+  <h2>Conventions</h2>
+  <ul>
+    <li><strong>Reads are public</strong> — no auth — and send <code>Access-Control-Allow-Origin: *</code>, so the browser can fetch them directly.</li>
+    <li><strong>Writes need a key</strong> — send <code>X-API-Key</code> or <code>Authorization: Bearer</code>.</li>
+    <li>Every record has a stable <strong>key</strong> (its slug) and a <strong>CID</strong> (sha-256 hash). The key never changes; the CID changes when content changes.</li>
+    <li>Single-record endpoints send the CID as a strong <code>ETag</code>. Send <code>If-None-Match</code> for conditional GET.</li>
+    <li>Timestamps are RFC3339 UTC strings.</li>
+    <li>The public API returns published entries only; drafts never appear.</li>
+  </ul>
+</main>
+</body>
+</html>

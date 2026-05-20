@@ -1,0 +1,45 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>Apex — Farfield Docs</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<nav class="docs-nav" aria-label="Docs navigation">
+  <a href="/" class="brand">Farfield</a>
+  <span class="sep" aria-hidden="true">/</span>
+  <a href="index.html">Docs</a>
+  <a href="apex.html" aria-current="page">Apex</a>
+  <a href="content.html">Content</a>
+  <a href="feed.html">Feed</a>
+  <a href="blobs.html">Blobs</a>
+  <a href="calendar.html">Calendar</a>
+  <a href="bookmarks.html">Bookmarks</a>
+  <a href="qr.html">QR</a>
+  <a href="backup.html">Backup</a>
+  <a href="skills.html">Skills</a>
+</nav>
+
+<main class="page">
+  <h1>apex</h1>
+  <p class="meta"><code>farfield.systems</code></p>
+
+  <p>The public face of Farfield. Apex is intentionally tiny: a single embedded static site served by a Go binary. The index keeps the Pale Blue Dot SVG and links into these docs.</p>
+
+  <figure class="screenshot">
+    <img src="assets/apex.png" alt="Screenshot of the Farfield apex landing page" loading="lazy">
+    <figcaption>Apex landing page. No database, no admin state, no secrets.</figcaption>
+  </figure>
+
+  <h2>Public surface</h2>
+  <div class="endpoint"><span class="method">GET</span><span class="path">/</span><div class="returns">Static landing page.</div></div>
+  <div class="endpoint"><span class="method">GET</span><span class="path">/docs/</span><div class="returns">Documentation index.</div></div>
+  <div class="endpoint"><span class="method">GET</span><span class="path">/docs/{page}.html</span><div class="returns">Static documentation pages and screenshots.</div></div>
+
+  <h2>Implementation</h2>
+  <p>Assets live under <code>apps/apex/web</code> and are embedded with Go's <code>embed</code> package. The service uses <code>http.FileServerFS</code>; there are no write endpoints and no credentials involved.</p>
+</main>
+</body>
+</html>

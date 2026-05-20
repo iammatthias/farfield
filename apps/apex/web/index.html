@@ -21,6 +21,26 @@
     0%,100%{opacity:.6;transform:scale(1)}
     50%{opacity:1;transform:scale(1.22)}
   }
+  .hud{
+    position:fixed;left:50%;bottom:1.75rem;transform:translateX(-50%);
+    display:flex;align-items:center;gap:.6rem;z-index:1
+  }
+  .hud .tick{width:1.5rem;height:1px;background:#fafaf7;opacity:.55}
+  .docs-link{
+    display:inline-block;background:#fafaf7;color:#0a0a0a;
+    border:1px solid #0a0a0a;
+    font-family:ui-monospace,"SF Mono",Menlo,Consolas,monospace;
+    font-size:.75rem;font-weight:500;letter-spacing:.1em;text-transform:uppercase;
+    text-decoration:none;padding:.6rem 1.1rem;
+    transition:background .15s ease,color .15s ease
+  }
+  .docs-link:hover,.docs-link:focus-visible{background:#0a0a0a;color:#fafaf7;outline:none}
+  .docs-link:focus-visible{box-shadow:0 0 0 2px #fafaf7,0 0 0 4px #0a0a0a}
+  @media (max-width:480px){
+    .hud{bottom:1.25rem;gap:.45rem}
+    .hud .tick{width:1rem}
+    .docs-link{font-size:.6875rem;padding:.55rem .9rem}
+  }
 </style>
 </head>
 <body>
@@ -129,6 +149,11 @@
     <!-- 5. Film grain over everything -->
     <rect width="1600" height="900" filter="url(#grain)" opacity=".4"/>
   </svg>
+</div>
+<div class="hud">
+  <span class="tick" aria-hidden="true"></span>
+  <a href="/docs/" class="docs-link">Docs</a>
+  <span class="tick" aria-hidden="true"></span>
 </div>
 </body>
 </html>

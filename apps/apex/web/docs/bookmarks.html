@@ -1,0 +1,83 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>Bookmarks — Farfield Docs</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<nav class="docs-nav" aria-label="Docs navigation">
+  <a href="/" class="brand">Farfield</a>
+  <span class="sep" aria-hidden="true">/</span>
+  <a href="index.html">Docs</a>
+  <a href="apex.html">Apex</a>
+  <a href="content.html">Content</a>
+  <a href="feed.html">Feed</a>
+  <a href="blobs.html">Blobs</a>
+  <a href="calendar.html">Calendar</a>
+  <a href="bookmarks.html" aria-current="page">Bookmarks</a>
+  <a href="qr.html">QR</a>
+  <a href="backup.html">Backup</a>
+  <a href="skills.html">Skills</a>
+</nav>
+
+<main class="page">
+  <h1>bookmarks</h1>
+  <p class="meta"><code>bookmarks.farfield.systems</code></p>
+
+  <p>A curated link list with OpenGraph metadata fetched server-side on save. Each bookmark carries a <code>public</code> flag — only public ones appear in the public API or on the public HTML index. Admin-only fields such as <code>adminNotes</code> are never returned publicly.</p>
+
+  <figure class="screenshot">
+    <img src="assets/bookmarks.png" alt="Screenshot of the Farfield bookmarks UI" loading="lazy">
+    <figcaption>Bookmarks login and admin shell. Public bookmark JSON omits private rows.</figcaption>
+  </figure>
+
+  <h2>Public API</h2>
+
+  <div class="endpoint">
+    <span class="method">GET</span>
+    <span class="path">/api/bookmarks</span>
+    <div class="returns"><code>{ "bookmarks": [Bookmark, …] }</code> — public only; strong <code>ETag</code></div>
+  </div>
+
+  <div class="endpoint">
+    <span class="method">GET</span>
+    <span class="path">/api/bookmarks/{id}</span>
+    <div class="returns">Bookmark — <code>404</code> if missing or private; strong <code>ETag</code></div>
+  </div>
+
+  <div class="endpoint">
+    <span class="method">GET</span>
+    <span class="path">/status</span>
+    <div class="returns"><code>{ "service": "bookmarks", "ok": true, "bookmarks": N }</code></div>
+  </div>
+
+  <p>Write endpoints (<code>POST /api/bookmarks</code>, <code>PUT /api/bookmarks/{id}</code>, <code>DELETE /api/bookmarks/{id}</code>) require an API key and the <code>BOOKMARKS_API_KEY</code> environment variable must be set on the service.</p>
+
+  <p>The HTML admin UI lives under <code>/admin</code> and is gated by the shared password.</p>
+
+  <h2>Record Shape</h2>
+
+  <h3>Bookmark</h3>
+<pre class="record-shape">{
+  "id": "string",
+  "url": "https://…",
+  "title": "string",
+  "description": "string",
+  "category": "string",
+  "public": true,
+  "cid": "bafk…",
+  "ogTitle": "string?",
+  "ogDescription": "string?",
+  "ogImage": "string?",
+  "ogSiteName": "string?",
+  "ogType": "string?",
+  "metaAuthor": "string?",
+  "favicon": "string?",
+  "createdAt": "2024-01-01T00:00:00Z",
+  "updatedAt": "2024-01-01T00:00:00Z"
+}</pre>
+</main>
+</body>
+</html>

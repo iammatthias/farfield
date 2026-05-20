@@ -1,0 +1,119 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>Content — Farfield Docs</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<nav class="docs-nav" aria-label="Docs navigation">
+  <a href="/" class="brand">Farfield</a>
+  <span class="sep" aria-hidden="true">/</span>
+  <a href="index.html">Docs</a>
+  <a href="apex.html">Apex</a>
+  <a href="content.html" aria-current="page">Content</a>
+  <a href="feed.html">Feed</a>
+  <a href="blobs.html">Blobs</a>
+  <a href="calendar.html">Calendar</a>
+  <a href="bookmarks.html">Bookmarks</a>
+  <a href="qr.html">QR</a>
+  <a href="backup.html">Backup</a>
+  <a href="skills.html">Skills</a>
+</nav>
+
+<main class="page">
+  <h1>content</h1>
+  <p class="meta"><code>content.farfield.systems</code></p>
+
+  <p>Collections, entries, and series fragments. The admin UI supports writing markdown content with <code>blob://</code> and <code>series://</code> embeds. Collections are managed in the admin UI; series fragments are reusable markdown blocks that can be spliced into entries.</p>
+
+  <figure class="screenshot">
+    <img src="assets/content.png" alt="Screenshot of the Farfield content UI" loading="lazy">
+    <figcaption>Content login and admin shell. Authenticated records are intentionally not shown.</figcaption>
+  </figure>
+
+  <h2>Public API</h2>
+
+  <div class="endpoint">
+    <span class="method">GET</span>
+    <span class="path">/api/collections</span>
+    <div class="returns"><code>{ "collections": [Collection, …] }</code></div>
+  </div>
+
+  <div class="endpoint">
+    <span class="method">GET</span>
+    <span class="path">/api/entries?collection=slug</span>
+    <div class="returns"><code>{ "entries": [Entry, …] }</code> — published only</div>
+  </div>
+
+  <div class="endpoint">
+    <span class="method">GET</span>
+    <span class="path">/api/entries/{slug}</span>
+    <div class="returns">Entry — <code>404</code> if missing/draft; strong <code>ETag</code></div>
+  </div>
+
+  <div class="endpoint">
+    <span class="method">GET</span>
+    <span class="path">/api/series</span>
+    <div class="returns"><code>{ "series": [Series, …] }</code></div>
+  </div>
+
+  <div class="endpoint">
+    <span class="method">GET</span>
+    <span class="path">/api/series/{slug}</span>
+    <div class="returns">Series — <code>404</code> if missing; strong <code>ETag</code></div>
+  </div>
+
+  <div class="endpoint">
+    <span class="method">GET</span>
+    <span class="path">/status</span>
+    <div class="returns"><code>{ "service": "content", "ok": true, "collections": N }</code></div>
+  </div>
+
+  <p>Write endpoints (<code>POST /api/entries</code>, <code>PUT /api/entries/{slug}</code>, <code>DELETE /api/entries/{slug}</code>, <code>POST /api/series</code>) require an API key.</p>
+
+  <h2>Record Shapes</h2>
+
+  <h3>Collection</h3>
+<pre class="record-shape">{
+  "slug": "string",
+  "name": "string",
+  "description": "string?",
+  "createdAt": "2024-01-01T00:00:00Z",
+  "entryCount": 0
+}</pre>
+
+  <h3>Entry</h3>
+<pre class="record-shape">{
+  "collection": "string",
+  "slug": "string",
+  "cid": "bafk…",
+  "title": "string",
+  "excerpt": "string?",
+  "body": "markdown",
+  "tags": ["string"],
+  "published": true,
+  "createdAt": "2024-01-01T00:00:00Z",
+  "updatedAt": "2024-01-01T00:00:00Z"
+}</pre>
+
+  <h3>Series</h3>
+<pre class="record-shape">{
+  "slug": "string",
+  "cid": "bafk…",
+  "title": "string?",
+  "body": "markdown",
+  "createdAt": "2024-01-01T00:00:00Z",
+  "updatedAt": "2024-01-01T00:00:00Z"
+}</pre>
+
+  <h2>Body URIs</h2>
+  <p>Entry and post <code>body</code> markdown embeds two custom URIs. Resolve them before rendering:</p>
+  <ul>
+    <li><code>blob://&lt;cid&gt;</code> — rewrite to <code>https://blobs.farfield.systems/blobs/&lt;cid&gt;</code>. For dimensions, blurhash, or a blur-up placeholder, read <code>GET /blobs/&lt;cid&gt;/meta</code>.</li>
+    <li><code>![](series://&lt;slug&gt;)</code> — fetch <code>GET /api/series/&lt;slug&gt;</code> and splice the fragment's <code>body</code> markdown in place of the whole image construct. The fragment itself contains <code>blob://</code> images.</li>
+  </ul>
+</main>
+</body>
+</html>

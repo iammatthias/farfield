@@ -1,0 +1,71 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>Feed — Farfield Docs</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<nav class="docs-nav" aria-label="Docs navigation">
+  <a href="/" class="brand">Farfield</a>
+  <span class="sep" aria-hidden="true">/</span>
+  <a href="index.html">Docs</a>
+  <a href="apex.html">Apex</a>
+  <a href="content.html">Content</a>
+  <a href="feed.html" aria-current="page">Feed</a>
+  <a href="blobs.html">Blobs</a>
+  <a href="calendar.html">Calendar</a>
+  <a href="bookmarks.html">Bookmarks</a>
+  <a href="qr.html">QR</a>
+  <a href="backup.html">Backup</a>
+  <a href="skills.html">Skills</a>
+</nav>
+
+<main class="page">
+  <h1>feed</h1>
+  <p class="meta"><code>feed.farfield.systems</code></p>
+
+  <p>Ephemeral short-form posts. No titles, just a markdown body and tags. The feed is the fastest way to publish — write, tag, and ship in one step.</p>
+
+  <figure class="screenshot">
+    <img src="assets/feed.png" alt="Screenshot of the Farfield feed UI" loading="lazy">
+    <figcaption>Feed login and admin shell. Public reads use JSON; writes stay authenticated.</figcaption>
+  </figure>
+
+  <h2>Public API</h2>
+
+  <div class="endpoint">
+    <span class="method">GET</span>
+    <span class="path">/api/posts</span>
+    <div class="returns"><code>{ "posts": [Post, …] }</code></div>
+  </div>
+
+  <div class="endpoint">
+    <span class="method">GET</span>
+    <span class="path">/api/posts/{slug}</span>
+    <div class="returns">Post — <code>404</code> if missing; strong <code>ETag</code></div>
+  </div>
+
+  <div class="endpoint">
+    <span class="method">GET</span>
+    <span class="path">/status</span>
+    <div class="returns"><code>{ "service": "feed", "ok": true, "posts": N }</code></div>
+  </div>
+
+  <p>Write endpoints (<code>POST /api/posts</code>, <code>PUT /api/posts/{slug}</code>, <code>DELETE /api/posts/{slug}</code>) require an API key.</p>
+
+  <h2>Record Shape</h2>
+
+  <h3>Post</h3>
+<pre class="record-shape">{
+  "slug": "string",
+  "cid": "bafk…",
+  "body": "markdown",
+  "tags": ["string"],
+  "createdAt": "2024-01-01T00:00:00Z",
+  "updatedAt": "2024-01-01T00:00:00Z"
+}</pre>
+</main>
+</body>
+</html>

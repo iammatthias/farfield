@@ -1,0 +1,78 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>Blobs — Farfield Docs</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<nav class="docs-nav" aria-label="Docs navigation">
+  <a href="/" class="brand">Farfield</a>
+  <span class="sep" aria-hidden="true">/</span>
+  <a href="index.html">Docs</a>
+  <a href="apex.html">Apex</a>
+  <a href="content.html">Content</a>
+  <a href="feed.html">Feed</a>
+  <a href="blobs.html" aria-current="page">Blobs</a>
+  <a href="calendar.html">Calendar</a>
+  <a href="bookmarks.html">Bookmarks</a>
+  <a href="qr.html">QR</a>
+  <a href="backup.html">Backup</a>
+  <a href="skills.html">Skills</a>
+</nav>
+
+<main class="page">
+  <h1>blobs</h1>
+  <p class="meta"><code>blobs.farfield.systems</code></p>
+
+  <p>Image and media storage with content-addressed identifiers. Every uploaded file gets a CIDv1 sha-256 hash as its address. Raw bytes are stored on Cloudflare R2; metadata lives in SQLite. Because a blob's CID <em>is</em> the hash of its bytes, <code>GET /blobs/{cid}</code> is immutable — cache it forever.</p>
+
+  <figure class="screenshot">
+    <img src="assets/blobs.png" alt="Screenshot of the Farfield blobs UI" loading="lazy">
+    <figcaption>Blobs login and upload shell. Media bytes are public by CID; mutation requires auth.</figcaption>
+  </figure>
+
+  <h2>Public API</h2>
+
+  <div class="endpoint">
+    <span class="method">GET</span>
+    <span class="path">/blobs/{cid}</span>
+    <div class="returns">Raw bytes — strong <code>ETag</code>, <code>Cache-Control: public, max-age=31536000, immutable</code></div>
+  </div>
+
+  <div class="endpoint">
+    <span class="method">GET</span>
+    <span class="path">/blobs/{cid}/meta</span>
+    <div class="returns">BlobMeta — dimensions, blurhash, dominant colour</div>
+  </div>
+
+  <div class="endpoint">
+    <span class="method">GET</span>
+    <span class="path">/blobs?page=N</span>
+    <div class="returns"><code>{ "blobs": [BlobMeta, …], "total": N, "page": N, "pages": N }</code></div>
+  </div>
+
+  <div class="endpoint">
+    <span class="method">GET</span>
+    <span class="path">/status</span>
+    <div class="returns"><code>{ "service": "blobs", "ok": true, "blobs": N }</code></div>
+  </div>
+
+  <p>Upload (<code>POST /blobs</code>) and delete (<code>DELETE /blobs/{cid}</code>) require an API key.</p>
+
+  <h2>Record Shape</h2>
+
+  <h3>BlobMeta</h3>
+<pre class="record-shape">{
+  "cid": "bafk…",
+  "size": 12345,
+  "mime": "image/jpeg",
+  "width": 1920,
+  "height": 1080,
+  "blurhash": "LEHV6nWB2yk8pyo0adR*.7kCMdnj",
+  "dominantColor": "#7a5c3e"
+}</pre>
+</main>
+</body>
+</html>

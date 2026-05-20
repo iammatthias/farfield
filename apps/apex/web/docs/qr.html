@@ -1,0 +1,91 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>QR — Farfield Docs</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<nav class="docs-nav" aria-label="Docs navigation">
+  <a href="/" class="brand">Farfield</a>
+  <span class="sep" aria-hidden="true">/</span>
+  <a href="index.html">Docs</a>
+  <a href="apex.html">Apex</a>
+  <a href="content.html">Content</a>
+  <a href="feed.html">Feed</a>
+  <a href="blobs.html">Blobs</a>
+  <a href="calendar.html">Calendar</a>
+  <a href="bookmarks.html">Bookmarks</a>
+  <a href="qr.html">QR</a>
+  <a href="backup.html">Backup</a>
+  <a href="skills.html">Skills</a>
+</nav>
+
+<main class="page">
+  <h1>qr</h1>
+  <p class="meta"><code>qr.farfield.systems</code></p>
+
+  <p>QR records encode arbitrary payloads. In <strong>direct</strong> mode the QR carries the exact target string. In <strong>proxy</strong> mode the QR carries <code>https://qr.farfield.systems/r/{id}</code>; that stable URL redirects to the current target, so the destination can be edited without reprinting the QR code.</p>
+
+  <p>Public image and redirect endpoints only work for records marked both <code>public</code> and <code>enabled</code>.</p>
+
+  <figure class="screenshot">
+    <img src="assets/qr.png" alt="Screenshot of the Farfield qr UI" loading="lazy">
+    <figcaption>QR login and admin shell. Public QR SVG and redirect endpoints are unauthenticated.</figcaption>
+  </figure>
+
+  <h2>Public API</h2>
+
+  <div class="endpoint">
+    <span class="method">GET</span>
+    <span class="path">/qr/{id}</span>
+    <div class="returns">SVG QR image for a public/enabled record; strong <code>ETag</code></div>
+  </div>
+
+  <div class="endpoint">
+    <span class="method">GET</span>
+    <span class="path">/r/{id}</span>
+    <div class="returns"><code>303</code> redirect for public/enabled proxy records</div>
+  </div>
+
+  <div class="endpoint">
+    <span class="method">GET</span>
+    <span class="path">/api/codes</span>
+    <div class="returns"><code>{ "codes": [QRCode, …] }</code> — public/enabled only; strong <code>ETag</code></div>
+  </div>
+
+  <div class="endpoint">
+    <span class="method">GET</span>
+    <span class="path">/api/codes/{id}</span>
+    <div class="returns">QRCode — <code>404</code> if missing, private, or disabled; strong <code>ETag</code></div>
+  </div>
+
+  <div class="endpoint">
+    <span class="method">GET</span>
+    <span class="path">/status</span>
+    <div class="returns"><code>{ "service": "qr", "ok": true, "codes": N }</code></div>
+  </div>
+
+  <p>Write endpoints (<code>POST /api/codes</code>, <code>PUT /api/codes/{id}</code>, <code>DELETE /api/codes/{id}</code>) require an API key and the <code>QR_API_KEY</code> environment variable must be set on the service.</p>
+
+  <p>The HTML admin UI is rooted at <code>/</code> and is gated by the shared password.</p>
+
+  <h2>Record Shape</h2>
+
+  <h3>QRCode</h3>
+<pre class="record-shape">{
+  "id": "string",
+  "label": "string?",
+  "mode": "direct | proxy",
+  "target": "https://…",
+  "ec": "L | M | Q | H",
+  "public": true,
+  "enabled": true,
+  "cid": "bafk…",
+  "createdAt": "2024-01-01T00:00:00Z",
+  "updatedAt": "2024-01-01T00:00:00Z"
+}</pre>
+</main>
+</body>
+</html>

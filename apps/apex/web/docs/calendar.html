@@ -1,0 +1,72 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>Calendar — Farfield Docs</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<nav class="docs-nav" aria-label="Docs navigation">
+  <a href="/" class="brand">Farfield</a>
+  <span class="sep" aria-hidden="true">/</span>
+  <a href="index.html">Docs</a>
+  <a href="apex.html">Apex</a>
+  <a href="content.html">Content</a>
+  <a href="feed.html">Feed</a>
+  <a href="blobs.html">Blobs</a>
+  <a href="calendar.html" aria-current="page">Calendar</a>
+  <a href="bookmarks.html">Bookmarks</a>
+  <a href="qr.html">QR</a>
+  <a href="backup.html">Backup</a>
+  <a href="skills.html">Skills</a>
+</nav>
+
+<main class="page">
+  <h1>calendar</h1>
+  <p class="meta"><code>calendar.farfield.systems</code></p>
+
+  <p>A daily photo calendar with two sources. The default is NASA's Astronomy Picture of the Day. Pass <code>?source=ufo</code> (aliases: <code>war</code>, <code>uap</code>, <code>dod</code>) to switch to an alternate Department of War UFO / UAP imagery source — an easter egg hidden in plain sight.</p>
+
+  <figure class="screenshot">
+    <img src="assets/calendar.png" alt="Screenshot of the Farfield calendar UI" loading="lazy">
+    <figcaption>Calendar public page. This service has public HTML and JSON reads.</figcaption>
+  </figure>
+
+  <h2>Public API</h2>
+
+  <div class="endpoint">
+    <span class="method">GET</span>
+    <span class="path">/api/sources</span>
+    <div class="returns"><code>{ "sources": [Source, …] }</code></div>
+  </div>
+
+  <div class="endpoint">
+    <span class="method">GET</span>
+    <span class="path">/api/photo?source=nasa|ufo</span>
+    <div class="returns">Today's photo: <code>{ "source", "photo", "prev", "next" }</code></div>
+  </div>
+
+  <div class="endpoint">
+    <span class="method">GET</span>
+    <span class="path">/api/photo/{date}?source=…</span>
+    <div class="returns">One day / item — <code>ETag</code> is the photo CID</div>
+  </div>
+
+  <div class="endpoint">
+    <span class="method">GET</span>
+    <span class="path">/api/photos?source=…&amp;page=N</span>
+    <div class="returns"><code>{ "source", "page", "pages", "total", "photos" }</code></div>
+  </div>
+
+  <div class="endpoint">
+    <span class="method">GET</span>
+    <span class="path">/status</span>
+    <div class="returns"><code>{ "service": "calendar", "ok": true, "nasa": N, "ufo": N }</code></div>
+  </div>
+
+  <h2>HTML</h2>
+  <p>The public HTML index at <code>/</code> shows the NASA source by default. Append <code>?source=ufo</code> for the alternate source. Archive and day links carry the selected source forward automatically.</p>
+</main>
+</body>
+</html>

@@ -1,0 +1,119 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>Skills — Farfield Docs</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<nav class="docs-nav" aria-label="Docs navigation">
+  <a href="/" class="brand">Farfield</a>
+  <span class="sep" aria-hidden="true">/</span>
+  <a href="index.html">Docs</a>
+  <a href="apex.html">Apex</a>
+  <a href="content.html">Content</a>
+  <a href="feed.html">Feed</a>
+  <a href="blobs.html">Blobs</a>
+  <a href="calendar.html">Calendar</a>
+  <a href="bookmarks.html">Bookmarks</a>
+  <a href="qr.html">QR</a>
+  <a href="backup.html">Backup</a>
+  <a href="skills.html" aria-current="page">Skills</a>
+</nav>
+
+<main class="page">
+  <h1>Farfield Skills</h1>
+  <p>Four <code>.claude/skills/</code> live in the repository. They encode the patterns and aesthetics that run through every app.</p>
+
+  <article class="skill-section">
+    <h2>Content Addressing</h2>
+    <p>Give records and files a content-addressed identity — a CIDv1 sha-256 hash of the content itself, computed in-process. This provides verification, change detection, ETag caching, and deduplication with no IPFS node and no network.</p>
+
+    <h3>Two identifiers</h3>
+    <p>Every mutable record needs <strong>both</strong> a key and a CID:</p>
+    <table>
+      <tr><th></th><th>Key (<code>slug</code>, <code>id</code>)</th><th>CID</th></tr>
+      <tr><td>What it is</td><td>A stable name</td><td>A hash of the content</td></tr>
+      <tr><td>Changes on edit?</td><td><strong>No</strong></td><td><strong>Yes</strong></td></tr>
+      <tr><td>Reference by</td><td>This</td><td>Never this</td></tr>
+      <tr><td>Survives edit?</td><td>Yes</td><td>No — that is the point</td></tr>
+    </table>
+
+    <p>For <strong>immutable bytes</strong> (uploaded files, snapshots) the CID <em>is</em> the key. There is no separate slug, and <code>GET /blobs/&lt;cid&gt;</code> is safe to cache forever.</p>
+
+    <h3>Primitive</h3>
+    <p>A CIDv1 is <code>0x01</code> (v1) + <code>0x55</code> (raw codec) + <code>0x12 0x20</code> (sha2-256, 32 bytes) + the digest, base32-encoded with a <code>b</code> multibase prefix. Implemented in <code>lib/cid</code> with the standard library only.</p>
+  </article>
+
+  <article class="skill-section">
+    <h2>Self-Migrating SQLite</h2>
+    <p>A single-binary service should not need a migration tool, a migrations directory, or a manual "run migrations" step. The database migrates <em>itself</em>: <code>openDB</code> brings any database — fresh or years old — to the current schema, and every step is safe to run on every startup.</p>
+
+    <h3>The openDB discipline</h3>
+    <ol>
+      <li><strong>CREATE TABLE IF NOT EXISTS</strong> — builds fresh DBs, no-ops on existing ones.</li>
+      <li><strong>Renames</strong> — before anything reads the new column name.</li>
+      <li><strong>Added columns</strong> — via <code>ensureColumn</code> for tables that already exist.</li>
+      <li><strong>Backfills</strong> — populate new columns for pre-existing rows.</li>
+    </ol>
+
+    <h3>DSN</h3>
+    <pre><code>file:&lt;path&gt;?_pragma=busy_timeout(5000)&amp;_pragma=journal_mode(WAL)</code></pre>
+    <p>WAL gives concurrent readers plus one writer; <code>busy_timeout</code> makes writers wait instead of erroring under contention.</p>
+  </article>
+
+  <article class="skill-section">
+    <h2>Farfield Stack</h2>
+    <p>Scaffold and build Go CRUD web applications in the farfield workspace using the <strong>standard library</strong> plus exactly one external dependency.</p>
+
+    <table>
+      <tr><th>Concern</th><th>Tool</th></tr>
+      <tr><td>HTTP server</td><td><code>net/http</code> (<code>http.ServeMux</code>, method routing)</td></tr>
+      <tr><td>Routing</td><td><code>http.ServeMux</code> patterns (<code>GET /items/{id}</code>)</td></tr>
+      <tr><td>Database</td><td><code>database/sql</code> + <code>modernc.org/sqlite</code></td></tr>
+      <tr><td>Templates</td><td><code>html/template</code></td></tr>
+      <tr><td>Static assets</td><td><code>embed</code> + <code>http.FileServerFS</code></td></tr>
+      <tr><td>JSON</td><td><code>encoding/json</code></td></tr>
+      <tr><td>Auth</td><td><code>crypto/subtle</code>, <code>crypto/rand</code>, cookies</td></tr>
+      <tr><td>Logging</td><td><code>log/slog</code></td></tr>
+      <tr><td>Concurrency</td><td>goroutines</td></tr>
+    </table>
+
+    <p>Shared libraries under <code>lib/</code> have zero dependencies:</p>
+    <ul>
+      <li><code>lib/auth</code> — password verify, session token, cookie helpers</li>
+      <li><code>lib/store</code> — env loader, short-ID, session table helpers</li>
+      <li><code>lib/theme</code> — shared CSS + editor JS, embedded</li>
+      <li><code>lib/cid</code> — content-addressed identifiers</li>
+    </ul>
+  </article>
+
+  <article class="skill-section">
+    <h2>Farfield Style</h2>
+    <p>Function and form, with function first. The aesthetic borrows from Dieter Rams (Braun), JPL / NASA technical documentation, and Swiss typography — high-contrast monochrome, generous whitespace, ruled dividers, restrained type. Nothing decorative earns its place unless it carries information.</p>
+
+    <h3>Palette</h3>
+    <table>
+      <tr><th>Token</th><th>Value</th><th>Usage</th></tr>
+      <tr><td>--surface</td><td><code>#fafaf7</code></td><td>Page background — slightly warm, paper-like</td></tr>
+      <tr><td>--ink</td><td><code>#0a0a0a</code></td><td>All text, primary rules</td></tr>
+      <tr><td>--accent</td><td><code>#d93a00</code></td><td>NASA red — status, callouts; never body text</td></tr>
+    </table>
+
+    <p>No gradients. No shadows. No additional colours.</p>
+
+    <h3>Hierarchy via opacity</h3>
+    <table>
+      <tr><th>Level</th><th>Opacity</th><th>Usage</th></tr>
+      <tr><td>Primary</td><td>1.0</td><td>Headings, body, links</td></tr>
+      <tr><td>Secondary</td><td>0.7</td><td>Labels, captions, meta</td></tr>
+      <tr><td>Tertiary</td><td>0.5</td><td>Timestamps, table headers, footnotes</td></tr>
+      <tr><td>Muted</td><td>0.3</td><td>Placeholders, disabled, empty states</td></tr>
+    </table>
+
+    <p>System fonts only. Mono for numerals, codes, identifiers, telemetry — anywhere alignment matters. Sans for prose.</p>
+  </article>
+</main>
+</body>
+</html>
