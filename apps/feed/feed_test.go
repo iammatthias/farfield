@@ -1,6 +1,12 @@
 package main
 
-import "testing"
+import (
+	"encoding/json"
+	"net/http"
+	"net/http/httptest"
+	"strings"
+	"testing"
+)
 
 func TestSplitTags(t *testing.T) {
 	got := splitTags("life, web ,, life , go ")
@@ -35,5 +41,49 @@ func TestSplitFrontmatter(t *testing.T) {
 	}
 	if front == "" {
 		t.Error("front is empty")
+	}
+}
+
+func TestRenderPostBodyResolvesBlobEmbeds(t *testing.T) {
+	counts := map[string]int{}
+	blobs := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if !strings.HasSuffix(r.URL.Path, "/meta") {
+			http.NotFound(w, r)
+			return
+		}
+		cid := strings.TrimSuffix(strings.TrimPrefix(r.URL.Path, "/blobs/"), "/meta")
+		counts[cid]++
+		mime := map[string]string{
+			"bimg":  "image/png",
+			"bvid":  "video/mp4",
+			"baud":  "audio/mpeg",
+			"bfile": "application/pdf",
+		}[cid]
+		if mime == "" {
+			http.NotFound(w, r)
+			return
+		}
+		_ = json.NewEncoder(w).Encode(map[string]string{"mime": mime})
+	}))
+	defer blobs.Close()
+
+	renderer := newBodyRenderer(blobs.URL, "https://public.example")
+	out := string(renderer.render("![](blob://bimg)\n\nHello <b>world</b> blob://bimg\n\nblob://bvid\n\nListen to blob://baud or grab blob://bfile."))
+	_ = renderer.render("blob://bimg")
+
+	for _, want := range []string{
+		`<img class="blob-media standalone" src="https://public.example/blobs/bimg" alt="">`,
+		"Hello &lt;b&gt;world&lt;/b&gt; ",
+		`<img class="blob-media inline" src="https://public.example/blobs/bimg" alt="">`,
+		`<video class="blob-media standalone" controls src="https://public.example/blobs/bvid"></video>`,
+		`<audio class="blob-media inline" controls src="https://public.example/blobs/baud"></audio>`,
+		`<a class="blob-file" href="https://public.example/blobs/bfile">blob://bfile</a>`,
+	} {
+		if !strings.Contains(out, want) {
+			t.Fatalf("rendered body missing %q:\n%s", want, out)
+		}
+	}
+	if counts["bimg"] != 1 || counts["bvid"] != 1 || counts["baud"] != 1 || counts["bfile"] != 1 {
+		t.Fatalf("metadata fetch counts = %#v, want each CID once", counts)
 	}
 }

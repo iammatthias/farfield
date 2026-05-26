@@ -8,7 +8,7 @@
           <span class="when">{{slice .CreatedAt 0 10}}</span>
           {{range .Tags}}<span class="tag">#{{.}}</span>{{end}}
         </div>
-        <div class="post-body">{{.Body}}</div>
+        <div class="post-body">{{.BodyHTML}}</div>
         <div class="post-actions">
           <a href="/posts/{{.Slug}}/edit">Edit</a>
           <form method="post" action="/posts/{{.Slug}}/delete"

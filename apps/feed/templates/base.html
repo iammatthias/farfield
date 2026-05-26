@@ -21,7 +21,17 @@
       text-transform: uppercase; letter-spacing: 0.06em; opacity: 0.55;
     }
     .post-meta .tag { opacity: 0.55; }
-    .post-body { white-space: pre-wrap; word-break: break-word; }
+    .post-body {
+      display: flex; flex-direction: column; gap: 0.6rem;
+      word-break: break-word;
+    }
+    .post-body-line { white-space: pre-wrap; }
+    .post-body-line.blank { min-height: 0.6rem; }
+    .blob-media.inline { display: inline-block; vertical-align: middle; max-width: 100%; }
+    .blob-media.standalone { display: block; max-width: 100%; }
+    .blob-media { border-radius: 0.5rem; }
+    .post-body audio.blob-media.inline, .post-body video.blob-media.inline { width: min(100%, 32rem); }
+    .blob-file { word-break: break-all; }
     .post-actions {
       display: flex; gap: 1.25rem; margin-top: 0.8rem;
       font-family: var(--font-mono); font-size: 0.78rem;

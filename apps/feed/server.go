@@ -146,7 +146,12 @@ func (s *Server) handleIndex(w http.ResponseWriter, r *http.Request) {
 		s.fail(w, "list posts", err)
 		return
 	}
-	s.render(w, "index.html", map[string]any{"Posts": posts})
+	renderer := newBodyRenderer(s.blobsURL, s.blobsPublic)
+	views := make([]postView, 0, len(posts))
+	for _, p := range posts {
+		views = append(views, postView{Post: p, BodyHTML: renderer.render(p.Body)})
+	}
+	s.render(w, "index.html", map[string]any{"Posts": views})
 }
 
 func (s *Server) handleNewPost(w http.ResponseWriter, r *http.Request) {
