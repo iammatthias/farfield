@@ -5,6 +5,9 @@ import (
 	"fmt"
 	"log/slog"
 	"os"
+	"path/filepath"
+	"sort"
+	"strings"
 
 	"github.com/iammatthias/farfield/lib/backup"
 	"github.com/iammatthias/farfield/lib/store"
@@ -16,15 +19,25 @@ type appTarget struct {
 	DBPath string
 }
 
-// targets resolves the apps to back up. Their database paths come from the
-// shared root .env — the same file the apps themselves read — so the backup
-// app needs no configuration of its own. apex has no database.
+// targets resolves the apps to back up by scanning the shared data directory
+// for *.sqlite files. Every farfield app keeps its database beside the backup
+// app's own in /data, so a newly deployed app (calendar, bookmarks, qr, ...) is
+// picked up automatically with no backup-side configuration to keep in sync.
+// The backup registry itself is skipped; SQLite -wal/-shm sidecars never match
+// the *.sqlite glob. apex has no database, so it simply never appears.
 func targets() []appTarget {
-	return []appTarget{
-		{"content", store.Env("CONTENT_DB_PATH", "data/content.sqlite")},
-		{"feed", store.Env("FEED_DB_PATH", "data/feed.sqlite")},
-		{"blobs", store.Env("BLOBS_DB_PATH", "data/blobs.sqlite")},
+	dataDir := filepath.Dir(store.Env("BACKUP_DB_PATH", "data/backup.sqlite"))
+	matches, _ := filepath.Glob(filepath.Join(dataDir, "*.sqlite"))
+	sort.Strings(matches)
+	out := make([]appTarget, 0, len(matches))
+	for _, p := range matches {
+		name := strings.TrimSuffix(filepath.Base(p), ".sqlite")
+		if name == "backup" {
+			continue // the backup app's own registry, not app data
+		}
+		out = append(out, appTarget{Name: name, DBPath: p})
 	}
+	return out
 }
 
 // snapResult is the outcome of snapshotting one app.
@@ -126,8 +139,9 @@ func runSnapshot() error {
 // dry run. With --confirm it takes a pre-restore safety snapshot, then
 // overwrites the target app's database — that app must be stopped first.
 func runRestore(app, cid string, confirm bool) error {
+	tgts := targets()
 	var target *appTarget
-	for _, t := range targets() {
+	for _, t := range tgts {
 		if t.Name == app {
 			t := t
 			target = &t
@@ -135,7 +149,11 @@ func runRestore(app, cid string, confirm bool) error {
 		}
 	}
 	if target == nil {
-		return fmt.Errorf("unknown app %q (want content, feed, or blobs)", app)
+		avail := make([]string, len(tgts))
+		for i, t := range tgts {
+			avail[i] = t.Name
+		}
+		return fmt.Errorf("unknown app %q (available: %s)", app, strings.Join(avail, ", "))
 	}
 
 	db, err := openDB(store.Env("BACKUP_DB_PATH", "data/backup.sqlite"))
