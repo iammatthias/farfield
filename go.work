@@ -2,8 +2,8 @@ go 1.25.0
 
 use (
 	./apps/apex
-	./apps/ba2d
 	./apps/backup
+	./apps/bard
 	./apps/blobs
 	./apps/bookmarks
 	./apps/calendar

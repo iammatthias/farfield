@@ -1,4 +1,5 @@
-// Command ba2d serves the ba2d browser inference app.
+// Command bard serves the bard browser inference app: a small GPT trained on
+// Shakespeare whose weights are sealed onchain and verified in the browser.
 package main
 
 import (
@@ -26,7 +27,7 @@ func main() {
 	slog.SetDefault(slog.New(slog.NewTextHandler(os.Stderr, nil)))
 
 	host := store.Env("HOST", "127.0.0.1")
-	port := store.Env("BA2D_PORT", "8795")
+	port := store.Env("BARD_PORT", "8795")
 
 	site, err := fs.Sub(webFS, "web")
 	if err != nil {

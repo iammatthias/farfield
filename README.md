@@ -7,7 +7,7 @@ moderating content, plus a public JSON API the website reads.
 | Service   | Address                    | Holds                                          |
 |-----------|----------------------------|------------------------------------------------|
 | `apex`    | `farfield.systems`         | the landing page — a standalone SVG            |
-| `ba2d`    | `0xba2d.farfield.systems`  | browser inference from sealed on-chain weights  |
+| `bard`    | `bard.farfield.systems`    | browser inference from sealed on-chain weights  |
 | `content` | `content.farfield.systems` | collections, entries, series fragments         |
 | `feed`    | `feed.farfield.systems`    | ephemeral short-form posts                     |
 | `blobs`   | `blobs.farfield.systems`   | image/media bytes + metadata, on Cloudflare R2 |

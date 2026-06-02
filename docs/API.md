@@ -5,7 +5,7 @@ single-binary services; the website reads three of them.
 
 | Service   | URL                                  | Holds                                   |
 |-----------|--------------------------------------|-----------------------------------------|
-| ba2d      | `https://0xba2d.farfield.systems`    | browser inference from sealed on-chain weights |
+| bard      | `https://bard.farfield.systems`     | browser inference from sealed on-chain weights |
 | content   | `https://content.farfield.systems`   | collections, entries, series fragments  |
 | feed      | `https://feed.farfield.systems`      | short ephemeral posts                   |
 | blobs     | `https://blobs.farfield.systems`     | image/media bytes + metadata            |
