@@ -89,6 +89,18 @@ services:
       - HOST=0.0.0.0
       - APEX_PORT=8790
 
+  ba2d:
+    build:
+      context: .
+      dockerfile: apps/ba2d/Dockerfile
+    image: farfield-ba2d
+    restart: unless-stopped
+    ports:
+      - "${BA2D_PORT:-8795}:8795"
+    environment:
+      - HOST=0.0.0.0
+      - BA2D_PORT=8795
+
   calendar:
     build:
       context: .
