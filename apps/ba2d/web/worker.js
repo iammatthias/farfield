@@ -274,6 +274,7 @@ function parseArtifact(bytes) {
   const vocab = decodeUtf8(bytes.subarray(20, 20 + vocabByteLen));
   let offset = 20 + vocabByteLen;
   const tensors = {};
+  let paramCount = 0;
   const specs = [
     ['wte', vocabSize, nEmbd],
     ['wpe', blockSize, nEmbd],
@@ -289,6 +290,7 @@ function parseArtifact(bytes) {
   specs.push(['lm_head', vocabSize, nEmbd]);
 
   for (const [name, rows, cols] of specs) {
+    paramCount += rows * cols;
     const result = readTensor(bytes, dv, offset, rows, cols, quant);
     tensors[name] = { shape: [rows, cols], data: result.data };
     offset = result.offset;
@@ -296,7 +298,7 @@ function parseArtifact(bytes) {
   if (offset !== bytes.length) {
     throw new Error(`artifact has ${bytes.length - offset} trailing bytes`);
   }
-  return { quant, nLayer, nHead, nEmbd, blockSize, vocabSize, ffnDim, vocab, vocabByteLen, tensors, bosId: vocabSize - 1 };
+  return { quant, nLayer, nHead, nEmbd, blockSize, vocabSize, ffnDim, paramCount, vocab, vocabByteLen, tensors, bosId: vocabSize - 1 };
 }
 
 function readTensor(bytes, dv, offset, rows, cols, quant) {
