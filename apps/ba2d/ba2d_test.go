@@ -37,28 +37,56 @@ func TestAppAutoLoadsWeightsOnStartup(t *testing.T) {
 	}
 }
 
-func TestStyleUsesFarfieldPaperSystem(t *testing.T) {
+func TestStyleUsesFarfieldHostSystem(t *testing.T) {
 	style := readAsset(t, "style.css")
-	for _, want := range []string{"--surface: #fafaf7", "--ink: #0a0a0a", "box-shadow: none", "font: 500 0.7rem/1 var(--font-mono)"} {
+	for _, want := range []string{
+		"--surface: #040810",
+		"--ink: #e8eef8",
+		"box-shadow: none",
+		"font: 500 0.7rem/1 var(--font-mono)",
+		"radial-gradient",
+		"backdrop-filter: blur(8px)",
+	} {
 		if !strings.Contains(style, want) {
 			t.Fatalf("style.css missing %q", want)
 		}
 	}
-	for _, bad := range []string{"radial-gradient", "box-shadow:0", "border-radius:20px"} {
+	for _, bad := range []string{"--surface: #fafaf7", "border-radius:20px"} {
 		if strings.Contains(style, bad) {
-			t.Fatalf("style.css still contains non-Farfield token %q", bad)
+			t.Fatalf("style.css still contains non-host token %q", bad)
 		}
 	}
 }
 
 func TestAppUsesVersionedAssets(t *testing.T) {
 	index := readAsset(t, "index.html")
-	if !strings.Contains(index, "./app.js?v=20260602-farfield-4") {
+	if !strings.Contains(index, "./app.js?v=20260602-farfield-host-1") {
 		t.Fatalf("index.html should load versioned app.js")
+	}
+	if !strings.Contains(index, "./style.css?v=20260602-farfield-host-1") {
+		t.Fatalf("index.html should load versioned style.css")
 	}
 	app := readAsset(t, "app.js")
 	if !strings.Contains(app, "./worker.js?v=") {
 		t.Fatalf("app.js should load a versioned worker.js")
+	}
+	if !strings.Contains(app, "20260602-farfield-host-1") {
+		t.Fatalf("app.js should expose the host-aligned ASSET_VERSION")
+	}
+}
+
+func TestIndexHasFarfieldHostChrome(t *testing.T) {
+	index := readAsset(t, "index.html")
+	for _, want := range []string{
+		`<title>ba2d · Farfield Systems</title>`,
+		`class="masthead"`,
+		`class="brand"`,
+		`Farfield Systems · 0xba2d · onchain inference`,
+		`class="colophon"`,
+	} {
+		if !strings.Contains(index, want) {
+			t.Fatalf("index.html missing host-chrome marker %q", want)
+		}
 	}
 }
 

@@ -3,17 +3,25 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
-<meta name="theme-color" content="#04060a">
-<title>BARD</title>
-<link rel="stylesheet" href="./style.css?v=20260602-farfield">
+<meta name="theme-color" content="#040810">
+<title>ba2d · Farfield Systems</title>
+<link rel="stylesheet" href="./style.css?v=20260602-farfield-host-1">
 </head>
 <body>
   <main class="shell">
+    <header class="masthead">
+      <a class="brand" href="https://farfield.systems/">Farfield</a>
+      <nav aria-label="Farfield apps">
+        <a href="https://farfield.systems/docs/" target="_blank" rel="noreferrer">Docs</a>
+        <a href="https://0xba2d.farfield.systems/" aria-current="page">ba2d</a>
+      </nav>
+    </header>
+
     <header class="hero card">
       <div>
-        <p class="eyebrow">0xba2d · onchain inference</p>
+        <p class="eyebrow">Farfield Systems · 0xba2d · onchain inference</p>
         <h1>BARD</h1>
-        <p class="lede">A small Shakespeare-trained GPT onchain. It loads from Ethereum Sepolia, verifies the sealed artifact hash, and runs inference in a worker. No wallet. No server-side inference. No excuses.</p>
+        <p class="lede">A small Shakespeare-trained GPT onchain. Weights stream from Ethereum Sepolia, the artifact hash is verified in the browser, and inference runs in a worker. No wallet. No server-side inference. No excuses.</p>
       </div>
       <div class="badge-row">
         <span class="badge sealed">sealed contract</span>
@@ -33,13 +41,13 @@
           <div><dt>Chunks</dt><dd id="m-chunks">29</dd></div>
           <div><dt>Owner</dt><dd id="m-owner">—</dd></div>
         </dl>
-        <p class="mono small" id="manifest-line">Ready to load.</p>
+        <p class="mono" id="manifest-line">Ready to load.</p>
       </section>
 
       <section class="card stack">
         <div class="row">
           <h2>Weights</h2>
-          <button id="load-btn" class="primary">Reload weights</button>
+          <button id="load-btn" class="ghost">Reload weights</button>
         </div>
         <label class="field">
           <span>Sepolia RPC</span>
@@ -47,9 +55,9 @@
         </label>
         <div class="progress">
           <div id="status" class="mono">idle</div>
-          <div id="progress" class="mono small">pointers → chunks → decompress → verify → done</div>
+          <div id="progress" class="mono">pointers → chunks → decompress → verify → done</div>
         </div>
-        <p class="mono small" id="provenance">hash not yet verified</p>
+        <p class="mono" id="provenance">hash not yet verified</p>
       </section>
     </section>
 
@@ -57,8 +65,10 @@
       <section class="card stack">
         <div class="row">
           <h2>Prompt</h2>
-          <button id="generate-btn" class="primary" disabled>Generate</button>
-          <button id="abort-btn" class="ghost" disabled>Abort</button>
+          <div class="row" style="gap:0.5rem;">
+            <button id="abort-btn" class="ghost" disabled>Abort</button>
+            <button id="generate-btn" class="primary" disabled>Generate</button>
+          </div>
         </div>
         <label class="field">
           <span>Prompt</span>
@@ -82,7 +92,12 @@
         <pre id="output" aria-live="polite">Weights load automatically. The text is synthetic and usually a little haunted.</pre>
       </section>
     </section>
+
+    <footer class="colophon">
+      <span>ba2d · farfield.systems</span>
+      <span>sepolia · chain 11155111 · int8 · 29 chunks</span>
+    </footer>
   </main>
-  <script type="module" src="./app.js?v=20260602-farfield-4"></script>
+  <script type="module" src="./app.js?v=20260602-farfield-host-1"></script>
 </body>
 </html>
