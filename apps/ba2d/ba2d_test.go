@@ -37,6 +37,20 @@ func TestAppAutoLoadsWeightsOnStartup(t *testing.T) {
 	}
 }
 
+func TestStyleUsesFarfieldPaperSystem(t *testing.T) {
+	style := readAsset(t, "style.css")
+	for _, want := range []string{"--surface: #fafaf7", "--ink: #0a0a0a", "box-shadow: none", "font: 500 0.7rem/1 var(--font-mono)"} {
+		if !strings.Contains(style, want) {
+			t.Fatalf("style.css missing %q", want)
+		}
+	}
+	for _, bad := range []string{"radial-gradient", "box-shadow:0", "border-radius:20px"} {
+		if strings.Contains(style, bad) {
+			t.Fatalf("style.css still contains non-Farfield token %q", bad)
+		}
+	}
+}
+
 func TestWorkerUsesArtifactHashFromArtifactCall(t *testing.T) {
 	worker := readAsset(t, "worker.js")
 	if strings.Contains(worker, "config().artifactHash does not match artifactHash()") {
