@@ -31,7 +31,7 @@
   <table class="rows">
     <thead>
       <tr><th>Title</th><th>Collection</th><th>Status</th>
-        <th class="nowrap">Updated</th><th></th></tr>
+        <th class="nowrap">Created</th><th class="nowrap">Updated</th><th></th></tr>
     </thead>
     <tbody>
       {{range .Entries}}
@@ -40,6 +40,7 @@
           <td>{{.Collection}}</td>
           <td>{{if .Published}}<span class="badge live">published</span>
               {{else}}<span class="badge draft">draft</span>{{end}}</td>
+          <td class="nowrap muted">{{slice .CreatedAt 0 10}}</td>
           <td class="nowrap muted">{{slice .UpdatedAt 0 10}}</td>
           <td class="nowrap">
             <form method="post" action="/entries/{{.Slug}}/delete"
