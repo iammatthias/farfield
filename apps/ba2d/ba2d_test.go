@@ -53,7 +53,7 @@ func TestStyleUsesFarfieldPaperSystem(t *testing.T) {
 
 func TestAppUsesVersionedAssets(t *testing.T) {
 	index := readAsset(t, "index.html")
-	if !strings.Contains(index, "./app.js?v=20260602-farfield") {
+	if !strings.Contains(index, "./app.js?v=20260602-farfield-2") {
 		t.Fatalf("index.html should load versioned app.js")
 	}
 	app := readAsset(t, "app.js")
