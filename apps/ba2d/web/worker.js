@@ -105,6 +105,25 @@ function ethGetCode(rpcUrl, address) {
 
 function decodeConfigResult(resultHex) {
   const bytes = hexToBytes(resultHex);
+
+  // Live `config()` comes back as a bytes blob whose payload is laid out as:
+  // quant, vocabSize, paramCount, maxChunkBytes, artifactHash, nameLength, name.
+  // The outer two words are the standard dynamic-bytes wrapper.
+  if (bytes.length >= 288) {
+    const payload = bytes.subarray(64);
+    const quant = payload[31];
+    const vocabSize = Number(bigWord(payload, 32));
+    const paramCount = Number(bigWord(payload, 64));
+    const maxChunkBytes = Number(bigWord(payload, 96));
+    const artifactHash = '0x' + bytesToHex(payload.subarray(128, 160));
+    const nameLength = Number(bigWord(payload, 160));
+    const name = decodeUtf8(payload.subarray(192, 192 + nameLength));
+    if (nameLength > 0 && nameLength <= 64 && quant <= 2 && vocabSize > 0) {
+      return { name, quant, vocabSize, paramCount, maxChunkBytes, artifactHash };
+    }
+  }
+
+  // Fallback for a standard ABI tuple encoding.
   const nameOffset = Number(bigWord(bytes, 0));
   const quant = bytes[32 + 31];
   const vocabSize = Number(bigWord(bytes, 64));

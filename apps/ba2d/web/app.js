@@ -1,4 +1,4 @@
-const ASSET_VERSION = '20260602-farfield-2';
+const ASSET_VERSION = '20260602-farfield-3';
 const worker = new Worker(`./worker.js?v=${ASSET_VERSION}`, { type: 'module' });
 
 const $ = (id) => document.getElementById(id);

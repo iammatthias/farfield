@@ -53,7 +53,7 @@ func TestStyleUsesFarfieldPaperSystem(t *testing.T) {
 
 func TestAppUsesVersionedAssets(t *testing.T) {
 	index := readAsset(t, "index.html")
-	if !strings.Contains(index, "./app.js?v=20260602-farfield-2") {
+	if !strings.Contains(index, "./app.js?v=20260602-farfield-3") {
 		t.Fatalf("index.html should load versioned app.js")
 	}
 	app := readAsset(t, "app.js")
@@ -69,6 +69,12 @@ func TestWorkerUsesArtifactHashFromArtifactCall(t *testing.T) {
 	}
 	if !strings.Contains(worker, "const artifactHash = decodeBytes32(artifactResult);") {
 		t.Fatalf("worker.js must use artifactHash() as the source of truth")
+	}
+	if !strings.Contains(worker, "const payload = bytes.subarray(64);") {
+		t.Fatalf("worker.js must decode the live config() payload layout")
+	}
+	if !strings.Contains(worker, "const name = decodeUtf8(payload.subarray(192, 192 + nameLength));") {
+		t.Fatalf("worker.js must decode the model name from the config payload")
 	}
 	if !strings.Contains(worker, "maxChunkBytes") {
 		t.Fatalf("worker.js must decode maxChunkBytes in config()")
