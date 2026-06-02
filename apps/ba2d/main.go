@@ -4,6 +4,7 @@ package main
 import (
 	"context"
 	"embed"
+	"io"
 	"io/fs"
 	"log/slog"
 	"net"
@@ -14,6 +15,7 @@ import (
 	"time"
 
 	"github.com/iammatthias/farfield/lib/store"
+	"github.com/iammatthias/farfield/lib/theme"
 )
 
 //go:embed web
@@ -32,9 +34,19 @@ func main() {
 		os.Exit(1)
 	}
 
+	mux := http.NewServeMux()
+	// Serve the shared farfield theme at the same path the other apps use, so
+	// bard inherits the canonical stylesheet instead of a local copy that drifts.
+	mux.HandleFunc("GET /static/styles.css", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/css; charset=utf-8")
+		w.Header().Set("Cache-Control", "public, max-age=3600")
+		_, _ = io.WriteString(w, theme.CSS)
+	})
+	mux.Handle("/", http.FileServerFS(site))
+
 	srv := &http.Server{
 		Addr:    net.JoinHostPort(host, port),
-		Handler: logRequests(http.FileServerFS(site)),
+		Handler: logRequests(mux),
 	}
 
 	go func() {

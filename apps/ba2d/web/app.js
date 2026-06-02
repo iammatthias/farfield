@@ -1,4 +1,4 @@
-const ASSET_VERSION = '20260602-bard-1';
+const ASSET_VERSION = '20260602-bard-2';
 const DEFAULT_RPC = 'https://ethereum-sepolia-rpc.publicnode.com';
 const worker = new Worker(`./worker.js?v=${ASSET_VERSION}`, { type: 'module' });
 
@@ -24,7 +24,6 @@ const els = {
   status: $('status'),
   progress: $('progress'),
   provenance: $('provenance'),
-  manifestLine: $('manifest-line'),
   output: $('output'),
   name: $('m-name'),
   quant: $('m-quant'),
@@ -76,8 +75,7 @@ function setModel(manifest) {
   els.params.textContent = String(manifest.paramCount);
   els.chunks.textContent = String(manifest.chunkCount);
   els.owner.textContent = manifest.owner;
-  els.manifestLine.textContent = `${manifest.name} · ${manifest.quantName} · vocab ${manifest.vocabSize} · params ${manifest.paramCount} · ${manifest.chunkCount} chunks`;
-  els.provenance.textContent = 'hash not yet verified';
+  els.provenance.textContent = 'not yet verified';
 }
 
 function setControlsEnabled(ok) {

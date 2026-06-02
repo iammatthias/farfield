@@ -4,95 +4,83 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
 <meta name="theme-color" content="#fafaf7">
-<title>bard · Farfield Systems</title>
-<link rel="stylesheet" href="./style.css?v=20260602-bard-1">
+<title>farfield · bard</title>
+<link rel="stylesheet" href="/static/styles.css?v=20260602-bard-2">
+<style>
+  /* bard-only: the inference controls the shared theme has no reason to carry. */
+  .sliders { display: grid; gap: 1rem 1.5rem; margin: 1.25rem 0;
+    grid-template-columns: repeat(auto-fit, minmax(13rem, 1fr)); }
+  .slider > span { display: flex; justify-content: space-between; gap: 0.75rem;
+    margin-bottom: 0.4rem; font: 500 0.7rem/1 var(--font-mono);
+    text-transform: uppercase; letter-spacing: 0.09em; opacity: 0.6; }
+  .slider > span strong { opacity: 1; }
+  .slider input[type="range"] { width: 100%; padding: 0; border: 0;
+    background: transparent; accent-color: var(--ink); }
+  .readout { margin-top: 1rem; }
+  .readout p + p { margin-top: 0.5rem; }
+  .readout .label { display: inline; }
+  #provenance { word-break: break-all; }
+  #output { min-height: 7rem; white-space: pre-wrap; }
+</style>
 </head>
 <body>
-  <main class="shell">
-    <header class="masthead">
-      <a class="brand" href="https://farfield.systems/">Farfield</a>
-      <nav aria-label="Farfield apps">
-        <a href="https://farfield.systems/docs/" target="_blank" rel="noreferrer">Docs</a>
-        <a href="https://bard.farfield.systems/" aria-current="page">bard</a>
+  <main class="container">
+    <header class="bar">
+      <h1><a href="https://farfield.systems/">farfield · bard</a></h1>
+      <nav>
+        <a href="https://farfield.systems/docs/">Docs</a>
+        <a href="https://sepolia.etherscan.io/address/0xBA2D82930b2F74B1319Fd326bdF43b567Ac03720">Etherscan</a>
+        <a href="https://sourcify.dev/server/v2/contract/11155111/0xBA2D82930b2F74B1319Fd326bdF43b567Ac03720?fields=devdoc,userdoc,abi">Sourcify</a>
       </nav>
     </header>
 
-    <header class="hero card">
-      <div>
-        <p class="eyebrow">Farfield Systems · bard</p>
-        <h1>BARD</h1>
-        <p class="lede">A small GPT trained on Shakespeare, stored onchain. Weights stream from a contract on Ethereum Sepolia, the artifact hash is verified in the browser, and inference runs in a Web Worker.</p>
-      </div>
-      <div class="badge-row">
-        <a class="badge" href="https://sepolia.etherscan.io/address/0xBA2D82930b2F74B1319Fd326bdF43b567Ac03720" target="_blank" rel="noreferrer">Etherscan</a>
-        <a class="badge" href="https://sourcify.dev/server/v2/contract/11155111/0xBA2D82930b2F74B1319Fd326bdF43b567Ac03720?fields=devdoc,userdoc,abi" target="_blank" rel="noreferrer">Sourcify</a>
-      </div>
-    </header>
+    <p class="measure muted">A small GPT trained on Shakespeare, stored onchain. Weights stream from a contract on Ethereum Sepolia, the artifact hash is verified in the browser, and inference runs in a Web Worker.</p>
 
-    <section class="card stack">
-      <div class="row">
-        <h2>Model card</h2>
-        <button id="load-btn" class="ghost">Reload weights</button>
+    <div class="section-head">
+      <h2>Model</h2>
+      <button id="load-btn">Reload weights</button>
+    </div>
+    <div class="table-wrap">
+      <table>
+        <tbody>
+          <tr><th>Name</th><td id="m-name" class="mono">ba2d</td><th>Quant</th><td id="m-quant" class="mono">int8</td></tr>
+          <tr><th>Vocab</th><td id="m-vocab" class="mono">66</td><th>Params</th><td id="m-params" class="mono">811520</td></tr>
+          <tr><th>Chunks</th><td id="m-chunks" class="mono">29</td><th>Owner</th><td id="m-owner" class="mono">—</td></tr>
+        </tbody>
+      </table>
+    </div>
+    <div class="readout">
+      <p class="mono"><span class="label">Status</span> <span id="status">idle</span></p>
+      <p class="mono muted"><span class="label">Stages</span> <span id="progress">pointers → chunks → decompress → verify → done</span></p>
+      <p class="mono"><span class="label">Hash</span> <span id="provenance">not yet verified</span></p>
+    </div>
+
+    <div class="section-head">
+      <h2>Generate</h2>
+      <div class="cluster">
+        <button id="abort-btn" disabled>Abort</button>
+        <button id="generate-btn" disabled>Generate</button>
       </div>
-      <dl class="model-card" id="model-card">
-        <div><dt>Name</dt><dd id="m-name">ba2d</dd></div>
-        <div><dt>Quant</dt><dd id="m-quant">int8</dd></div>
-        <div><dt>Vocab</dt><dd id="m-vocab">66</dd></div>
-        <div><dt>Params</dt><dd id="m-params">811520</dd></div>
-        <div><dt>Chunks</dt><dd id="m-chunks">29</dd></div>
-        <div><dt>Owner</dt><dd id="m-owner">-</dd></div>
-      </dl>
-      <div class="verify">
-        <div class="verify-row">
-          <span class="label">Status</span>
-          <span id="status" class="data">idle</span>
-        </div>
-        <p id="progress" class="data muted">pointers → chunks → decompress → verify → done</p>
-        <div class="verify-row">
-          <span class="label">Hash</span>
-          <span id="provenance" class="data">hash not yet verified</span>
-        </div>
-      </div>
-      <p class="data muted" id="manifest-line">Ready to load.</p>
-    </section>
+    </div>
+    <div class="field">
+      <label class="label" for="prompt">Prompt</label>
+      <textarea id="prompt" rows="6" spellcheck="false">Write a short passage in the style of Shakespeare.</textarea>
+    </div>
+    <div class="sliders">
+      <label class="slider"><span>Temperature <strong id="temp-val">0.70</strong></span><input id="temperature" type="range" min="0" max="1.5" step="0.05" value="0.7"></label>
+      <label class="slider"><span>Top-k <strong id="topk-val">40</strong></span><input id="topk" type="range" min="0" max="66" step="1" value="40"></label>
+      <label class="slider"><span>Top-p <strong id="topp-val">1.00</strong></span><input id="topp" type="range" min="0.1" max="1" step="0.01" value="1"></label>
+      <label class="slider"><span>Max tokens <strong id="max-val">160</strong></span><input id="max-tokens" type="range" min="16" max="256" step="1" value="160"></label>
+      <label class="slider"><span>Freq penalty <strong id="freq-val">0.00</strong></span><input id="freq-penalty" type="range" min="0" max="2" step="0.01" value="0"></label>
+      <label class="slider"><span>Seed <strong id="seed-val">0</strong></span><input id="seed" type="number" min="0" step="1" value="0"></label>
+    </div>
 
-    <section class="grid two-up">
-      <section class="card stack">
-        <div class="row">
-          <h2>Prompt</h2>
-          <div class="cluster">
-            <button id="abort-btn" class="ghost" disabled>Abort</button>
-            <button id="generate-btn" class="primary" disabled>Generate</button>
-          </div>
-        </div>
-        <label class="field">
-          <span>Prompt</span>
-          <textarea id="prompt" rows="8" spellcheck="false">Write a short passage in the style of Shakespeare.</textarea>
-        </label>
-        <div class="sliders">
-          <label class="field"><span>Temperature <strong id="temp-val">0.7</strong></span><input id="temperature" type="range" min="0" max="1.5" step="0.05" value="0.7"></label>
-          <label class="field"><span>Top-k <strong id="topk-val">40</strong></span><input id="topk" type="range" min="0" max="66" step="1" value="40"></label>
-          <label class="field"><span>Top-p <strong id="topp-val">1.00</strong></span><input id="topp" type="range" min="0.1" max="1" step="0.01" value="1"></label>
-          <label class="field"><span>Max tokens <strong id="max-val">160</strong></span><input id="max-tokens" type="range" min="16" max="256" step="1" value="160"></label>
-          <label class="field"><span>Seed <strong id="seed-val">0</strong></span><input id="seed" type="number" min="0" step="1" value="0"></label>
-          <label class="field"><span>Freq penalty <strong id="freq-val">0.00</strong></span><input id="freq-penalty" type="range" min="0" max="2" step="0.01" value="0"></label>
-        </div>
-      </section>
-
-      <section class="card stack output-card">
-        <div class="row">
-          <h2>Stream</h2>
-          <button id="clear-btn" class="ghost">Clear</button>
-        </div>
-        <pre id="output" aria-live="polite">Weights load on open. Generated text appears here.</pre>
-      </section>
-    </section>
-
-    <footer class="colophon">
-      <span>bard · farfield.systems</span>
-      <span>sepolia · chain 11155111 · int8 · 29 chunks</span>
-    </footer>
+    <div class="section-head">
+      <h2>Output</h2>
+      <button id="clear-btn">Clear</button>
+    </div>
+    <pre id="output" aria-live="polite">Weights load on open. Generated text appears here.</pre>
   </main>
-  <script type="module" src="./app.js?v=20260602-bard-1"></script>
+  <script type="module" src="./app.js?v=20260602-bard-2"></script>
 </body>
 </html>
