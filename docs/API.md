@@ -6,6 +6,7 @@ single-binary services; the website reads three of them.
 | Service   | URL                                  | Holds                                   |
 |-----------|--------------------------------------|-----------------------------------------|
 | bard      | `https://bard.farfield.systems`     | browser inference from sealed on-chain weights |
+| dead-presidents | `https://dead-presidents.farfield.systems` | char-level GPT on presidential speeches, run in-browser |
 | content   | `https://content.farfield.systems`   | collections, entries, series fragments  |
 | feed      | `https://feed.farfield.systems`      | short ephemeral posts                   |
 | blobs     | `https://blobs.farfield.systems`     | image/media bytes + metadata            |

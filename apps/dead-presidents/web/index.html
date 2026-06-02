@@ -1,0 +1,78 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name="theme-color" content="#fafaf7">
+<title>farfield · dead presidents</title>
+<link rel="stylesheet" href="/static/styles.css?v=20260602-dp-1">
+<style>
+  /* dead-presidents-only: the inference controls the shared theme has no reason to carry. */
+  .sliders { display: grid; gap: 1rem 1.5rem; margin: 1.25rem 0;
+    grid-template-columns: repeat(auto-fit, minmax(13rem, 1fr)); }
+  .slider > span { display: flex; justify-content: space-between; gap: 0.75rem;
+    margin-bottom: 0.4rem; font: 500 0.7rem/1 var(--font-mono);
+    text-transform: uppercase; letter-spacing: 0.09em; opacity: 0.6; }
+  .slider > span strong { opacity: 1; }
+  .slider input[type="range"] { width: 100%; padding: 0; border: 0;
+    background: transparent; accent-color: var(--ink); }
+  .readout { margin-top: 1rem; }
+  .readout .label { display: inline; }
+  #output { min-height: 9rem; white-space: pre-wrap; }
+  #output .seed { opacity: 0.45; }
+</style>
+</head>
+<body>
+  <main class="container">
+    <header class="bar">
+      <h1><a href="https://farfield.systems/">farfield · dead presidents</a></h1>
+      <nav>
+        <a href="https://farfield.systems/docs/dead-presidents.html">Docs</a>
+        <a href="https://github.com/iammatthias/dp">GitHub</a>
+      </nav>
+    </header>
+
+    <p class="measure muted">A character-level GPT trained on the speeches of US presidents. The whole model streams to your browser once (1.8&nbsp;MB) and runs entirely in a Web Worker — no server inference, no API calls. It is not a chatbot: it continues a short text seed in the cadence of the corpus.</p>
+
+    <div class="section-head">
+      <h2>Model</h2>
+      <span id="m-status" class="badge draft">loading</span>
+    </div>
+    <div class="table-wrap">
+      <table>
+        <tbody>
+          <tr><th>Params</th><td id="m-params" class="mono">—</td><th>Vocab</th><td id="m-vocab" class="mono">—</td></tr>
+          <tr><th>Context</th><td id="m-context" class="mono">—</td><th>Layers</th><td id="m-layers" class="mono">—</td></tr>
+          <tr><th>Val loss</th><td id="m-bpc" class="mono">—</td><th>Runs</th><td id="m-where" class="mono">in your browser</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <div class="section-head">
+      <h2>Continue</h2>
+      <div class="cluster">
+        <button id="clear-btn">Clear</button>
+        <button id="generate-btn" disabled>Continue</button>
+      </div>
+    </div>
+    <div class="field">
+      <label class="label" for="seed">Seed</label>
+      <textarea id="seed" rows="3" spellcheck="false">the state of the union is</textarea>
+    </div>
+    <div class="sliders">
+      <label class="slider"><span>Temperature <strong id="temp-val">0.60</strong></span><input id="temperature" type="range" min="0" max="1.2" step="0.05" value="0.6"></label>
+      <label class="slider"><span>Max characters <strong id="max-val">240</strong></span><input id="max-tokens" type="range" min="16" max="400" step="1" value="240"></label>
+    </div>
+
+    <div class="section-head">
+      <h2>Continuation</h2>
+    </div>
+    <pre id="output" aria-live="polite">The model loads on open. Your seed and its continuation appear here.</pre>
+    <div class="readout">
+      <p class="mono muted"><span class="label">Generated</span> <span id="gen-stat">—</span></p>
+    </div>
+  </main>
+  <script src="./openai.js?v=20260602-dp-1"></script>
+  <script src="./app.js?v=20260602-dp-1"></script>
+</body>
+</html>

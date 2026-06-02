@@ -1,0 +1,63 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>Dead Presidents — Farfield Docs</title>
+<link rel="stylesheet" href="/static/styles.css?v=20260602-1">
+<link rel="stylesheet" href="style.css?v=20260602-docs4">
+</head>
+<body>
+<input type="checkbox" id="nav-toggle" class="nav-toggle" hidden>
+<header class="bar">
+  <a href="/" class="brand">farfield · docs</a>
+  <label for="nav-toggle" class="nav-burger" aria-label="Toggle navigation"><span></span></label>
+</header>
+<div class="docs-layout">
+<aside class="sidebar">
+  <nav class="docs-nav" aria-label="Docs navigation">
+  <a href="index.html">Docs</a>
+  <a href="apex.html">Apex</a>
+  <a href="content.html">Content</a>
+  <a href="feed.html">Feed</a>
+  <a href="blobs.html">Blobs</a>
+  <a href="calendar.html">Calendar</a>
+  <a href="bookmarks.html">Bookmarks</a>
+  <a href="qr.html">QR</a>
+  <a href="bard.html">Bard</a>
+  <a href="dead-presidents.html" aria-current="page">Dead Presidents</a>
+  <a href="backup.html">Backup</a>
+  <a href="skills.html">Skills</a>
+</nav>
+  </aside>
+
+<main class="page">
+  <h1>dead presidents</h1>
+  <p class="meta"><code>dead-presidents.farfield.systems</code></p>
+
+  <p>A character-level GPT trained on the speeches of US presidents. The whole model — 464,928 parameters as a 1.8&nbsp;MB float32 binary — streams to your browser once and runs entirely in a Web Worker. There is no server-side inference and no API call.</p>
+
+  <p>It is not instruction-tuned and its context is only 192 characters, so it does not answer questions. It <em>continues</em> a short text seed in the cadence of the corpus. dead presidents has no database and no JSON API; it is a static page, so it sits apart from the content services.</p>
+
+  <figure class="screenshot">
+    <img src="assets/dead-presidents.png?v=20260602-dp" alt="Screenshot of the dead presidents browser inference UI" loading="lazy">
+    <figcaption>The dead presidents interface continuing a seed after the model loads.</figcaption>
+  </figure>
+
+  <h2>How it works</h2>
+  <p>The model ships as two static files served alongside the page:</p>
+  <ul>
+    <li><strong>model.json</strong> — a manifest: architecture config, the 34-character vocabulary, and the byte offsets of each tensor.</li>
+    <li><strong>model.bin</strong> — the float32 weights, read into typed arrays in one fetch.</li>
+  </ul>
+  <p>A classic Web Worker loads a dependency-free inference engine, reconstructs the GPT-2-style transformer (RMSNorm, causal attention, tied output head), and runs KV-cached generation. The JS engine matches the source-of-truth Python model to about 1e-6, so the browser output is the real model, not an approximation.</p>
+
+  <h2>Model</h2>
+  <p>Char-level, GPT-2-style: <code>n_embd 96</code>, <code>n_layer 4</code>, <code>n_head 4</code>, <code>block_size 192</code>, vocabulary 34 (33 characters + a BOS marker), validation 1.475 bits/char. Weights and training code live at <a href="https://github.com/iammatthias/dp">github.com/iammatthias/dp</a>.</p>
+
+  <h2>Inference</h2>
+  <p>Generation runs in the Worker so the page stays responsive, behind a small OpenAI-shaped client (streaming <code>chat.completion.chunk</code> objects where each "token" is one character). The seed is the controls' text; temperature and a character budget steer the output. Everything happens locally — no wallet, no server, no network after the weights load.</p>
+</main>
+</div>
+</body>
+</html>

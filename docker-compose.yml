@@ -101,6 +101,18 @@ services:
       - HOST=0.0.0.0
       - BARD_PORT=8795
 
+  dead-presidents:
+    build:
+      context: .
+      dockerfile: apps/dead-presidents/Dockerfile
+    image: farfield-dead-presidents
+    restart: unless-stopped
+    ports:
+      - "${DEAD_PRESIDENTS_PORT:-8796}:8796"
+    environment:
+      - HOST=0.0.0.0
+      - DEAD_PRESIDENTS_PORT=8796
+
   calendar:
     build:
       context: .

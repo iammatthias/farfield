@@ -8,6 +8,7 @@ moderating content, plus a public JSON API the website reads.
 |-----------|----------------------------|------------------------------------------------|
 | `apex`    | `farfield.systems`         | the landing page — a standalone SVG            |
 | `bard`    | `bard.farfield.systems`    | browser inference from sealed on-chain weights  |
+| `dead-presidents` | `dead-presidents.farfield.systems` | char-level GPT on presidential speeches, run in-browser |
 | `content` | `content.farfield.systems` | collections, entries, series fragments         |
 | `feed`    | `feed.farfield.systems`    | ephemeral short-form posts                     |
 | `blobs`   | `blobs.farfield.systems`   | image/media bytes + metadata, on Cloudflare R2 |

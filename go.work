@@ -8,6 +8,7 @@ use (
 	./apps/bookmarks
 	./apps/calendar
 	./apps/content
+	./apps/dead-presidents
 	./apps/feed
 	./apps/qr
 	./lib/auth
