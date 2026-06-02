@@ -1,4 +1,5 @@
-const ASSET_VERSION = '20260602-farfield-host-1';
+const ASSET_VERSION = '20260602-bard-1';
+const DEFAULT_RPC = 'https://ethereum-sepolia-rpc.publicnode.com';
 const worker = new Worker(`./worker.js?v=${ASSET_VERSION}`, { type: 'module' });
 
 const $ = (id) => document.getElementById(id);
@@ -7,7 +8,6 @@ const els = {
   generate: $('generate-btn'),
   abort: $('abort-btn'),
   clear: $('clear-btn'),
-  rpc: $('rpc-url'),
   prompt: $('prompt'),
   temp: $('temperature'),
   topk: $('topk'),
@@ -57,7 +57,7 @@ function loadWeightsFromChain() {
   setOutput('');
   streaming = false;
   updateBusy();
-  worker.postMessage({ type: 'load', rpcUrl: els.rpc.value.trim() });
+  worker.postMessage({ type: 'load', rpcUrl: DEFAULT_RPC });
 }
 
 function setProgress(text) {
@@ -180,7 +180,7 @@ worker.addEventListener('error', (event) => {
   setProgress(event.message || 'worker error');
 });
 
-setOutput('Weights load automatically. The text is synthetic and usually a little haunted.');
+setOutput('Weights load on open. Generated text appears here.');
 syncSliderLabels();
 setControlsEnabled(false);
 updateBusy();
