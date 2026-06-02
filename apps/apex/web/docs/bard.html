@@ -1,0 +1,56 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>Bard — Farfield Docs</title>
+<link rel="stylesheet" href="style.css?v=20260520-docs2">
+</head>
+<body>
+<nav class="docs-nav" aria-label="Docs navigation">
+  <a href="/" class="brand">Farfield</a>
+  <span class="sep" aria-hidden="true">/</span>
+  <a href="index.html">Docs</a>
+  <a href="apex.html">Apex</a>
+  <a href="content.html">Content</a>
+  <a href="feed.html">Feed</a>
+  <a href="blobs.html">Blobs</a>
+  <a href="calendar.html">Calendar</a>
+  <a href="bookmarks.html">Bookmarks</a>
+  <a href="qr.html">QR</a>
+  <a href="bard.html" aria-current="page">Bard</a>
+  <a href="backup.html">Backup</a>
+  <a href="skills.html">Skills</a>
+</nav>
+
+<main class="page">
+  <h1>bard</h1>
+  <p class="meta"><code>bard.farfield.systems</code></p>
+
+  <p>A small GPT trained on Shakespeare, stored onchain. Weights stream from a contract on Ethereum Sepolia, the artifact hash is verified in the browser, and inference runs in a Web Worker.</p>
+
+  <p>bard has no database and no JSON API. It is a static page that reads the model directly from the chain, so it sits apart from the content services.</p>
+
+  <figure class="screenshot">
+    <img src="assets/bard.png?v=20260602-bard" alt="Screenshot of the bard onchain inference UI" loading="lazy">
+    <figcaption>The bard interface after streaming and verifying weights from the contract.</figcaption>
+  </figure>
+
+  <h2>How it works</h2>
+  <p>The weights are chunked, gzipped, and written into the contract's storage. The browser reassembles the model client-side in four stages:</p>
+  <ul>
+    <li><strong>Pointers.</strong> Read the chunk pointers from the contract.</li>
+    <li><strong>Chunks.</strong> Fetch each weight chunk over a public Sepolia RPC.</li>
+    <li><strong>Decompress.</strong> Gunzip the reassembled artifact.</li>
+    <li><strong>Verify.</strong> Recompute the sha-256 hash and confirm it matches the artifact hash the contract advertises.</li>
+  </ul>
+  <p>The model only loads when the in-browser hash matches the onchain one. This is the same content-addressing the rest of Farfield uses, enforced in the browser against the chain.</p>
+
+  <h2>Contract</h2>
+  <p>Address <code>0xBA2D82930b2F74B1319Fd326bdF43b567Ac03720</code> on Ethereum Sepolia (chain <code>11155111</code>). Inspect it on <a href="https://sepolia.etherscan.io/address/0xBA2D82930b2F74B1319Fd326bdF43b567Ac03720">Etherscan</a> or <a href="https://sourcify.dev/server/v2/contract/11155111/0xBA2D82930b2F74B1319Fd326bdF43b567Ac03720?fields=devdoc,userdoc,abi">Sourcify</a>.</p>
+
+  <h2>Inference</h2>
+  <p>Generation runs in a Web Worker so the page stays responsive. The sampling controls are the usual set: temperature, top-k, top-p, max tokens, frequency penalty, and a seed. Output streams token by token. There is no wallet and no server-side inference; everything after the chunk fetch happens locally.</p>
+</main>
+</body>
+</html>
