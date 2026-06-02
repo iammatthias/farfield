@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
 <meta name="theme-color" content="#fafaf7">
 <title>farfield · bard</title>
-<link rel="stylesheet" href="/static/styles.css?v=20260602-bard-2">
+<link rel="stylesheet" href="/static/styles.css?v=20260602-bard-3">
 <style>
   /* bard-only: the inference controls the shared theme has no reason to carry. */
   .sliders { display: grid; gap: 1rem 1.5rem; margin: 1.25rem 0;
@@ -52,7 +52,8 @@
     <div class="readout">
       <p class="mono"><span class="label">Status</span> <span id="status">idle</span></p>
       <p class="mono muted"><span class="label">Stages</span> <span id="progress">pointers → chunks → decompress → verify → done</span></p>
-      <p class="mono"><span class="label">Hash</span> <span id="provenance">not yet verified</span></p>
+      <p class="mono"><span class="label">Verified</span> <span id="verified">pending</span></p>
+      <p class="mono"><span class="label">Artifact hash</span> <span id="provenance">—</span></p>
     </div>
 
     <div class="section-head">
@@ -81,6 +82,6 @@
     </div>
     <pre id="output" aria-live="polite">Weights load on open. Generated text appears here.</pre>
   </main>
-  <script type="module" src="./app.js?v=20260602-bard-2"></script>
+  <script type="module" src="./app.js?v=20260602-bard-3"></script>
 </body>
 </html>

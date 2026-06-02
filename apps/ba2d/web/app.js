@@ -1,4 +1,4 @@
-const ASSET_VERSION = '20260602-bard-2';
+const ASSET_VERSION = '20260602-bard-3';
 const DEFAULT_RPC = 'https://ethereum-sepolia-rpc.publicnode.com';
 const worker = new Worker(`./worker.js?v=${ASSET_VERSION}`, { type: 'module' });
 
@@ -23,6 +23,7 @@ const els = {
   freqVal: $('freq-val'),
   status: $('status'),
   progress: $('progress'),
+  verified: $('verified'),
   provenance: $('provenance'),
   output: $('output'),
   name: $('m-name'),
@@ -75,7 +76,8 @@ function setModel(manifest) {
   els.params.textContent = String(manifest.paramCount);
   els.chunks.textContent = String(manifest.chunkCount);
   els.owner.textContent = manifest.owner;
-  els.provenance.textContent = 'not yet verified';
+  els.verified.textContent = 'pending';
+  els.provenance.textContent = '—';
 }
 
 function setControlsEnabled(ok) {
@@ -146,7 +148,8 @@ worker.addEventListener('message', (event) => {
     setControlsEnabled(true);
     setStatus('ready');
     setProgress('done');
-    els.provenance.textContent = `${msg.provenance.hash} ✓ · ${msg.provenance.chunkCount} chunks · ${msg.provenance.gzBytes} gz bytes · ${msg.provenance.layers}L/${msg.provenance.embd}d · vocab ${msg.provenance.vocabSize} · ${msg.provenance.artifactHash}`;
+    els.verified.textContent = '✓ in-browser recompute matches the onchain hash';
+    els.provenance.textContent = msg.provenance.hash;
     return;
   }
   if (msg.type === 'token') {
