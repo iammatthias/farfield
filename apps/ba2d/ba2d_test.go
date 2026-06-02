@@ -51,6 +51,17 @@ func TestStyleUsesFarfieldPaperSystem(t *testing.T) {
 	}
 }
 
+func TestAppUsesVersionedAssets(t *testing.T) {
+	index := readAsset(t, "index.html")
+	if !strings.Contains(index, "./app.js?v=20260602-farfield") {
+		t.Fatalf("index.html should load versioned app.js")
+	}
+	app := readAsset(t, "app.js")
+	if !strings.Contains(app, "./worker.js?v=") {
+		t.Fatalf("app.js should load a versioned worker.js")
+	}
+}
+
 func TestWorkerUsesArtifactHashFromArtifactCall(t *testing.T) {
 	worker := readAsset(t, "worker.js")
 	if strings.Contains(worker, "config().artifactHash does not match artifactHash()") {

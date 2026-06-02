@@ -1,4 +1,5 @@
-const worker = new Worker('./worker.js', { type: 'module' });
+const ASSET_VERSION = '20260602-farfield';
+const worker = new Worker(`./worker.js?v=${ASSET_VERSION}`, { type: 'module' });
 
 const $ = (id) => document.getElementById(id);
 const els = {
