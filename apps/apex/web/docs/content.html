@@ -4,12 +4,18 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
 <title>Content — Farfield Docs</title>
-<link rel="stylesheet" href="style.css?v=20260520-docs2">
+<link rel="stylesheet" href="/static/styles.css?v=20260602-1">
+<link rel="stylesheet" href="style.css?v=20260602-docs3">
 </head>
 <body>
-<nav class="docs-nav" aria-label="Docs navigation">
-  <a href="/" class="brand">Farfield</a>
-  <span class="sep" aria-hidden="true">/</span>
+<input type="checkbox" id="nav-toggle" class="nav-toggle" hidden>
+<div class="docs-layout">
+<aside class="sidebar">
+  <div class="sidebar-head">
+    <a href="/" class="brand">Farfield</a>
+    <label for="nav-toggle" class="nav-burger" aria-label="Toggle navigation"><span></span></label>
+  </div>
+  <nav class="docs-nav" aria-label="Docs navigation">
   <a href="index.html">Docs</a>
   <a href="apex.html">Apex</a>
   <a href="content.html" aria-current="page">Content</a>
@@ -22,6 +28,7 @@
   <a href="backup.html">Backup</a>
   <a href="skills.html">Skills</a>
 </nav>
+  </aside>
 
 <main class="page">
   <h1>content</h1>
@@ -116,5 +123,6 @@
     <li><code>![](series://&lt;slug&gt;)</code> — fetch <code>GET /api/series/&lt;slug&gt;</code> and splice the fragment's <code>body</code> markdown in place of the whole image construct. The fragment itself contains <code>blob://</code> images.</li>
   </ul>
 </main>
+</div>
 </body>
 </html>

@@ -4,12 +4,18 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
 <title>Bard — Farfield Docs</title>
-<link rel="stylesheet" href="style.css?v=20260520-docs2">
+<link rel="stylesheet" href="/static/styles.css?v=20260602-1">
+<link rel="stylesheet" href="style.css?v=20260602-docs3">
 </head>
 <body>
-<nav class="docs-nav" aria-label="Docs navigation">
-  <a href="/" class="brand">Farfield</a>
-  <span class="sep" aria-hidden="true">/</span>
+<input type="checkbox" id="nav-toggle" class="nav-toggle" hidden>
+<div class="docs-layout">
+<aside class="sidebar">
+  <div class="sidebar-head">
+    <a href="/" class="brand">Farfield</a>
+    <label for="nav-toggle" class="nav-burger" aria-label="Toggle navigation"><span></span></label>
+  </div>
+  <nav class="docs-nav" aria-label="Docs navigation">
   <a href="index.html">Docs</a>
   <a href="apex.html">Apex</a>
   <a href="content.html">Content</a>
@@ -22,6 +28,7 @@
   <a href="backup.html">Backup</a>
   <a href="skills.html">Skills</a>
 </nav>
+  </aside>
 
 <main class="page">
   <h1>bard</h1>
@@ -52,5 +59,6 @@
   <h2>Inference</h2>
   <p>Generation runs in a Web Worker so the page stays responsive. The sampling controls are the usual set: temperature, top-k, top-p, max tokens, frequency penalty, and a seed. Output streams token by token. There is no wallet and no server-side inference; everything after the chunk fetch happens locally.</p>
 </main>
+</div>
 </body>
 </html>

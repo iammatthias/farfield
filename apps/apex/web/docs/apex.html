@@ -4,12 +4,18 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
 <title>Apex — Farfield Docs</title>
-<link rel="stylesheet" href="style.css?v=20260520-docs2">
+<link rel="stylesheet" href="/static/styles.css?v=20260602-1">
+<link rel="stylesheet" href="style.css?v=20260602-docs3">
 </head>
 <body>
-<nav class="docs-nav" aria-label="Docs navigation">
-  <a href="/" class="brand">Farfield</a>
-  <span class="sep" aria-hidden="true">/</span>
+<input type="checkbox" id="nav-toggle" class="nav-toggle" hidden>
+<div class="docs-layout">
+<aside class="sidebar">
+  <div class="sidebar-head">
+    <a href="/" class="brand">Farfield</a>
+    <label for="nav-toggle" class="nav-burger" aria-label="Toggle navigation"><span></span></label>
+  </div>
+  <nav class="docs-nav" aria-label="Docs navigation">
   <a href="index.html">Docs</a>
   <a href="apex.html" aria-current="page">Apex</a>
   <a href="content.html">Content</a>
@@ -22,6 +28,7 @@
   <a href="backup.html">Backup</a>
   <a href="skills.html">Skills</a>
 </nav>
+  </aside>
 
 <main class="page">
   <h1>apex</h1>
@@ -42,5 +49,6 @@
   <h2>Implementation</h2>
   <p>Assets live under <code>apps/apex/web</code> and are embedded with Go's <code>embed</code> package. The service uses <code>http.FileServerFS</code>; there are no write endpoints and no credentials involved.</p>
 </main>
+</div>
 </body>
 </html>
