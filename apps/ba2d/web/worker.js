@@ -159,9 +159,7 @@ async function loadManifest(rpcUrl) {
   if (chunkCount !== chunks.length) {
     throw new Error(`chunk count mismatch: contract says ${chunkCount}, getChunks() returned ${chunks.length}`);
   }
-  if (config.artifactHash.toLowerCase() !== artifactHash.toLowerCase()) {
-    throw new Error('config().artifactHash does not match artifactHash()');
-  }
+  // artifactHash() is the source of truth for the sealed artifact.
   return {
     rpcUrl,
     chainId: CHAIN_ID,

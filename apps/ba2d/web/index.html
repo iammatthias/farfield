@@ -4,16 +4,16 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
 <meta name="theme-color" content="#04060a">
-<title>ba2d</title>
+<title>BARD</title>
 <link rel="stylesheet" href="./style.css?v=20260602">
 </head>
 <body>
   <main class="shell">
     <header class="hero card">
       <div>
-        <p class="eyebrow">read-only browser inference</p>
-        <h1>ba2d</h1>
-        <p class="lede">Loads a sealed model straight from Ethereum Sepolia, verifies the gzip artifact hash, and runs inference in a worker. No wallet. No server-side inference. No excuses.</p>
+        <p class="eyebrow">0xba2d · onchain inference</p>
+        <h1>BARD</h1>
+        <p class="lede">A small Shakespeare-trained GPT onchain. It loads from Ethereum Sepolia, verifies the sealed artifact hash, and runs inference in a worker. No wallet. No server-side inference. No excuses.</p>
       </div>
       <div class="badge-row">
         <span class="badge sealed">sealed contract</span>
@@ -38,8 +38,8 @@
 
       <section class="card stack">
         <div class="row">
-          <h2>Load weights</h2>
-          <button id="load-btn" class="primary">Load weights from chain</button>
+          <h2>Weights</h2>
+          <button id="load-btn" class="primary">Reload weights</button>
         </div>
         <label class="field">
           <span>Sepolia RPC</span>
@@ -79,7 +79,7 @@
           <h2>Stream</h2>
           <button id="clear-btn" class="ghost">Clear</button>
         </div>
-        <pre id="output" aria-live="polite">Load the model, then generate. The text is synthetic and usually a little haunted.</pre>
+        <pre id="output" aria-live="polite">Weights load automatically. The text is synthetic and usually a little haunted.</pre>
       </section>
     </section>
   </main>

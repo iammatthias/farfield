@@ -50,6 +50,15 @@ function setStatus(text) {
   els.status.textContent = text;
 }
 
+function loadWeightsFromChain() {
+  setStatus('starting');
+  setProgress('pointers → chunks → decompress → verify → done');
+  setOutput('');
+  streaming = false;
+  updateBusy();
+  worker.postMessage({ type: 'load', rpcUrl: els.rpc.value.trim() });
+}
+
 function setProgress(text) {
   els.progress.textContent = text;
 }
@@ -102,14 +111,7 @@ function payload() {
 
 els.clear.addEventListener('click', () => setOutput(''));
 
-els.load.addEventListener('click', () => {
-  setStatus('starting');
-  setProgress('pointers → chunks → decompress → verify → done');
-  setOutput('');
-  streaming = false;
-  updateBusy();
-  worker.postMessage({ type: 'load', rpcUrl: els.rpc.value.trim() });
-});
+els.load.addEventListener('click', loadWeightsFromChain);
 
 els.generate.addEventListener('click', () => {
   if (!loaded || streaming) return;
@@ -177,7 +179,8 @@ worker.addEventListener('error', (event) => {
   setProgress(event.message || 'worker error');
 });
 
-setOutput('Load the model, then generate. The text is synthetic and usually a little haunted.');
+setOutput('Weights load automatically. The text is synthetic and usually a little haunted.');
 syncSliderLabels();
 setControlsEnabled(false);
 updateBusy();
+loadWeightsFromChain();
