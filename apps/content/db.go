@@ -412,15 +412,19 @@ func getEntry(db *sql.DB, slug string) (*Entry, error) {
 	return e, nil
 }
 
-// insertEntry creates an entry in the named collection. The entry slug must be
-// unique; an unknown collection slug is an error.
+// insertEntry creates an entry in the named collection. The slug is stamped
+// with the creation instant — "<unixMillis>-<slug>" — so app-authored entries
+// are keyed like the migrated content; it must then be unique. An unknown
+// collection slug is an error.
 func insertEntry(db *sql.DB, e *Entry) error {
 	collID, err := collectionID(db, e.Collection)
 	if err != nil {
 		return err
 	}
-	e.CreatedAt = nowRFC3339()
+	now := time.Now().UTC()
+	e.CreatedAt = now.Format(time.RFC3339)
 	e.UpdatedAt = e.CreatedAt
+	e.Slug = stampSlug(e.Slug, now)
 	e.CID = entryCID(e)
 	res, err := db.Exec(
 		`INSERT INTO entries
