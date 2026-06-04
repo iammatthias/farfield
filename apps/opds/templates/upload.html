@@ -1,10 +1,34 @@
 {{define "title"}}Upload · farfield{{end}}
 {{define "content"}}
+  <style>
+    .queue { list-style: none; margin: 1.25rem 0 0; padding: 0;
+      display: flex; flex-direction: column; gap: 0.6rem; }
+    .queue-item {
+      display: grid; grid-template-columns: minmax(0,1fr) auto;
+      align-items: center; gap: 0.35rem 1rem;
+      padding-bottom: 0.6rem; border-bottom: 1px solid var(--hairline);
+    }
+    .queue-item .name { min-width: 0; word-break: break-all; font-size: 0.9rem; }
+    .queue-item .state {
+      font: 500 0.72rem/1 var(--font-mono); white-space: nowrap;
+      text-transform: uppercase; letter-spacing: 0.06em; opacity: 0.55;
+    }
+    .queue-item .state.ok { opacity: 0.8; }
+    .queue-item .state.err { color: var(--accent); opacity: 1; text-transform: none; letter-spacing: 0; }
+    .queue-item progress {
+      grid-column: 1 / -1; -webkit-appearance: none; appearance: none;
+      width: 100%; height: 0.4rem; border: 1px solid var(--ink); background: var(--surface);
+    }
+    .queue-item progress::-webkit-progress-bar { background: var(--surface); }
+    .queue-item progress::-webkit-progress-value { background: var(--ink); }
+    .queue-item progress::-moz-progress-bar { background: var(--ink); }
+  </style>
+
   <section class="prose">
     <p><a href="/">← Books</a></p>
     <h1>Upload EPUBs</h1>
     {{with .Error}}<p class="error">{{.}}</p>{{end}}
-    <form method="post" action="/upload" enctype="multipart/form-data">
+    <form id="up" method="post" action="/upload" enctype="multipart/form-data">
       <div class="field">
         <label for="file">EPUB files</label>
         <input type="file" id="file" name="file" accept=".epub,application/epub+zip" multiple required>
@@ -12,5 +36,87 @@
       </div>
       <div class="actions"><button type="submit">Upload</button></div>
     </form>
+
+    <div id="progress" hidden>
+      <div class="section-head"><h2>Progress</h2><span id="summary" class="muted"></span></div>
+      <ul id="queue" class="queue"></ul>
+      <p id="alldone" hidden><a href="/">View catalog →</a></p>
+    </div>
   </section>
+
+  <script>
+  (function () {
+    var form = document.getElementById('up'),
+        input = document.getElementById('file'),
+        panel = document.getElementById('progress'),
+        queue = document.getElementById('queue'),
+        summary = document.getElementById('summary'),
+        alldone = document.getElementById('alldone');
+    // Graceful degradation: without XHR upload progress, the plain multipart
+    // POST to /upload still works (and bulk-processes server-side).
+    if (!form || !window.XMLHttpRequest || !(new XMLHttpRequest().upload)) return;
+
+    form.addEventListener('submit', function (e) {
+      var files = input.files;
+      if (!files || !files.length) return; // let the browser enforce `required`
+      e.preventDefault();
+
+      var btn = form.querySelector('button');
+      btn.disabled = true; input.disabled = true;
+      panel.hidden = false; alldone.hidden = true; queue.innerHTML = '';
+
+      var total = files.length, ok = 0, items = [];
+      for (var i = 0; i < total; i++) {
+        var li = document.createElement('li');
+        li.className = 'queue-item';
+        li.innerHTML = '<span class="name"></span><span class="state">queued</span><progress max="100" value="0"></progress>';
+        li.querySelector('.name').textContent = files[i].name;
+        queue.appendChild(li);
+        items.push(li);
+      }
+      summary.textContent = '0 / ' + total;
+
+      function setState(li, cls, text) {
+        var s = li.querySelector('.state');
+        s.className = 'state' + (cls ? ' ' + cls : '');
+        s.textContent = text;
+      }
+
+      function next(i) {
+        if (i >= total) {
+          summary.textContent = ok + ' / ' + total + (ok < total ? ' — ' + (total - ok) + ' failed' : ' uploaded');
+          alldone.hidden = false;
+          return;
+        }
+        var file = files[i], li = items[i], bar = li.querySelector('progress');
+        setState(li, '', 'uploading');
+        var xhr = new XMLHttpRequest();
+        xhr.open('POST', '/upload/file?filename=' + encodeURIComponent(file.name));
+        xhr.upload.addEventListener('progress', function (ev) {
+          if (ev.lengthComputable) bar.value = Math.round(ev.loaded / ev.total * 100);
+        });
+        xhr.addEventListener('load', function () {
+          if (xhr.status === 201) {
+            ok++; bar.value = 100;
+            var title = '';
+            try { title = (JSON.parse(xhr.responseText) || {}).title || ''; } catch (e) {}
+            setState(li, 'ok', '✓ ' + (title || 'stored'));
+          } else {
+            var msg = 'failed';
+            try { msg = (JSON.parse(xhr.responseText) || {}).error || msg; } catch (e) {}
+            setState(li, 'err', '✗ ' + msg);
+          }
+          summary.textContent = ok + ' / ' + total;
+          next(i + 1);
+        });
+        xhr.addEventListener('error', function () {
+          setState(li, 'err', '✗ network error');
+          next(i + 1);
+        });
+        xhr.send(file);
+      }
+      next(0);
+    });
+  })();
+  </script>
 {{end}}

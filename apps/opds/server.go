@@ -128,6 +128,7 @@ func (s *Server) routes() http.Handler {
 	mux.HandleFunc("GET /{$}", s.requireSession(s.handleIndex))
 	mux.HandleFunc("GET /upload", s.requireSession(s.handleUploadForm))
 	mux.HandleFunc("POST /upload", s.requireSession(s.handleAdminUpload))
+	mux.HandleFunc("POST /upload/file", s.requireSession(s.handleUploadJSON))
 	mux.HandleFunc("POST /books/{cid}/delete", s.requireSession(s.handleAdminDelete))
 
 	// Login — public HTML.
@@ -141,7 +142,7 @@ func (s *Server) routes() http.Handler {
 	mux.HandleFunc("GET /opds/cover/{cid}", s.requireCatalogAuth(s.handleCover))
 
 	// JSON write API — API-key-gated.
-	mux.HandleFunc("POST /api/books", s.requireAPIKey(s.handleAPIUpload))
+	mux.HandleFunc("POST /api/books", s.requireAPIKey(s.handleUploadJSON))
 	mux.HandleFunc("DELETE /api/books/{cid}", s.requireAPIKey(s.handleAPIDelete))
 
 	// Public health + shared theme stylesheet.
@@ -447,9 +448,13 @@ func (s *Server) handleCover(w http.ResponseWriter, r *http.Request) {
 	_, _ = w.Write(data)
 }
 
-// ── API-key-gated write API ────────────────────────────────────────────────
+// ── single-EPUB JSON upload (shared) ────────────────────────────────────────
 
-func (s *Server) handleAPIUpload(w http.ResponseWriter, r *http.Request) {
+// handleUploadJSON stores one raw EPUB from the request body and returns the
+// book as JSON. It backs both the API-key write endpoint (POST /api/books) and
+// the session-gated POST /upload/file the admin progress uploader drives one
+// file at a time — so each file reports success or failure on its own.
+func (s *Server) handleUploadJSON(w http.ResponseWriter, r *http.Request) {
 	r.Body = http.MaxBytesReader(w, r.Body, s.maxUpload)
 	data, err := io.ReadAll(r.Body)
 	if err != nil {

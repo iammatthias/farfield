@@ -197,6 +197,41 @@ func TestBulkUpload(t *testing.T) {
 	}
 }
 
+func TestUploadFileEndpoint(t *testing.T) {
+	s := newTestServer(t)
+	h := s.routes()
+
+	data := buildEPUB(t, "Solo Mission", "Far Field", nil)
+
+	// Without a session, the endpoint is not usable (requireSession redirects).
+	req := httptest.NewRequest(http.MethodPost, "/upload/file?filename=solo.epub", bytes.NewReader(data))
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, req)
+	if rec.Code == http.StatusCreated {
+		t.Errorf("unauthenticated /upload/file returned 201, want a redirect/denial")
+	}
+
+	// With a session, one EPUB stores and returns the book JSON.
+	token := auth.NewSessionToken()
+	if err := store.InsertSession(s.db, token, time.Now().Add(time.Hour)); err != nil {
+		t.Fatal(err)
+	}
+	req = httptest.NewRequest(http.MethodPost, "/upload/file?filename=solo.epub", bytes.NewReader(data))
+	req.AddCookie(auth.SessionCookie(token, false))
+	rec = httptest.NewRecorder()
+	h.ServeHTTP(rec, req)
+	if rec.Code != http.StatusCreated {
+		t.Fatalf("status = %d, body=%s", rec.Code, rec.Body)
+	}
+	var book Book
+	if err := json.Unmarshal(rec.Body.Bytes(), &book); err != nil {
+		t.Fatal(err)
+	}
+	if book.Title != "Solo Mission" || book.CID != cid.Of(data) {
+		t.Errorf("book = %+v", book)
+	}
+}
+
 func TestCatalogFlow(t *testing.T) {
 	s := newTestServer(t)
 	h := s.routes()
