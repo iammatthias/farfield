@@ -12,6 +12,7 @@ import (
 	"io"
 	"io/fs"
 	"log/slog"
+	"mime/multipart"
 	"net"
 	"net/http"
 	"net/url"
@@ -260,27 +261,49 @@ func (s *Server) handleAdminUpload(w http.ResponseWriter, r *http.Request) {
 		http.Redirect(w, r, "/upload?error=Upload+failed", http.StatusSeeOther)
 		return
 	}
-	file, header, err := r.FormFile("file")
-	if err != nil {
+	var files []*multipart.FileHeader
+	if r.MultipartForm != nil {
+		files = r.MultipartForm.File["file"]
+	}
+	if len(files) == 0 {
 		http.Redirect(w, r, "/upload?error=No+file+selected", http.StatusSeeOther)
 		return
 	}
-	defer file.Close()
 
-	data, err := io.ReadAll(io.LimitReader(file, s.maxUpload))
-	if err != nil {
-		http.Redirect(w, r, "/upload?error=Could+not+read+file", http.StatusSeeOther)
-		return
+	// Bulk: process every selected file, tolerating per-file failures so one
+	// bad EPUB doesn't sink the whole batch.
+	var stored int
+	var failed []string
+	for _, fh := range files {
+		if err := s.storeMultipartFile(fh); err != nil {
+			slog.Error("upload: file failed", "name", fh.Filename, "err", err)
+			failed = append(failed, fh.Filename)
+			continue
+		}
+		stored++
 	}
-	filename := ""
-	if header != nil {
-		filename = header.Filename
-	}
-	if _, err := s.storeUpload(data, filename); err != nil {
-		http.Redirect(w, r, "/upload?error="+url.QueryEscape(err.Error()), http.StatusSeeOther)
+	if len(failed) > 0 {
+		msg := fmt.Sprintf("Stored %d; %d failed: %s", stored, len(failed), strings.Join(failed, ", "))
+		http.Redirect(w, r, "/upload?error="+url.QueryEscape(msg), http.StatusSeeOther)
 		return
 	}
 	http.Redirect(w, r, "/", http.StatusSeeOther)
+}
+
+// storeMultipartFile reads one uploaded file (bounded by maxUpload) and stores
+// it as a book.
+func (s *Server) storeMultipartFile(fh *multipart.FileHeader) error {
+	f, err := fh.Open()
+	if err != nil {
+		return err
+	}
+	defer f.Close()
+	data, err := io.ReadAll(io.LimitReader(f, s.maxUpload))
+	if err != nil {
+		return err
+	}
+	_, err = s.storeUpload(data, fh.Filename)
+	return err
 }
 
 func (s *Server) handleAdminDelete(w http.ResponseWriter, r *http.Request) {

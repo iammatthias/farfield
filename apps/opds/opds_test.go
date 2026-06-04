@@ -6,13 +6,17 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"mime/multipart"
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
+	"github.com/iammatthias/farfield/lib/auth"
 	"github.com/iammatthias/farfield/lib/cid"
+	"github.com/iammatthias/farfield/lib/store"
 )
 
 // buildEPUB assembles a minimal but valid EPUB in memory: the stored mimetype
@@ -142,6 +146,54 @@ func TestParseEPUB(t *testing.T) {
 	// Non-EPUB bytes must be rejected — that error is the upload validation.
 	if _, _, _, err := parseEPUB([]byte("not an epub")); err == nil {
 		t.Error("parseEPUB accepted non-EPUB bytes")
+	}
+}
+
+func TestBulkUpload(t *testing.T) {
+	s := newTestServer(t)
+	h := s.routes()
+
+	// A live admin session so requireSession lets the upload through.
+	token := auth.NewSessionToken()
+	if err := store.InsertSession(s.db, token, time.Now().Add(time.Hour)); err != nil {
+		t.Fatal(err)
+	}
+
+	// A multipart form carrying three EPUBs under one "file" field, plus one
+	// non-EPUB that must be rejected without sinking the batch.
+	var body bytes.Buffer
+	mw := multipart.NewWriter(&body)
+	for i, title := range []string{"Mission One", "Mission Two", "Mission Three"} {
+		fw, err := mw.CreateFormFile("file", fmt.Sprintf("book-%d.epub", i))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err := fw.Write(buildEPUB(t, title, "Far Field", nil)); err != nil {
+			t.Fatal(err)
+		}
+	}
+	bad, _ := mw.CreateFormFile("file", "not-a-book.epub")
+	bad.Write([]byte("definitely not an epub"))
+	mw.Close()
+
+	req := httptest.NewRequest(http.MethodPost, "/upload", &body)
+	req.Header.Set("Content-Type", mw.FormDataContentType())
+	req.AddCookie(auth.SessionCookie(token, false))
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusSeeOther {
+		t.Fatalf("bulk upload status = %d, want 303; body=%s", rec.Code, rec.Body)
+	}
+	// The three valid EPUBs are stored; the bad one is reported, not fatal.
+	loc := rec.Header().Get("Location")
+	if !strings.HasPrefix(loc, "/upload?error=") || !strings.Contains(loc, "not-a-book.epub") {
+		t.Errorf("redirect = %q, want an error mentioning the bad file", loc)
+	}
+	if n, err := countBooks(s.db); err != nil {
+		t.Fatal(err)
+	} else if n != 3 {
+		t.Errorf("books after bulk upload = %d, want 3", n)
 	}
 }
 

@@ -2,13 +2,13 @@
 {{define "content"}}
   <section class="prose">
     <p><a href="/">← Books</a></p>
-    <h1>Upload an EPUB</h1>
+    <h1>Upload EPUBs</h1>
     {{with .Error}}<p class="error">{{.}}</p>{{end}}
     <form method="post" action="/upload" enctype="multipart/form-data">
       <div class="field">
-        <label for="file">EPUB file</label>
-        <input type="file" id="file" name="file" accept=".epub,application/epub+zip" required>
-        <p class="hint">Title, author, language, and cover are read from the file.</p>
+        <label for="file">EPUB files</label>
+        <input type="file" id="file" name="file" accept=".epub,application/epub+zip" multiple required>
+        <p class="hint">Pick one or more files. Title, author, language, and cover are read from each.</p>
       </div>
       <div class="actions"><button type="submit">Upload</button></div>
     </form>
