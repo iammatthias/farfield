@@ -1,0 +1,60 @@
+{{define "title"}}Books · farfield{{end}}
+{{define "content"}}
+  <header class="bar">
+    <h1>farfield · opds</h1>
+    <nav>
+      <span class="muted">{{.Total}} book{{if ne .Total 1}}s{{end}}</span>
+      <a href="/opds">Catalog</a>
+      <a href="/upload">Upload</a>
+      <a href="/logout">Log out</a>
+    </nav>
+  </header>
+
+  {{if .Books}}
+    <div class="table-wrap">
+      <table class="books">
+        <thead>
+          <tr>
+            <th></th><th>Title</th><th>Author</th><th>Lang</th><th>Size</th><th>Added</th><th></th>
+          </tr>
+        </thead>
+        <tbody>
+          {{range .Books}}
+            <tr>
+              <td class="shrink">
+                {{if .CoverCID}}
+                  <img class="cover" src="/opds/cover/{{.CoverCID}}" loading="lazy" alt="">
+                {{else}}
+                  <span class="cover placeholder">epub</span>
+                {{end}}
+              </td>
+              <td class="title">{{.Title}}</td>
+              <td class="meta">{{if .Author}}{{.Author}}{{else}}—{{end}}</td>
+              <td class="meta">{{if .Language}}{{.Language}}{{else}}—{{end}}</td>
+              <td class="meta">{{humanSize .Size}}</td>
+              <td class="meta">{{shortDate .CreatedAt}}</td>
+              <td class="actions">
+                <a href="/opds/download/{{.CID}}">Download</a>
+                ·
+                <form method="post" action="/books/{{.CID}}/delete"
+                      onsubmit="return confirm('Delete this book? It is removed from the catalog and the store.')">
+                  <button type="submit">Delete</button>
+                </form>
+              </td>
+            </tr>
+          {{end}}
+        </tbody>
+      </table>
+    </div>
+
+    {{if gt .Pages 1}}
+      <nav class="pager">
+        {{if .HasPrev}}<a href="/?page={{.Prev}}">← Prev</a>{{else}}<span class="muted">← Prev</span>{{end}}
+        <span class="muted">Page {{.Page}} of {{.Pages}}</span>
+        {{if .HasNext}}<a href="/?page={{.Next}}">Next →</a>{{else}}<span class="muted">Next →</span>{{end}}
+      </nav>
+    {{end}}
+  {{else}}
+    <p class="muted">No books in the catalog. <a href="/upload">Upload an EPUB.</a></p>
+  {{end}}
+{{end}}

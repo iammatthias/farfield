@@ -1,0 +1,45 @@
+{{define "base"}}<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>{{block "title" .}}farfield · opds{{end}}</title>
+  <meta name="theme-color" content="#fafaf7">
+  <link rel="stylesheet" href="/static/styles.css?v={{.AssetVer}}">
+  <style>
+    /* opds admin — full-width, for the catalogue table */
+    .container { max-width: 72rem; }
+
+    table.books { width: 100%; }
+    table.books th { white-space: nowrap; }
+    table.books td { vertical-align: middle; }
+    table.books td.shrink { width: 1%; white-space: nowrap; }
+    .cover {
+      width: 40px; height: 56px; max-width: none; object-fit: cover; display: block;
+      border: 1px solid var(--hairline); background: var(--wash);
+    }
+    .cover.placeholder {
+      display: flex; align-items: center; justify-content: center;
+      font: 500 0.6rem/1 var(--font-mono); text-transform: uppercase;
+      letter-spacing: 0.06em; opacity: 0.4;
+    }
+    td.title { font-weight: 500; }
+    td.meta { font-size: 0.85rem; opacity: 0.75; }
+    td.actions { white-space: nowrap; font-family: var(--font-mono); font-size: 0.78rem; }
+    td.actions form { display: inline; }
+    td.actions button {
+      background: none; border: 0; padding: 0; margin: 0;
+      font: inherit; color: var(--accent); cursor: pointer; text-decoration: underline;
+    }
+    .pager {
+      display: flex; gap: 1.5rem; justify-content: center; align-items: baseline;
+      margin-top: 2rem; font-family: var(--font-mono); font-size: 0.8rem;
+    }
+  </style>
+</head>
+<body>
+  <main class="container">
+    {{block "content" .}}{{end}}
+  </main>
+</body>
+</html>{{end}}

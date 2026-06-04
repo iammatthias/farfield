@@ -1,0 +1,29 @@
+# Local-dev compose for the opds app. Run from the repo root so Compose
+# interpolates ${...} from the root .env:
+#   docker compose -f apps/opds/docker-compose.yml up --build
+services:
+  opds:
+    build:
+      context: ../..
+      dockerfile: apps/opds/Dockerfile
+    ports:
+      - "${OPDS_PORT:-8797}:8797"
+    environment:
+      - HOST=0.0.0.0
+      - OPDS_PORT=8797
+      - OPDS_DB_PATH=/data/opds.sqlite
+      - OPDS_BACKEND=${OPDS_BACKEND:-local}
+      - OPDS_DIR=/data/opds
+      - PASSWORD=${PASSWORD:-changeme}
+      - OPDS_API_KEY=${OPDS_API_KEY:-}
+      - R2_ACCOUNT_ID=${R2_ACCOUNT_ID:-}
+      - R2_BUCKET=${R2_BUCKET:-}
+      - R2_ACCESS_KEY_ID=${R2_ACCESS_KEY_ID:-}
+      - R2_SECRET_ACCESS_KEY=${R2_SECRET_ACCESS_KEY:-}
+      - COOKIE_SECURE=false
+    volumes:
+      - opds-data:/data
+    restart: unless-stopped
+
+volumes:
+  opds-data:

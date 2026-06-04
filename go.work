@@ -10,6 +10,7 @@ use (
 	./apps/content
 	./apps/dead-presidents
 	./apps/feed
+	./apps/opds
 	./apps/qr
 	./lib/auth
 	./lib/backup
