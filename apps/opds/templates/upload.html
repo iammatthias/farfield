@@ -5,10 +5,12 @@
     <h1>Upload an EPUB</h1>
     {{with .Error}}<p class="error">{{.}}</p>{{end}}
     <form method="post" action="/upload" enctype="multipart/form-data">
-      <label for="file">EPUB file</label>
-      <input type="file" id="file" name="file" accept=".epub,application/epub+zip" required>
-      <p class="hint">Title, author, language, and cover are read from the file.</p>
-      <p><button type="submit">Upload</button></p>
+      <div class="field">
+        <label for="file">EPUB file</label>
+        <input type="file" id="file" name="file" accept=".epub,application/epub+zip" required>
+        <p class="hint">Title, author, language, and cover are read from the file.</p>
+      </div>
+      <div class="actions"><button type="submit">Upload</button></div>
     </form>
   </section>
 {{end}}

@@ -1,12 +1,14 @@
 {{define "title"}}Log in · farfield{{end}}
 {{define "content"}}
-  <section class="prose">
-    <h1>farfield · opds</h1>
+  <section style="max-width:24rem;margin:2rem auto">
+    <h1 style="font-size:1.1rem">farfield · opds</h1>
     {{with .Error}}<p class="error">{{.}}</p>{{end}}
     <form method="post" action="/login">
-      <label for="password">Password</label>
-      <input type="password" id="password" name="password" required autofocus>
-      <p><button type="submit">Log in</button></p>
+      <div class="field">
+        <label for="password">Password</label>
+        <input type="password" id="password" name="password" required autofocus>
+      </div>
+      <div class="actions"><button type="submit">Log in</button></div>
     </form>
   </section>
 {{end}}
