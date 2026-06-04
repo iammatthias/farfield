@@ -336,62 +336,6 @@ func TestBulkCollection(t *testing.T) {
 	}
 }
 
-func TestAdminFolderLanding(t *testing.T) {
-	s := newTestServer(t)
-	h := s.routes()
-	token := auth.NewSessionToken()
-	if err := store.InsertSession(s.db, token, time.Now().Add(time.Hour)); err != nil {
-		t.Fatal(err)
-	}
-
-	for _, tc := range []struct{ title, coll string }{{"Dune", "Sci-Fi"}, {"Loose", ""}} {
-		data := buildEPUB(t, tc.title, "A", nil)
-		u := "/api/books?filename=" + tc.title + ".epub"
-		if tc.coll != "" {
-			u += "&collection=" + url.QueryEscape(tc.coll)
-		}
-		req := httptest.NewRequest(http.MethodPost, u, bytes.NewReader(data))
-		req.Header.Set("X-API-Key", "secret")
-		rec := httptest.NewRecorder()
-		h.ServeHTTP(rec, req)
-		if rec.Code != http.StatusCreated {
-			t.Fatalf("upload %s: %d", tc.title, rec.Code)
-		}
-	}
-
-	get := func(path string) (int, string) {
-		req := httptest.NewRequest(http.MethodGet, path, nil)
-		req.AddCookie(auth.SessionCookie(token, false))
-		rec := httptest.NewRecorder()
-		h.ServeHTTP(rec, req)
-		return rec.Code, rec.Body.String()
-	}
-
-	// Homepage is the folder directory — folders + an optional All books link,
-	// and NOT the flat books table.
-	code, body := get("/")
-	if code != http.StatusOK {
-		t.Fatalf("/ = %d", code)
-	}
-	for _, want := range []string{`class="folders"`, "Sci-Fi", "/?view=all", "All books"} {
-		if !strings.Contains(body, want) {
-			t.Errorf("/ landing missing %q", want)
-		}
-	}
-	if strings.Contains(body, `class="books"`) {
-		t.Error("/ should not render the flat books table")
-	}
-
-	// ?view=all is the optional flat view — the table with the books.
-	code, body = get("/?view=all")
-	if code != http.StatusOK {
-		t.Fatalf("/?view=all = %d", code)
-	}
-	if !strings.Contains(body, `class="books"`) || !strings.Contains(body, "Dune") {
-		t.Error("/?view=all should render the books table")
-	}
-}
-
 func TestCollections(t *testing.T) {
 	s := newTestServer(t)
 	h := s.routes()

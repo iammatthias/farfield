@@ -246,12 +246,12 @@ func (s *Server) handleIndex(w http.ResponseWriter, r *http.Request) {
 		"Uncategorized": uncategorized,
 		"Total":         total,
 		"Self":          r.URL.RequestURI(),
-		"Current":       "",
+		"Filter":        "",
+		"Filtered":      false,
 	}
 
-	switch {
-	case q.Has("collection"):
-		// One folder's books (an empty name is the uncategorised set).
+	// Filtered view — all books in one collection, no pagination.
+	if q.Has("collection") {
 		name := q.Get("collection")
 		books, err := listBooksByCollection(s.db, name)
 		if err != nil {
@@ -259,46 +259,38 @@ func (s *Server) handleIndex(w http.ResponseWriter, r *http.Request) {
 			http.Error(w, "internal error", http.StatusInternalServerError)
 			return
 		}
-		current, label := name, name
-		if name == "" {
-			current, label = "uncategorized", "Uncategorized"
+		label := name
+		if label == "" {
+			label = "Uncategorized"
 		}
-		data["Mode"] = "books"
 		data["Books"] = books
-		data["Current"] = current
-		data["ViewLabel"] = label
+		data["Filter"] = name
+		data["Filtered"] = true
+		data["FilterLabel"] = label
 		s.render(w, "index.html", data)
-
-	case q.Get("view") == "all":
-		// Every book — the optional flat view, paginated.
-		page := 1
-		if p, err := strconv.Atoi(q.Get("page")); err == nil && p > 1 {
-			page = p
-		}
-		books, err := listBooks(s.db, pageSize, (page-1)*pageSize)
-		if err != nil {
-			slog.Error("list books", "err", err)
-			http.Error(w, "internal error", http.StatusInternalServerError)
-			return
-		}
-		pages := (total + pageSize - 1) / pageSize
-		data["Mode"] = "books"
-		data["Books"] = books
-		data["Current"] = "all"
-		data["ViewLabel"] = "All books"
-		data["Page"] = page
-		data["Pages"] = pages
-		data["HasPrev"] = page > 1
-		data["HasNext"] = page < pages
-		data["Prev"] = page - 1
-		data["Next"] = page + 1
-		s.render(w, "index.html", data)
-
-	default:
-		// Homepage: the folder directory. "All books" is an optional view.
-		data["Mode"] = "folders"
-		s.render(w, "index.html", data)
+		return
 	}
+
+	// All view — paginated.
+	page := 1
+	if p, err := strconv.Atoi(q.Get("page")); err == nil && p > 1 {
+		page = p
+	}
+	books, err := listBooks(s.db, pageSize, (page-1)*pageSize)
+	if err != nil {
+		slog.Error("list books", "err", err)
+		http.Error(w, "internal error", http.StatusInternalServerError)
+		return
+	}
+	pages := (total + pageSize - 1) / pageSize
+	data["Books"] = books
+	data["Page"] = page
+	data["Pages"] = pages
+	data["HasPrev"] = page > 1
+	data["HasNext"] = page < pages
+	data["Prev"] = page - 1
+	data["Next"] = page + 1
+	s.render(w, "index.html", data)
 }
 
 func (s *Server) handleUploadForm(w http.ResponseWriter, r *http.Request) {
@@ -442,8 +434,7 @@ func (s *Server) handleOPDSRoot(w http.ResponseWriter, r *http.Request) {
 	for _, c := range named {
 		total += c.Count
 	}
-	// Folders first; "All books" is the optional catch-all, listed last.
-	var items []NavItem
+	items := []NavItem{{Title: "All books", Href: "/opds/all", Count: total}}
 	for _, c := range named {
 		items = append(items, NavItem{
 			Title: c.Name,
@@ -454,7 +445,6 @@ func (s *Server) handleOPDSRoot(w http.ResponseWriter, r *http.Request) {
 	if uncategorized > 0 {
 		items = append(items, NavItem{Title: "Uncategorized", Href: "/opds/collection?c=", Count: uncategorized})
 	}
-	items = append(items, NavItem{Title: "All books", Href: "/opds/all", Count: total})
 	body, err := navFeedXML(items, "/opds", nowRFC3339())
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "could not render catalog")
