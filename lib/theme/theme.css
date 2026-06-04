@@ -342,3 +342,17 @@ dialog.embed-modal::backdrop { background: rgba(10, 10, 10, 0.45); }
 .embed-go:hover { background: var(--surface); color: var(--ink); }
 
 .embed-msg { padding: 1.5rem 0.5rem; text-align: center; font-size: 0.85rem; opacity: 0.55; }
+
+/* ── responsive ────────────────────────────────────────────────────────── */
+/* The theme is fluid by default (clamp type, border-box, max-width: 100% media,
+   flex-wrap bars). These narrow-viewport tweaks reclaim horizontal space on
+   phones and keep the heavier components from crowding the edges. Per-table
+   layouts (e.g. an admin grid that should become cards) stay each app's job —
+   wrap wide tables in .table-wrap so they scroll rather than overflow. */
+@media (max-width: 40rem) {
+	.container { padding: 1.6rem 1.05rem; }
+	.bar { gap: 0.45rem 1rem; margin-bottom: 1.25rem; }
+	.section-head { margin-top: 1.75rem; }
+	.filter-bar { gap: 0.4rem 0.85rem; }
+	pre { padding: 0.85rem; }
+}
