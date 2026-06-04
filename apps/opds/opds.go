@@ -49,11 +49,11 @@ type opdsContent struct {
 // carry their prefix in the local name so encoding/xml emits them verbatim
 // under the xmlns:dc declared on the feed.
 type opdsEntry struct {
-	Title      string      `xml:"title"`
-	ID         string      `xml:"id"`
-	Updated    string      `xml:"updated"`
-	Author     *opdsAuthor `xml:"author,omitempty"`
-	Language   string      `xml:"dc:language,omitempty"`
+	Title      string       `xml:"title"`
+	ID         string       `xml:"id"`
+	Updated    string       `xml:"updated"`
+	Author     *opdsAuthor  `xml:"author,omitempty"`
+	Language   string       `xml:"dc:language,omitempty"`
 	Identifier string       `xml:"dc:identifier,omitempty"`
 	Summary    string       `xml:"summary,omitempty"`
 	Content    *opdsContent `xml:"content,omitempty"`
