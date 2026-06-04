@@ -19,7 +19,6 @@ import (
 	"os"
 	"os/signal"
 	"path"
-	"strconv"
 	"strings"
 	"syscall"
 	"time"
@@ -33,10 +32,7 @@ import (
 //go:embed templates
 var assets embed.FS
 
-const (
-	defaultMaxUpload = 100 << 20 // 100 MiB
-	pageSize         = 48        // books per admin page
-)
+const defaultMaxUpload = 100 << 20 // 100 MiB
 
 // Server holds the running OPDS service.
 type Server struct {
@@ -230,7 +226,6 @@ func (s *Server) deleteBookAndBytes(cid string) (bool, error) {
 // ── HTML admin handlers ────────────────────────────────────────────────────
 
 func (s *Server) handleIndex(w http.ResponseWriter, r *http.Request) {
-	q := r.URL.Query()
 	named, uncategorized, err := collectionStats(s.db)
 	if err != nil {
 		slog.Error("collection stats", "err", err)
@@ -242,54 +237,37 @@ func (s *Server) handleIndex(w http.ResponseWriter, r *http.Request) {
 		total += c.Count
 	}
 	data := map[string]any{
-		"Collections":   named,
-		"Uncategorized": uncategorized,
-		"Total":         total,
-		"Self":          r.URL.RequestURI(),
-		"Filter":        "",
-		"Filtered":      false,
+		"Collections": named, // existing folders — for the move datalist
+		"Total":       total,
+		"Self":        r.URL.RequestURI(),
 	}
 
-	// Filtered view — all books in one collection, no pagination.
-	if q.Has("collection") {
-		name := q.Get("collection")
+	// Inside a named folder: just its books, with a breadcrumb back to root.
+	if name := r.URL.Query().Get("collection"); name != "" {
 		books, err := listBooksByCollection(s.db, name)
 		if err != nil {
 			slog.Error("list collection", "err", err)
 			http.Error(w, "internal error", http.StatusInternalServerError)
 			return
 		}
-		label := name
-		if label == "" {
-			label = "Uncategorized"
-		}
+		data["Root"] = false
+		data["FolderName"] = name
 		data["Books"] = books
-		data["Filter"] = name
-		data["Filtered"] = true
-		data["FilterLabel"] = label
 		s.render(w, "index.html", data)
 		return
 	}
 
-	// All view — paginated.
-	page := 1
-	if p, err := strconv.Atoi(q.Get("page")); err == nil && p > 1 {
-		page = p
-	}
-	books, err := listBooks(s.db, pageSize, (page-1)*pageSize)
+	// Root: the folders as rows at the top, then the unfoldered books — a file
+	// browser. Folders are entries in the same list, not a separate page.
+	loose, err := listBooksByCollection(s.db, "")
 	if err != nil {
-		slog.Error("list books", "err", err)
+		slog.Error("list loose books", "err", err)
 		http.Error(w, "internal error", http.StatusInternalServerError)
 		return
 	}
-	pages := (total + pageSize - 1) / pageSize
-	data["Books"] = books
-	data["Page"] = page
-	data["Pages"] = pages
-	data["HasPrev"] = page > 1
-	data["HasNext"] = page < pages
-	data["Prev"] = page - 1
-	data["Next"] = page + 1
+	data["Root"] = true
+	data["Folders"] = named
+	data["Books"] = loose
 	s.render(w, "index.html", data)
 }
 

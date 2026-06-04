@@ -1,23 +1,31 @@
 {{define "title"}}Books · farfield{{end}}
 {{define "content"}}
   <style>
-    .organize {
-      display: flex; flex-wrap: wrap; align-items: center; gap: 0.5rem 0.6rem;
-      margin: 0.75rem 0 0.4rem;
-    }
-    .organize-label {
-      font: 500 0.7rem/1 var(--font-mono); text-transform: uppercase; letter-spacing: 0.07em; opacity: 0.6;
-    }
+    .crumb { margin: 0 0 0.5rem; font-size: 0.9rem; }
+    .crumb a { text-decoration: none; }
+
+    .organize { display: flex; flex-wrap: wrap; align-items: center; gap: 0.5rem 0.6rem; margin: 0.75rem 0 0.4rem; }
+    .organize-label { font: 500 0.7rem/1 var(--font-mono); text-transform: uppercase; letter-spacing: 0.07em; opacity: 0.6; }
     .organize input[type="text"] { flex: 1 1 12rem; max-width: 18rem; padding: 0.3rem 0.5rem; font-size: 0.85rem; }
     .organize button { padding: 0.3rem 0.9rem; }
     .organize .check-all { display: inline-flex; align-items: center; gap: 0.35rem; font-size: 0.85rem; white-space: nowrap; }
     .organize .check-all input { width: auto; }
     .organize-hint { margin: 0 0 1.25rem; }
+
     table.books td.pick, table.books th.pick { width: 1%; text-align: center; }
     table.books td.pick input { width: auto; }
-    td.folder { white-space: nowrap; font-size: 0.85rem; opacity: 0.8; }
 
-    /* Mobile: each row becomes a labelled card instead of overflowing sideways. */
+    /* folder rows — a directory entry inside the list */
+    .folder-row td.folder-cell {
+      padding: 0.5rem 0.7rem; background: var(--wash);
+      display: flex; justify-content: space-between; align-items: baseline; gap: 1rem;
+    }
+    .folder-row a { font-weight: 500; text-decoration: none; display: inline-flex; align-items: baseline; gap: 0.4rem; }
+    .folder-row a:hover { color: var(--accent); }
+    .folder-mark { font-size: 0.8em; opacity: 0.55; }
+    .folder-count { font: 500 0.7rem/1 var(--font-mono); text-transform: uppercase; letter-spacing: 0.06em; opacity: 0.55; white-space: nowrap; }
+
+    /* Mobile: book rows become labelled cards; folder rows stay simple. */
     @media (max-width: 46rem) {
       table.books thead { display: none; }
       table.books, table.books tbody, table.books tr, table.books td { display: block; width: auto; }
@@ -30,6 +38,9 @@
       table.books td.pick, table.books td.shrink { display: inline-flex; }
       table.books td.pick::before, table.books td.shrink::before { content: ""; flex: 0; }
       table.books td.actions { gap: 1rem; }
+      .folder-row { padding: 0; }
+      .folder-row td.folder-cell { padding: 0.55rem 0.7rem; }
+      .folder-row td.folder-cell::before { display: none; }
     }
   </style>
 
@@ -43,18 +54,11 @@
     </nav>
   </header>
 
-  <nav class="filter-bar">
-    <span class="label">Folders</span>
-    <a href="/"{{if not .Filtered}} class="on"{{end}}>All ({{.Total}})</a>
-    {{range .Collections}}
-      <a href="/?collection={{.Name}}"{{if and $.Filtered (eq $.Filter .Name)}} class="on"{{end}}>{{.Name}} ({{.Count}})</a>
-    {{end}}
-    {{if .Uncategorized}}
-      <a href="/?collection="{{if and $.Filtered (eq $.Filter "")}} class="on"{{end}}>Uncategorized ({{.Uncategorized}})</a>
-    {{end}}
-  </nav>
+  {{if not .Root}}
+    <p class="crumb"><a href="/">← All folders</a> &nbsp;/&nbsp; <strong>{{.FolderName}}</strong></p>
+  {{end}}
 
-  {{if .Books}}
+  {{if or .Folders .Books}}
     <form id="organize" class="organize" method="post" action="/books/collection">
       <input type="hidden" name="next" value="{{.Self}}">
       <label class="check-all"><input type="checkbox" id="selall"> Select all</label>
@@ -68,10 +72,20 @@
       <table class="books">
         <thead>
           <tr>
-            <th class="pick"></th><th></th><th>Title</th><th>Author</th><th>Folder</th><th>Size</th><th>Added</th><th></th>
+            <th class="pick"></th><th></th><th>Title</th><th>Author</th><th>Size</th><th>Added</th><th></th>
           </tr>
         </thead>
         <tbody>
+          {{if .Root}}
+            {{range .Folders}}
+              <tr class="folder-row">
+                <td class="folder-cell" colspan="7">
+                  <a href="/?collection={{.Name}}"><span class="folder-mark">▸</span> {{.Name}}</a>
+                  <span class="folder-count">{{.Count}} book{{if ne .Count 1}}s{{end}}</span>
+                </td>
+              </tr>
+            {{end}}
+          {{end}}
           {{range .Books}}
             <tr>
               <td class="pick"><input type="checkbox" name="cid" value="{{.CID}}" form="organize" aria-label="Select {{.Title}}"></td>
@@ -84,7 +98,6 @@
               </td>
               <td class="title" data-label="Title">{{.Title}}</td>
               <td class="meta" data-label="Author">{{if .Author}}{{.Author}}{{else}}—{{end}}</td>
-              <td class="folder" data-label="Folder">{{if .Collection}}{{.Collection}}{{else}}—{{end}}</td>
               <td class="meta" data-label="Size">{{humanSize .Size}}</td>
               <td class="meta" data-label="Added">{{shortDate .CreatedAt}}</td>
               <td class="actions" data-label="">
@@ -100,19 +113,11 @@
         </tbody>
       </table>
     </div>
-
-    {{if .Pages}}{{if gt .Pages 1}}
-      <nav class="pager">
-        {{if .HasPrev}}<a href="/?page={{.Prev}}">← Prev</a>{{else}}<span class="muted">← Prev</span>{{end}}
-        <span class="muted">Page {{.Page}} of {{.Pages}}</span>
-        {{if .HasNext}}<a href="/?page={{.Next}}">Next →</a>{{else}}<span class="muted">Next →</span>{{end}}
-      </nav>
-    {{end}}{{end}}
   {{else}}
-    {{if .Filtered}}
-      <p class="muted">No books in “{{.FilterLabel}}”.</p>
+    {{if .Root}}
+      <p class="muted">No books yet. <a href="/upload">Upload an EPUB.</a></p>
     {{else}}
-      <p class="muted">No books in the catalog. <a href="/upload">Upload an EPUB.</a></p>
+      <p class="muted">No books in this folder. <a href="/">← All folders</a></p>
     {{end}}
   {{end}}
 

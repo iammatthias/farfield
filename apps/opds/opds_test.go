@@ -336,6 +336,63 @@ func TestBulkCollection(t *testing.T) {
 	}
 }
 
+func TestFileManagerIndex(t *testing.T) {
+	s := newTestServer(t)
+	h := s.routes()
+	token := auth.NewSessionToken()
+	if err := store.InsertSession(s.db, token, time.Now().Add(time.Hour)); err != nil {
+		t.Fatal(err)
+	}
+
+	upload := func(title, coll string) {
+		data := buildEPUB(t, title, "A", nil)
+		u := "/api/books?filename=" + title + ".epub"
+		if coll != "" {
+			u += "&collection=" + url.QueryEscape(coll)
+		}
+		req := httptest.NewRequest(http.MethodPost, u, bytes.NewReader(data))
+		req.Header.Set("X-API-Key", "secret")
+		rec := httptest.NewRecorder()
+		h.ServeHTTP(rec, req)
+		if rec.Code != http.StatusCreated {
+			t.Fatalf("upload %s: %d", title, rec.Code)
+		}
+	}
+	upload("Dune", "Sci-Fi")
+	upload("Loose", "")
+
+	get := func(path string) string {
+		req := httptest.NewRequest(http.MethodGet, path, nil)
+		req.AddCookie(auth.SessionCookie(token, false))
+		rec := httptest.NewRecorder()
+		h.ServeHTTP(rec, req)
+		if rec.Code != http.StatusOK {
+			t.Fatalf("GET %s: %d", path, rec.Code)
+		}
+		return rec.Body.String()
+	}
+
+	// Root: a folder row for Sci-Fi and the loose book, but not the foldered one.
+	root := get("/")
+	for _, want := range []string{`class="folder-row"`, "/?collection=Sci-Fi", "Sci-Fi", "Loose"} {
+		if !strings.Contains(root, want) {
+			t.Errorf("root missing %q", want)
+		}
+	}
+	if strings.Contains(root, "Dune") {
+		t.Error("root should not list the foldered book Dune")
+	}
+
+	// Inside the folder: the foldered book + a breadcrumb back, not the loose book.
+	inside := get("/?collection=Sci-Fi")
+	if !strings.Contains(inside, "Dune") || !strings.Contains(inside, `href="/"`) {
+		t.Error("folder view should show Dune and a back link")
+	}
+	if strings.Contains(inside, "Loose") {
+		t.Error("folder view should not list the loose book")
+	}
+}
+
 func TestCollections(t *testing.T) {
 	s := newTestServer(t)
 	h := s.routes()
