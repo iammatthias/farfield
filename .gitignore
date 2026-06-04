@@ -1,11 +1,20 @@
 # Compiled binaries.
 /bin/
+/opds
 /apps/apex/apex
 /apps/backup/backup
+/apps/bard/bard
 /apps/blobs/blobs
+/apps/bookmarks/bookmarks
 /apps/calendar/calendar
 /apps/content/content
+/apps/dead-presidents/dead-presidents
 /apps/feed/feed
+/apps/opds/opds
+/apps/qr/qr
+
+# Compiled iOS Shortcuts — source of truth is the .cherri files.
+/shortcuts/*.shortcut
 
 # Local state — never committed.
 *.sqlite

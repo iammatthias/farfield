@@ -1,0 +1,41 @@
+// farfield · qr
+//
+// Share a URL → create a public, enabled, proxy-mode QR. Proxy mode means
+// the QR encodes a stable redirect URL on qr.farfield.systems, so you can
+// edit the destination later from the admin UI without reprinting.
+//
+//   POST {baseURL}/api/codes  with { target, mode: "proxy", ec: "M",
+//                                    public: true, enabled: true }
+
+#define color purple
+#define inputs url,text
+#define noinput askfor url
+
+#include 'actions/web'
+#include 'actions/sharing'
+
+#question apiKey "QR API key" ""
+#question baseURL "QR base URL" "https://qr.farfield.systems"
+
+const key = text(apiKey)
+const url = text(baseURL)
+
+@target = "{ShortcutInput}"
+
+@resp = jsonRequest("{url}/api/codes", 'POST', {
+    "target": "{@target}",
+    "mode": "proxy",
+    "ec": "M",
+    "public": true,
+    "enabled": true
+}, {
+    "X-API-Key": "{key}",
+    "Content-Type": "application/json"
+})
+
+@d = getDictionary(@resp)
+@id = getValue(@d, "id")
+@svg = "{url}/qr/{@id}.svg"
+
+setClipboard(@svg)
+show("Created · {@svg} (copied)")

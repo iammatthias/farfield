@@ -1,0 +1,32 @@
+// farfield · feed
+//
+// Prompt for a short post body → publish. Markdown is supported. Photo
+// posts: upload the image in the blobs admin UI, then paste `blob://<cid>`
+// into a post body the next time you run this.
+//
+//   POST {baseURL}/api/posts  with { body }
+
+#define color pink
+#define inputs text
+#define noinput askfor text
+
+#include 'actions/web'
+
+#question apiKey "Feed API key" ""
+#question baseURL "Feed base URL" "https://feed.farfield.systems"
+
+const key = text(apiKey)
+const url = text(baseURL)
+
+@body = prompt("Post body (markdown)", "Text", "{ShortcutInput}", "true")
+
+@resp = jsonRequest("{url}/api/posts", 'POST', {
+    "body": "{@body}"
+}, {
+    "X-API-Key": "{key}",
+    "Content-Type": "application/json"
+})
+
+@d = getDictionary(@resp)
+@slug = getValue(@d, "slug")
+show("Posted · {@slug}")

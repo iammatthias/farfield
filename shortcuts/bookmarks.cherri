@@ -1,0 +1,36 @@
+// farfield · bookmarks
+//
+// Share a URL → save it as a public bookmark. OG metadata (title,
+// description, image, favicon) is fetched server-side, so there's nothing
+// to prompt for. Edit category, visibility, or notes in the admin UI.
+//
+//   POST {baseURL}/api/bookmarks  with { url, category, public: true }
+
+#define color orange
+#define inputs url,text
+#define noinput askfor url
+
+#include 'actions/web'
+
+#question apiKey "Bookmarks API key" ""
+#question baseURL "Bookmarks base URL" "https://bookmarks.farfield.systems"
+#question defCat "Default category" "reading"
+
+const key = text(apiKey)
+const url = text(baseURL)
+const cat = text(defCat)
+
+@target = "{ShortcutInput}"
+
+@resp = jsonRequest("{url}/api/bookmarks", 'POST', {
+    "url": "{@target}",
+    "category": "{cat}",
+    "public": true
+}, {
+    "X-API-Key": "{key}",
+    "Content-Type": "application/json"
+})
+
+@d = getDictionary(@resp)
+@id = getValue(@d, "id")
+show("Saved · {@id}")
