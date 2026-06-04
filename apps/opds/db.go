@@ -19,6 +19,7 @@ type Book struct {
 	Language    string `json:"language"`
 	Identifier  string `json:"identifier"`
 	Description string `json:"description"`
+	Collection  string `json:"collection"`
 	Filename    string `json:"filename"`
 	Size        int64  `json:"size"`
 	CoverCID    string `json:"coverCid"`
@@ -36,6 +37,7 @@ CREATE TABLE IF NOT EXISTS books (
 	language    TEXT NOT NULL DEFAULT '',
 	identifier  TEXT NOT NULL DEFAULT '',
 	description TEXT NOT NULL DEFAULT '',
+	collection  TEXT NOT NULL DEFAULT '',
 	filename    TEXT NOT NULL DEFAULT '',
 	size        INTEGER NOT NULL,
 	cover_cid   TEXT NOT NULL DEFAULT '',
@@ -45,7 +47,7 @@ CREATE TABLE IF NOT EXISTS books (
 CREATE INDEX IF NOT EXISTS books_by_created ON books (created_at DESC, cid);`
 
 // bookCols is the column list, in Book-field order, shared by every query.
-const bookCols = `cid, title, author, language, identifier, description, filename, size, cover_cid, cover_mime, created_at`
+const bookCols = `cid, title, author, language, identifier, description, collection, filename, size, cover_cid, cover_mime, created_at`
 
 // openDB opens the SQLite database, applies pragmas, and migrates. It holds the
 // book metadata index and admin login sessions; book and cover bytes live in
@@ -66,7 +68,40 @@ func openDB(path string) (*sql.DB, error) {
 	if _, err := db.Exec(store.SessionSchema); err != nil {
 		return nil, err
 	}
+	// Self-migrate: add the collection column to databases created before it
+	// existed, then index it (the index can only be built once the column is).
+	if err := ensureColumn(db, "books", "collection", "TEXT NOT NULL DEFAULT ''"); err != nil {
+		return nil, err
+	}
+	if _, err := db.Exec(
+		`CREATE INDEX IF NOT EXISTS books_by_collection ON books (collection, created_at DESC)`); err != nil {
+		return nil, err
+	}
 	return db, nil
+}
+
+// ensureColumn adds a column to a table when it is missing, so an existing
+// database picks up a new field on deploy with no migration tooling.
+func ensureColumn(db *sql.DB, table, column, decl string) error {
+	rows, err := db.Query(`SELECT name FROM pragma_table_info(?)`, table)
+	if err != nil {
+		return err
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var name string
+		if err := rows.Scan(&name); err != nil {
+			return err
+		}
+		if name == column {
+			return nil
+		}
+	}
+	if err := rows.Err(); err != nil {
+		return err
+	}
+	_, err = db.Exec(`ALTER TABLE ` + table + ` ADD COLUMN ` + column + ` ` + decl)
+	return err
 }
 
 // scanner is satisfied by both *sql.Row and *sql.Rows.
@@ -75,7 +110,7 @@ type scanner interface{ Scan(...any) error }
 func scanBook(row scanner) (*Book, error) {
 	var b Book
 	err := row.Scan(&b.CID, &b.Title, &b.Author, &b.Language, &b.Identifier,
-		&b.Description, &b.Filename, &b.Size, &b.CoverCID, &b.CoverMime, &b.CreatedAt)
+		&b.Description, &b.Collection, &b.Filename, &b.Size, &b.CoverCID, &b.CoverMime, &b.CreatedAt)
 	if err != nil {
 		return nil, err
 	}
@@ -86,15 +121,15 @@ func scanBook(row scanner) (*Book, error) {
 // CID (re-uploading identical bytes is idempotent).
 func upsertBook(db *sql.DB, b *Book) error {
 	_, err := db.Exec(
-		`INSERT INTO books (`+bookCols+`) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+		`INSERT INTO books (`+bookCols+`) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 		 ON CONFLICT(cid) DO UPDATE SET
 		   title=excluded.title, author=excluded.author, language=excluded.language,
 		   identifier=excluded.identifier, description=excluded.description,
-		   filename=excluded.filename, size=excluded.size,
+		   collection=excluded.collection, filename=excluded.filename, size=excluded.size,
 		   cover_cid=excluded.cover_cid, cover_mime=excluded.cover_mime,
 		   created_at=excluded.created_at`,
 		b.CID, b.Title, b.Author, b.Language, b.Identifier, b.Description,
-		b.Filename, b.Size, b.CoverCID, b.CoverMime, b.CreatedAt)
+		b.Collection, b.Filename, b.Size, b.CoverCID, b.CoverMime, b.CreatedAt)
 	return err
 }
 
@@ -137,6 +172,68 @@ func countBooks(db *sql.DB) (int, error) {
 	var n int
 	err := db.QueryRow(`SELECT COUNT(*) FROM books`).Scan(&n)
 	return n, err
+}
+
+// listBooksByCollection returns every book in a collection, newest first. An
+// empty collection name selects the uncategorised books.
+func listBooksByCollection(db *sql.DB, collection string) ([]Book, error) {
+	rows, err := db.Query(
+		`SELECT `+bookCols+` FROM books WHERE collection = ? ORDER BY created_at DESC, cid`,
+		collection)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []Book
+	for rows.Next() {
+		b, err := scanBook(rows)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, *b)
+	}
+	return out, rows.Err()
+}
+
+// CollectionStat is one named collection (folder) and how many books it holds.
+type CollectionStat struct {
+	Name  string `json:"name"`
+	Count int    `json:"count"`
+}
+
+// collectionStats returns the named collections with their book counts (sorted
+// by name) and, separately, the number of uncategorised books.
+func collectionStats(db *sql.DB) (named []CollectionStat, uncategorized int, err error) {
+	rows, err := db.Query(
+		`SELECT collection, COUNT(*) FROM books GROUP BY collection ORDER BY collection`)
+	if err != nil {
+		return nil, 0, err
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var name string
+		var n int
+		if err := rows.Scan(&name, &n); err != nil {
+			return nil, 0, err
+		}
+		if name == "" {
+			uncategorized = n
+			continue
+		}
+		named = append(named, CollectionStat{Name: name, Count: n})
+	}
+	return named, uncategorized, rows.Err()
+}
+
+// updateBookCollection moves a book into a collection. It reports whether a
+// book with that CID existed.
+func updateBookCollection(db *sql.DB, cid, collection string) (bool, error) {
+	res, err := db.Exec(`UPDATE books SET collection = ? WHERE cid = ?`, collection, cid)
+	if err != nil {
+		return false, err
+	}
+	n, _ := res.RowsAffected()
+	return n > 0, nil
 }
 
 // coverInfo reports whether any book references coverCID as its cover, and the

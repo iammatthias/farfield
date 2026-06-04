@@ -3,12 +3,14 @@ package main
 import (
 	"archive/zip"
 	"bytes"
+	"database/sql"
 	"encoding/json"
 	"fmt"
 	"io"
 	"mime/multipart"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -232,6 +234,119 @@ func TestUploadFileEndpoint(t *testing.T) {
 	}
 }
 
+func TestEnsureCollectionColumn(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "old.sqlite")
+
+	// Simulate a database created before the collection column existed.
+	raw, err := sql.Open("sqlite", "file:"+path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := raw.Exec(`CREATE TABLE books (
+		cid TEXT PRIMARY KEY, title TEXT NOT NULL DEFAULT '', author TEXT NOT NULL DEFAULT '',
+		language TEXT NOT NULL DEFAULT '', identifier TEXT NOT NULL DEFAULT '',
+		description TEXT NOT NULL DEFAULT '', filename TEXT NOT NULL DEFAULT '',
+		size INTEGER NOT NULL, cover_cid TEXT NOT NULL DEFAULT '',
+		cover_mime TEXT NOT NULL DEFAULT '', created_at TEXT NOT NULL)`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := raw.Exec(
+		`INSERT INTO books (cid, title, size, created_at) VALUES ('bafold', 'Old Book', 10, '2026-01-01T00:00:00Z')`); err != nil {
+		t.Fatal(err)
+	}
+	raw.Close()
+
+	// openDB must migrate it: add the column, read the old row cleanly.
+	db, err := openDB(path)
+	if err != nil {
+		t.Fatalf("openDB migrate: %v", err)
+	}
+	defer db.Close()
+
+	b, err := getBook(db, "bafold")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if b == nil || b.Title != "Old Book" || b.Collection != "" {
+		t.Fatalf("migrated book = %+v", b)
+	}
+	if _, err := updateBookCollection(db, "bafold", "Archive"); err != nil {
+		t.Fatal(err)
+	}
+	if b, _ = getBook(db, "bafold"); b.Collection != "Archive" {
+		t.Errorf("collection after update = %q, want Archive", b.Collection)
+	}
+}
+
+func TestCollections(t *testing.T) {
+	s := newTestServer(t)
+	h := s.routes()
+
+	upload := func(title, collection string) {
+		data := buildEPUB(t, title, "Author", nil)
+		u := "/api/books?filename=" + url.QueryEscape(title) + ".epub"
+		if collection != "" {
+			u += "&collection=" + url.QueryEscape(collection)
+		}
+		req := httptest.NewRequest(http.MethodPost, u, bytes.NewReader(data))
+		req.Header.Set("X-API-Key", "secret")
+		rec := httptest.NewRecorder()
+		h.ServeHTTP(rec, req)
+		if rec.Code != http.StatusCreated {
+			t.Fatalf("upload %q: %d %s", title, rec.Code, rec.Body)
+		}
+	}
+	upload("Dune", "Sci-Fi")
+	upload("Neuromancer", "Sci-Fi")
+	upload("Cookbook", "") // uncategorized
+
+	get := func(path string) string {
+		req := httptest.NewRequest(http.MethodGet, path, nil)
+		req.SetBasicAuth("x", "secret")
+		rec := httptest.NewRecorder()
+		h.ServeHTTP(rec, req)
+		if rec.Code != http.StatusOK {
+			t.Fatalf("GET %s: %d %s", path, rec.Code, rec.Body)
+		}
+		return rec.Body.String()
+	}
+
+	// Navigation root: All books, the Sci-Fi folder, and Uncategorized.
+	nav := get("/opds")
+	for _, want := range []string{
+		"kind=navigation", "<title>All books</title>",
+		"<title>Sci-Fi</title>", "/opds/collection?c=Sci-Fi",
+		"<title>Uncategorized</title>",
+	} {
+		if !strings.Contains(nav, want) {
+			t.Errorf("nav feed missing %q\n%s", want, nav)
+		}
+	}
+
+	// The Sci-Fi feed holds exactly its two books, not the uncategorized one.
+	sci := get("/opds/collection?c=Sci-Fi")
+	if !strings.Contains(sci, "<title>Dune</title>") || !strings.Contains(sci, "<title>Neuromancer</title>") {
+		t.Errorf("Sci-Fi feed missing its books\n%s", sci)
+	}
+	if strings.Contains(sci, "<title>Cookbook</title>") {
+		t.Errorf("Sci-Fi feed leaked the uncategorized book")
+	}
+
+	// Uncategorized feed holds only the loose book.
+	unc := get("/opds/collection?c=")
+	if !strings.Contains(unc, "<title>Cookbook</title>") || strings.Contains(unc, "<title>Dune</title>") {
+		t.Errorf("uncategorized feed wrong\n%s", unc)
+	}
+
+	// All feed has everything.
+	all := get("/opds/all")
+	for _, want := range []string{"Dune", "Neuromancer", "Cookbook"} {
+		if !strings.Contains(all, "<title>"+want+"</title>") {
+			t.Errorf("all feed missing %s", want)
+		}
+	}
+}
+
 func TestCatalogFlow(t *testing.T) {
 	s := newTestServer(t)
 	h := s.routes()
@@ -281,8 +396,23 @@ func TestCatalogFlow(t *testing.T) {
 		t.Errorf("WWW-Authenticate = %q, want a Basic challenge", got)
 	}
 
-	// 4. With Basic Auth the catalog lists the book with an acquisition link.
+	// 4a. The navigation root (with auth) lists folders, not books.
 	req = httptest.NewRequest(http.MethodGet, "/opds", nil)
+	req.SetBasicAuth("reader", "secret")
+	rec = httptest.NewRecorder()
+	h.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("nav status = %d, body = %s", rec.Code, rec.Body)
+	}
+	if ct := rec.Header().Get("Content-Type"); ct != navFeedType {
+		t.Errorf("nav content-type = %q, want %q", ct, navFeedType)
+	}
+	if nav := rec.Body.String(); !strings.Contains(nav, "<title>All books</title>") || !strings.Contains(nav, "/opds/all") {
+		t.Errorf("nav feed missing the All books folder\n%s", nav)
+	}
+
+	// 4b. The acquisition feed (/opds/all) lists the book with its links.
+	req = httptest.NewRequest(http.MethodGet, "/opds/all", nil)
 	req.SetBasicAuth("reader", "secret")
 	rec = httptest.NewRecorder()
 	h.ServeHTTP(rec, req)

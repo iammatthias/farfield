@@ -1,5 +1,12 @@
 {{define "title"}}Books · farfield{{end}}
 {{define "content"}}
+  <style>
+    td.folder { white-space: nowrap; }
+    .move { display: flex; gap: 0.35rem; align-items: center; }
+    .move input[type="text"] { width: 7.5rem; padding: 0.2rem 0.4rem; font-size: 0.8rem; }
+    .move button { padding: 0.2rem 0.6rem; font-size: 0.76rem; }
+  </style>
+
   <header class="bar">
     <h1>farfield · opds</h1>
     <nav>
@@ -10,12 +17,23 @@
     </nav>
   </header>
 
+  <nav class="filter-bar">
+    <span class="label">Folders</span>
+    <a href="/"{{if not .Filtered}} class="on"{{end}}>All ({{.Total}})</a>
+    {{range .Collections}}
+      <a href="/?collection={{.Name}}"{{if and $.Filtered (eq $.Filter .Name)}} class="on"{{end}}>{{.Name}} ({{.Count}})</a>
+    {{end}}
+    {{if .Uncategorized}}
+      <a href="/?collection="{{if and $.Filtered (eq $.Filter "")}} class="on"{{end}}>Uncategorized ({{.Uncategorized}})</a>
+    {{end}}
+  </nav>
+
   {{if .Books}}
     <div class="table-wrap">
       <table class="books">
         <thead>
           <tr>
-            <th></th><th>Title</th><th>Author</th><th>Lang</th><th>Size</th><th>Added</th><th></th>
+            <th></th><th>Title</th><th>Author</th><th>Folder</th><th>Size</th><th>Added</th><th></th>
           </tr>
         </thead>
         <tbody>
@@ -30,7 +48,13 @@
               </td>
               <td class="title">{{.Title}}</td>
               <td class="meta">{{if .Author}}{{.Author}}{{else}}—{{end}}</td>
-              <td class="meta">{{if .Language}}{{.Language}}{{else}}—{{end}}</td>
+              <td class="folder">
+                <form method="post" action="/books/{{.CID}}/collection" class="move">
+                  <input type="hidden" name="next" value="{{$.Self}}">
+                  <input type="text" name="collection" list="collections" value="{{.Collection}}" placeholder="—" aria-label="Folder">
+                  <button type="submit">Move</button>
+                </form>
+              </td>
               <td class="meta">{{humanSize .Size}}</td>
               <td class="meta">{{shortDate .CreatedAt}}</td>
               <td class="actions">
@@ -47,14 +71,20 @@
       </table>
     </div>
 
-    {{if gt .Pages 1}}
+    {{if .Pages}}{{if gt .Pages 1}}
       <nav class="pager">
         {{if .HasPrev}}<a href="/?page={{.Prev}}">← Prev</a>{{else}}<span class="muted">← Prev</span>{{end}}
         <span class="muted">Page {{.Page}} of {{.Pages}}</span>
         {{if .HasNext}}<a href="/?page={{.Next}}">Next →</a>{{else}}<span class="muted">Next →</span>{{end}}
       </nav>
-    {{end}}
+    {{end}}{{end}}
   {{else}}
-    <p class="muted">No books in the catalog. <a href="/upload">Upload an EPUB.</a></p>
+    {{if .Filtered}}
+      <p class="muted">No books in “{{.FilterLabel}}”.</p>
+    {{else}}
+      <p class="muted">No books in the catalog. <a href="/upload">Upload an EPUB.</a></p>
+    {{end}}
   {{end}}
+
+  <datalist id="collections">{{range .Collections}}<option value="{{.Name}}"></option>{{end}}</datalist>
 {{end}}

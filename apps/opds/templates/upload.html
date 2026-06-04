@@ -34,6 +34,12 @@
         <input type="file" id="file" name="file" accept=".epub,application/epub+zip" multiple required>
         <p class="hint">Pick one or more files. Title, author, language, and cover are read from each.</p>
       </div>
+      <div class="field">
+        <label for="collection">Folder (optional)</label>
+        <input type="text" id="collection" name="collection" list="collections" placeholder="e.g. Sci-Fi">
+        <datalist id="collections">{{range .Collections}}<option value="{{.Name}}"></option>{{end}}</datalist>
+        <p class="hint">Adds every file in this batch to a collection. Leave blank for none.</p>
+      </div>
       <div class="actions"><button type="submit">Upload</button></div>
     </form>
 
@@ -61,8 +67,11 @@
       if (!files || !files.length) return; // let the browser enforce `required`
       e.preventDefault();
 
+      var collInput = document.getElementById('collection');
+      var coll = collInput ? (collInput.value || '').trim() : '';
       var btn = form.querySelector('button');
       btn.disabled = true; input.disabled = true;
+      if (collInput) collInput.disabled = true;
       panel.hidden = false; alldone.hidden = true; queue.innerHTML = '';
 
       var total = files.length, ok = 0, items = [];
@@ -91,7 +100,8 @@
         var file = files[i], li = items[i], bar = li.querySelector('progress');
         setState(li, '', 'uploading');
         var xhr = new XMLHttpRequest();
-        xhr.open('POST', '/upload/file?filename=' + encodeURIComponent(file.name));
+        xhr.open('POST', '/upload/file?filename=' + encodeURIComponent(file.name) +
+          (coll ? '&collection=' + encodeURIComponent(coll) : ''));
         xhr.upload.addEventListener('progress', function (ev) {
           if (ev.lengthComputable) bar.value = Math.round(ev.loaded / ev.total * 100);
         });

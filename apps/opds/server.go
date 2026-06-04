@@ -129,6 +129,7 @@ func (s *Server) routes() http.Handler {
 	mux.HandleFunc("GET /upload", s.requireSession(s.handleUploadForm))
 	mux.HandleFunc("POST /upload", s.requireSession(s.handleAdminUpload))
 	mux.HandleFunc("POST /upload/file", s.requireSession(s.handleUploadJSON))
+	mux.HandleFunc("POST /books/{cid}/collection", s.requireSession(s.handleSetCollection))
 	mux.HandleFunc("POST /books/{cid}/delete", s.requireSession(s.handleAdminDelete))
 
 	// Login — public HTML.
@@ -137,7 +138,11 @@ func (s *Server) routes() http.Handler {
 	mux.HandleFunc("GET /logout", s.handleLogout)
 
 	// OPDS catalog — session OR HTTP Basic (the credential e-readers send).
-	mux.HandleFunc("GET /opds", s.requireCatalogAuth(s.handleCatalog))
+	// /opds is a navigation feed of folders; /opds/all and /opds/collection are
+	// the acquisition feeds those folders link to.
+	mux.HandleFunc("GET /opds", s.requireCatalogAuth(s.handleOPDSRoot))
+	mux.HandleFunc("GET /opds/all", s.requireCatalogAuth(s.handleOPDSAll))
+	mux.HandleFunc("GET /opds/collection", s.requireCatalogAuth(s.handleOPDSCollection))
 	mux.HandleFunc("GET /opds/download/{cid}", s.requireCatalogAuth(s.handleDownload))
 	mux.HandleFunc("GET /opds/cover/{cid}", s.requireCatalogAuth(s.handleCover))
 
@@ -155,7 +160,7 @@ func (s *Server) routes() http.Handler {
 // storeUpload validates EPUB bytes, extracts metadata and the cover, writes
 // both to the byte store, and records the book row. filename is the original
 // upload name (best-effort) used for the download name and a title fallback.
-func (s *Server) storeUpload(data []byte, filename string) (*Book, error) {
+func (s *Server) storeUpload(data []byte, filename, collection string) (*Book, error) {
 	if len(data) == 0 {
 		return nil, errors.New("empty upload")
 	}
@@ -175,9 +180,10 @@ func (s *Server) storeUpload(data []byte, filename string) (*Book, error) {
 		Language:    meta.Language,
 		Identifier:  meta.Identifier,
 		Description: meta.Description,
+		Collection:  strings.TrimSpace(collection),
 		Filename:    sanitizeFilename(filename),
 		Size:        int64(len(data)),
-		CreatedAt:   time.Now().UTC().Format(time.RFC3339),
+		CreatedAt:   nowRFC3339(),
 	}
 
 	if len(coverBytes) > 0 {
@@ -224,15 +230,51 @@ func (s *Server) deleteBookAndBytes(cid string) (bool, error) {
 // ── HTML admin handlers ────────────────────────────────────────────────────
 
 func (s *Server) handleIndex(w http.ResponseWriter, r *http.Request) {
-	page := 1
-	if p, err := strconv.Atoi(r.URL.Query().Get("page")); err == nil && p > 1 {
-		page = p
-	}
-	total, err := countBooks(s.db)
+	q := r.URL.Query()
+	named, uncategorized, err := collectionStats(s.db)
 	if err != nil {
-		slog.Error("count books", "err", err)
+		slog.Error("collection stats", "err", err)
 		http.Error(w, "internal error", http.StatusInternalServerError)
 		return
+	}
+	total := uncategorized
+	for _, c := range named {
+		total += c.Count
+	}
+	data := map[string]any{
+		"Collections":   named,
+		"Uncategorized": uncategorized,
+		"Total":         total,
+		"Self":          r.URL.RequestURI(),
+		"Filter":        "",
+		"Filtered":      false,
+	}
+
+	// Filtered view — all books in one collection, no pagination.
+	if q.Has("collection") {
+		name := q.Get("collection")
+		books, err := listBooksByCollection(s.db, name)
+		if err != nil {
+			slog.Error("list collection", "err", err)
+			http.Error(w, "internal error", http.StatusInternalServerError)
+			return
+		}
+		label := name
+		if label == "" {
+			label = "Uncategorized"
+		}
+		data["Books"] = books
+		data["Filter"] = name
+		data["Filtered"] = true
+		data["FilterLabel"] = label
+		s.render(w, "index.html", data)
+		return
+	}
+
+	// All view — paginated.
+	page := 1
+	if p, err := strconv.Atoi(q.Get("page")); err == nil && p > 1 {
+		page = p
 	}
 	books, err := listBooks(s.db, pageSize, (page-1)*pageSize)
 	if err != nil {
@@ -241,20 +283,22 @@ func (s *Server) handleIndex(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	pages := (total + pageSize - 1) / pageSize
-	s.render(w, "index.html", map[string]any{
-		"Books":   books,
-		"Total":   total,
-		"Page":    page,
-		"Pages":   pages,
-		"HasPrev": page > 1,
-		"HasNext": page < pages,
-		"Prev":    page - 1,
-		"Next":    page + 1,
-	})
+	data["Books"] = books
+	data["Page"] = page
+	data["Pages"] = pages
+	data["HasPrev"] = page > 1
+	data["HasNext"] = page < pages
+	data["Prev"] = page - 1
+	data["Next"] = page + 1
+	s.render(w, "index.html", data)
 }
 
 func (s *Server) handleUploadForm(w http.ResponseWriter, r *http.Request) {
-	s.render(w, "upload.html", map[string]any{"Error": r.URL.Query().Get("error")})
+	named, _, _ := collectionStats(s.db) // a convenience datalist; ignore errors
+	s.render(w, "upload.html", map[string]any{
+		"Error":       r.URL.Query().Get("error"),
+		"Collections": named,
+	})
 }
 
 func (s *Server) handleAdminUpload(w http.ResponseWriter, r *http.Request) {
@@ -272,11 +316,13 @@ func (s *Server) handleAdminUpload(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Bulk: process every selected file, tolerating per-file failures so one
-	// bad EPUB doesn't sink the whole batch.
+	// bad EPUB doesn't sink the whole batch. The collection (if any) applies
+	// to every file in the batch.
+	collection := r.FormValue("collection")
 	var stored int
 	var failed []string
 	for _, fh := range files {
-		if err := s.storeMultipartFile(fh); err != nil {
+		if err := s.storeMultipartFile(fh, collection); err != nil {
 			slog.Error("upload: file failed", "name", fh.Filename, "err", err)
 			failed = append(failed, fh.Filename)
 			continue
@@ -292,8 +338,8 @@ func (s *Server) handleAdminUpload(w http.ResponseWriter, r *http.Request) {
 }
 
 // storeMultipartFile reads one uploaded file (bounded by maxUpload) and stores
-// it as a book.
-func (s *Server) storeMultipartFile(fh *multipart.FileHeader) error {
+// it as a book in the given collection.
+func (s *Server) storeMultipartFile(fh *multipart.FileHeader, collection string) error {
 	f, err := fh.Open()
 	if err != nil {
 		return err
@@ -303,7 +349,7 @@ func (s *Server) storeMultipartFile(fh *multipart.FileHeader) error {
 	if err != nil {
 		return err
 	}
-	_, err = s.storeUpload(data, fh.Filename)
+	_, err = s.storeUpload(data, fh.Filename, collection)
 	return err
 }
 
@@ -314,6 +360,21 @@ func (s *Server) handleAdminDelete(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	http.Redirect(w, r, "/", http.StatusSeeOther)
+}
+
+// handleSetCollection moves a book into a collection (an empty value clears it).
+func (s *Server) handleSetCollection(w http.ResponseWriter, r *http.Request) {
+	if cid := r.PathValue("cid"); validCID(cid) {
+		if _, err := updateBookCollection(s.db, cid, strings.TrimSpace(r.FormValue("collection"))); err != nil {
+			slog.Error("set collection", "cid", cid, "err", err)
+		}
+	}
+	// Return to the view they were on (validated to a local path).
+	dest := r.FormValue("next")
+	if !strings.HasPrefix(dest, "/") {
+		dest = "/"
+	}
+	http.Redirect(w, r, dest, http.StatusSeeOther)
 }
 
 // ── login handlers ─────────────────────────────────────────────────────────
@@ -351,17 +412,71 @@ func (s *Server) handleLogout(w http.ResponseWriter, r *http.Request) {
 
 // ── OPDS catalog ───────────────────────────────────────────────────────────
 
-func (s *Server) handleCatalog(w http.ResponseWriter, r *http.Request) {
+// handleOPDSRoot serves the navigation feed: an "All books" folder, one folder
+// per collection, and "Uncategorized" when some books have none.
+func (s *Server) handleOPDSRoot(w http.ResponseWriter, r *http.Request) {
+	named, uncategorized, err := collectionStats(s.db)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "could not read catalog")
+		return
+	}
+	total := uncategorized
+	for _, c := range named {
+		total += c.Count
+	}
+	items := []NavItem{{Title: "All books", Href: "/opds/all", Count: total}}
+	for _, c := range named {
+		items = append(items, NavItem{
+			Title: c.Name,
+			Href:  "/opds/collection?c=" + url.QueryEscape(c.Name),
+			Count: c.Count,
+		})
+	}
+	if uncategorized > 0 {
+		items = append(items, NavItem{Title: "Uncategorized", Href: "/opds/collection?c=", Count: uncategorized})
+	}
+	body, err := navFeedXML(items, "/opds", nowRFC3339())
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "could not render catalog")
+		return
+	}
+	w.Header().Set("Content-Type", navFeedType)
+	_, _ = w.Write(body)
+}
+
+// handleOPDSAll serves the acquisition feed of every book.
+func (s *Server) handleOPDSAll(w http.ResponseWriter, r *http.Request) {
 	books, err := listBooks(s.db, -1, 0) // -1: every book, newest first
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "could not read catalog")
 		return
 	}
-	updated := time.Now().UTC().Format(time.RFC3339)
+	s.writeAcquisition(w, books, "farfield · opds — All books", "/opds/all")
+}
+
+// handleOPDSCollection serves one collection's acquisition feed (an empty c is
+// the uncategorised books).
+func (s *Server) handleOPDSCollection(w http.ResponseWriter, r *http.Request) {
+	name := r.URL.Query().Get("c")
+	books, err := listBooksByCollection(s.db, name)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "could not read catalog")
+		return
+	}
+	label := name
+	if label == "" {
+		label = "Uncategorized"
+	}
+	s.writeAcquisition(w, books, "farfield · opds — "+label, "/opds/collection?c="+url.QueryEscape(name))
+}
+
+// writeAcquisition renders and writes an OPDS acquisition feed.
+func (s *Server) writeAcquisition(w http.ResponseWriter, books []Book, title, selfHref string) {
+	updated := nowRFC3339()
 	if len(books) > 0 {
 		updated = books[0].CreatedAt
 	}
-	body, err := catalogXML(books, "/opds", updated)
+	body, err := catalogXML(books, title, selfHref, updated)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "could not render catalog")
 		return
@@ -462,12 +577,12 @@ func (s *Server) handleUploadJSON(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	// Filename is advisory — a query param or X-Filename header; the title
-	// falls back to it only when the EPUB declares none.
+	// falls back to it only when the EPUB declares none. collection is optional.
 	filename := r.URL.Query().Get("filename")
 	if filename == "" {
 		filename = r.Header.Get("X-Filename")
 	}
-	b, err := s.storeUpload(data, filename)
+	b, err := s.storeUpload(data, filename, r.URL.Query().Get("collection"))
 	if err != nil {
 		writeError(w, http.StatusBadRequest, err.Error())
 		return
@@ -604,6 +719,8 @@ func shortDate(s string) string {
 	}
 	return s
 }
+
+func nowRFC3339() string { return time.Now().UTC().Format(time.RFC3339) }
 
 // render writes a page through base.html, buffering first so a template error
 // never produces a half-written response.
