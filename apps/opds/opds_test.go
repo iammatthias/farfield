@@ -278,6 +278,64 @@ func TestEnsureCollectionColumn(t *testing.T) {
 	}
 }
 
+func TestBulkCollection(t *testing.T) {
+	s := newTestServer(t)
+	h := s.routes()
+
+	token := auth.NewSessionToken()
+	if err := store.InsertSession(s.db, token, time.Now().Add(time.Hour)); err != nil {
+		t.Fatal(err)
+	}
+
+	// Upload two uncategorized books via the API.
+	var cids []string
+	for _, title := range []string{"Alpha", "Beta"} {
+		data := buildEPUB(t, title, "Author", nil)
+		cids = append(cids, cid.Of(data))
+		req := httptest.NewRequest(http.MethodPost, "/api/books?filename="+title+".epub", bytes.NewReader(data))
+		req.Header.Set("X-API-Key", "secret")
+		rec := httptest.NewRecorder()
+		h.ServeHTTP(rec, req)
+		if rec.Code != http.StatusCreated {
+			t.Fatalf("upload %s: %d", title, rec.Code)
+		}
+	}
+
+	// Bulk-move both into a new "Reading" folder.
+	form := url.Values{"collection": {"Reading"}, "next": {"/?collection=Reading"}, "cid": cids}
+	req := httptest.NewRequest(http.MethodPost, "/books/collection", strings.NewReader(form.Encode()))
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	req.AddCookie(auth.SessionCookie(token, false))
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, req)
+	if rec.Code != http.StatusSeeOther || rec.Header().Get("Location") != "/?collection=Reading" {
+		t.Fatalf("bulk move: status=%d loc=%q", rec.Code, rec.Header().Get("Location"))
+	}
+
+	named, _, err := collectionStats(s.db)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := 0
+	for _, c := range named {
+		if c.Name == "Reading" {
+			got = c.Count
+		}
+	}
+	if got != 2 {
+		t.Errorf("Reading folder count = %d, want 2 (%+v)", got, named)
+	}
+
+	// Without a session the bulk endpoint is denied (redirected to login).
+	req = httptest.NewRequest(http.MethodPost, "/books/collection", strings.NewReader(form.Encode()))
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	rec = httptest.NewRecorder()
+	h.ServeHTTP(rec, req)
+	if rec.Header().Get("Location") == "/?collection=Reading" {
+		t.Error("unauthenticated bulk move should not be processed")
+	}
+}
+
 func TestCollections(t *testing.T) {
 	s := newTestServer(t)
 	h := s.routes()

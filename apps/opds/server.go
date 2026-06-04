@@ -129,7 +129,7 @@ func (s *Server) routes() http.Handler {
 	mux.HandleFunc("GET /upload", s.requireSession(s.handleUploadForm))
 	mux.HandleFunc("POST /upload", s.requireSession(s.handleAdminUpload))
 	mux.HandleFunc("POST /upload/file", s.requireSession(s.handleUploadJSON))
-	mux.HandleFunc("POST /books/{cid}/collection", s.requireSession(s.handleSetCollection))
+	mux.HandleFunc("POST /books/collection", s.requireSession(s.handleBulkCollection))
 	mux.HandleFunc("POST /books/{cid}/delete", s.requireSession(s.handleAdminDelete))
 
 	// Login — public HTML.
@@ -362,10 +362,20 @@ func (s *Server) handleAdminDelete(w http.ResponseWriter, r *http.Request) {
 	http.Redirect(w, r, "/", http.StatusSeeOther)
 }
 
-// handleSetCollection moves a book into a collection (an empty value clears it).
-func (s *Server) handleSetCollection(w http.ResponseWriter, r *http.Request) {
-	if cid := r.PathValue("cid"); validCID(cid) {
-		if _, err := updateBookCollection(s.db, cid, strings.TrimSpace(r.FormValue("collection"))); err != nil {
+// handleBulkCollection moves the selected books into a collection. An empty
+// value removes them from any folder. The folder is created implicitly — a
+// collection exists exactly when some book names it.
+func (s *Server) handleBulkCollection(w http.ResponseWriter, r *http.Request) {
+	if err := r.ParseForm(); err != nil {
+		http.Error(w, "bad form", http.StatusBadRequest)
+		return
+	}
+	collection := strings.TrimSpace(r.FormValue("collection"))
+	for _, cid := range r.Form["cid"] {
+		if !validCID(cid) {
+			continue
+		}
+		if _, err := updateBookCollection(s.db, cid, collection); err != nil {
 			slog.Error("set collection", "cid", cid, "err", err)
 		}
 	}

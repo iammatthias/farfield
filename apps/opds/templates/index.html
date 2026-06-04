@@ -1,10 +1,36 @@
 {{define "title"}}Books · farfield{{end}}
 {{define "content"}}
   <style>
-    td.folder { white-space: nowrap; }
-    .move { display: flex; gap: 0.35rem; align-items: center; }
-    .move input[type="text"] { width: 7.5rem; padding: 0.2rem 0.4rem; font-size: 0.8rem; }
-    .move button { padding: 0.2rem 0.6rem; font-size: 0.76rem; }
+    .organize {
+      display: flex; flex-wrap: wrap; align-items: center; gap: 0.5rem 0.6rem;
+      margin: 0.75rem 0 0.4rem;
+    }
+    .organize-label {
+      font: 500 0.7rem/1 var(--font-mono); text-transform: uppercase; letter-spacing: 0.07em; opacity: 0.6;
+    }
+    .organize input[type="text"] { flex: 1 1 12rem; max-width: 18rem; padding: 0.3rem 0.5rem; font-size: 0.85rem; }
+    .organize button { padding: 0.3rem 0.9rem; }
+    .organize .check-all { display: inline-flex; align-items: center; gap: 0.35rem; font-size: 0.85rem; white-space: nowrap; }
+    .organize .check-all input { width: auto; }
+    .organize-hint { margin: 0 0 1.25rem; }
+    table.books td.pick, table.books th.pick { width: 1%; text-align: center; }
+    table.books td.pick input { width: auto; }
+    td.folder { white-space: nowrap; font-size: 0.85rem; opacity: 0.8; }
+
+    /* Mobile: each row becomes a labelled card instead of overflowing sideways. */
+    @media (max-width: 46rem) {
+      table.books thead { display: none; }
+      table.books, table.books tbody, table.books tr, table.books td { display: block; width: auto; }
+      table.books tr { border: 1px solid var(--hairline); padding: 0.5rem 0.75rem; margin-bottom: 0.6rem; }
+      table.books td { display: flex; gap: 0.7rem; align-items: baseline; padding: 0.18rem 0; border: 0; }
+      table.books td::before {
+        content: attr(data-label); flex: 0 0 4.5rem;
+        font: 500 0.66rem/1.5 var(--font-mono); text-transform: uppercase; letter-spacing: 0.06em; opacity: 0.5;
+      }
+      table.books td.pick, table.books td.shrink { display: inline-flex; }
+      table.books td.pick::before, table.books td.shrink::before { content: ""; flex: 0; }
+      table.books td.actions { gap: 1rem; }
+    }
   </style>
 
   <header class="bar">
@@ -29,16 +55,26 @@
   </nav>
 
   {{if .Books}}
+    <form id="organize" class="organize" method="post" action="/books/collection">
+      <input type="hidden" name="next" value="{{.Self}}">
+      <label class="check-all"><input type="checkbox" id="selall"> Select all</label>
+      <span class="organize-label">Move checked to</span>
+      <input type="text" name="collection" list="collections" placeholder="new or existing folder" aria-label="Folder name">
+      <button type="submit">Move</button>
+    </form>
+    <p class="hint organize-hint">Tick books, type a folder (a new name creates it), then Move. An empty name removes them from a folder.</p>
+
     <div class="table-wrap">
       <table class="books">
         <thead>
           <tr>
-            <th></th><th>Title</th><th>Author</th><th>Folder</th><th>Size</th><th>Added</th><th></th>
+            <th class="pick"></th><th></th><th>Title</th><th>Author</th><th>Folder</th><th>Size</th><th>Added</th><th></th>
           </tr>
         </thead>
         <tbody>
           {{range .Books}}
             <tr>
+              <td class="pick"><input type="checkbox" name="cid" value="{{.CID}}" form="organize" aria-label="Select {{.Title}}"></td>
               <td class="shrink">
                 {{if .CoverCID}}
                   <img class="cover" src="/opds/cover/{{.CoverCID}}" loading="lazy" alt="">
@@ -46,18 +82,12 @@
                   <span class="cover placeholder">epub</span>
                 {{end}}
               </td>
-              <td class="title">{{.Title}}</td>
-              <td class="meta">{{if .Author}}{{.Author}}{{else}}—{{end}}</td>
-              <td class="folder">
-                <form method="post" action="/books/{{.CID}}/collection" class="move">
-                  <input type="hidden" name="next" value="{{$.Self}}">
-                  <input type="text" name="collection" list="collections" value="{{.Collection}}" placeholder="—" aria-label="Folder">
-                  <button type="submit">Move</button>
-                </form>
-              </td>
-              <td class="meta">{{humanSize .Size}}</td>
-              <td class="meta">{{shortDate .CreatedAt}}</td>
-              <td class="actions">
+              <td class="title" data-label="Title">{{.Title}}</td>
+              <td class="meta" data-label="Author">{{if .Author}}{{.Author}}{{else}}—{{end}}</td>
+              <td class="folder" data-label="Folder">{{if .Collection}}{{.Collection}}{{else}}—{{end}}</td>
+              <td class="meta" data-label="Size">{{humanSize .Size}}</td>
+              <td class="meta" data-label="Added">{{shortDate .CreatedAt}}</td>
+              <td class="actions" data-label="">
                 <a href="/opds/download/{{.CID}}">Download</a>
                 ·
                 <form method="post" action="/books/{{.CID}}/delete"
@@ -87,4 +117,15 @@
   {{end}}
 
   <datalist id="collections">{{range .Collections}}<option value="{{.Name}}"></option>{{end}}</datalist>
+
+  <script>
+  (function () {
+    var all = document.getElementById('selall');
+    if (!all) return;
+    all.addEventListener('change', function () {
+      var boxes = document.querySelectorAll('input[name="cid"]');
+      for (var i = 0; i < boxes.length; i++) boxes[i].checked = all.checked;
+    });
+  })();
+  </script>
 {{end}}
