@@ -1,13 +1,27 @@
 {{define "title"}}Books · farfield{{end}}
 {{define "content"}}
   <style>
-    .organize {
-      display: flex; flex-wrap: wrap; align-items: center; gap: 0.5rem 0.6rem;
-      margin: 0.75rem 0 0.4rem;
+    /* folder directory (homepage) */
+    .folders {
+      list-style: none; margin: 0; padding: 0; display: grid; gap: 0.55rem;
+      grid-template-columns: repeat(auto-fill, minmax(min(15rem, 100%), 1fr));
     }
-    .organize-label {
-      font: 500 0.7rem/1 var(--font-mono); text-transform: uppercase; letter-spacing: 0.07em; opacity: 0.6;
+    .folders a {
+      display: flex; justify-content: space-between; align-items: baseline; gap: 1rem;
+      padding: 0.9rem 1rem; border: 1px solid var(--ink); text-decoration: none;
     }
+    .folders a:hover { background: var(--ink); color: var(--surface); }
+    .folders .f-name { font-weight: 500; }
+    .folders .f-count {
+      font: 500 0.7rem/1 var(--font-mono); text-transform: uppercase; letter-spacing: 0.06em;
+      opacity: 0.6; white-space: nowrap;
+    }
+    .folders a:hover .f-count { opacity: 0.85; }
+    .folders .f-all a { border-style: dashed; }
+
+    /* organize bar (books view) */
+    .organize { display: flex; flex-wrap: wrap; align-items: center; gap: 0.5rem 0.6rem; margin: 0.75rem 0 0.4rem; }
+    .organize-label { font: 500 0.7rem/1 var(--font-mono); text-transform: uppercase; letter-spacing: 0.07em; opacity: 0.6; }
     .organize input[type="text"] { flex: 1 1 12rem; max-width: 18rem; padding: 0.3rem 0.5rem; font-size: 0.85rem; }
     .organize button { padding: 0.3rem 0.9rem; }
     .organize .check-all { display: inline-flex; align-items: center; gap: 0.35rem; font-size: 0.85rem; white-space: nowrap; }
@@ -43,76 +57,91 @@
     </nav>
   </header>
 
-  <nav class="filter-bar">
-    <span class="label">Folders</span>
-    <a href="/"{{if not .Filtered}} class="on"{{end}}>All ({{.Total}})</a>
-    {{range .Collections}}
-      <a href="/?collection={{.Name}}"{{if and $.Filtered (eq $.Filter .Name)}} class="on"{{end}}>{{.Name}} ({{.Count}})</a>
-    {{end}}
-    {{if .Uncategorized}}
-      <a href="/?collection="{{if and $.Filtered (eq $.Filter "")}} class="on"{{end}}>Uncategorized ({{.Uncategorized}})</a>
-    {{end}}
-  </nav>
-
-  {{if .Books}}
-    <form id="organize" class="organize" method="post" action="/books/collection">
-      <input type="hidden" name="next" value="{{.Self}}">
-      <label class="check-all"><input type="checkbox" id="selall"> Select all</label>
-      <span class="organize-label">Move checked to</span>
-      <input type="text" name="collection" list="collections" placeholder="new or existing folder" aria-label="Folder name">
-      <button type="submit">Move</button>
-    </form>
-    <p class="hint organize-hint">Tick books, type a folder (a new name creates it), then Move. An empty name removes them from a folder.</p>
-
-    <div class="table-wrap">
-      <table class="books">
-        <thead>
-          <tr>
-            <th class="pick"></th><th></th><th>Title</th><th>Author</th><th>Folder</th><th>Size</th><th>Added</th><th></th>
-          </tr>
-        </thead>
-        <tbody>
-          {{range .Books}}
-            <tr>
-              <td class="pick"><input type="checkbox" name="cid" value="{{.CID}}" form="organize" aria-label="Select {{.Title}}"></td>
-              <td class="shrink">
-                {{if .CoverCID}}
-                  <img class="cover" src="/opds/cover/{{.CoverCID}}" loading="lazy" alt="">
-                {{else}}
-                  <span class="cover placeholder">epub</span>
-                {{end}}
-              </td>
-              <td class="title" data-label="Title">{{.Title}}</td>
-              <td class="meta" data-label="Author">{{if .Author}}{{.Author}}{{else}}—{{end}}</td>
-              <td class="folder" data-label="Folder">{{if .Collection}}{{.Collection}}{{else}}—{{end}}</td>
-              <td class="meta" data-label="Size">{{humanSize .Size}}</td>
-              <td class="meta" data-label="Added">{{shortDate .CreatedAt}}</td>
-              <td class="actions" data-label="">
-                <a href="/opds/download/{{.CID}}">Download</a>
-                ·
-                <form method="post" action="/books/{{.CID}}/delete"
-                      onsubmit="return confirm('Delete this book? It is removed from the catalog and the store.')">
-                  <button type="submit">Delete</button>
-                </form>
-              </td>
-            </tr>
-          {{end}}
-        </tbody>
-      </table>
-    </div>
-
-    {{if .Pages}}{{if gt .Pages 1}}
-      <nav class="pager">
-        {{if .HasPrev}}<a href="/?page={{.Prev}}">← Prev</a>{{else}}<span class="muted">← Prev</span>{{end}}
-        <span class="muted">Page {{.Page}} of {{.Pages}}</span>
-        {{if .HasNext}}<a href="/?page={{.Next}}">Next →</a>{{else}}<span class="muted">Next →</span>{{end}}
-      </nav>
-    {{end}}{{end}}
-  {{else}}
-    {{if .Filtered}}
-      <p class="muted">No books in “{{.FilterLabel}}”.</p>
+  {{if eq .Mode "folders"}}
+    {{/* ── homepage: the folder directory ── */}}
+    <div class="section-head"><h2>Folders</h2></div>
+    {{if .Total}}
+      <ul class="folders">
+        {{range .Collections}}
+          <li><a href="/?collection={{.Name}}"><span class="f-name">{{.Name}}</span><span class="f-count">{{.Count}} book{{if ne .Count 1}}s{{end}}</span></a></li>
+        {{end}}
+        {{if .Uncategorized}}
+          <li><a href="/?collection="><span class="f-name">Uncategorized</span><span class="f-count">{{.Uncategorized}} book{{if ne .Uncategorized 1}}s{{end}}</span></a></li>
+        {{end}}
+        <li class="f-all"><a href="/?view=all"><span class="f-name">All books</span><span class="f-count">{{.Total}} book{{if ne .Total 1}}s{{end}}</span></a></li>
+      </ul>
     {{else}}
-      <p class="muted">No books in the catalog. <a href="/upload">Upload an EPUB.</a></p>
+      <p class="muted">No books yet. <a href="/upload">Upload an EPUB.</a></p>
+    {{end}}
+
+  {{else}}
+    {{/* ── books view: a folder, uncategorized, or all ── */}}
+    <nav class="filter-bar">
+      <span class="label">Folders</span>
+      <a href="/">← All folders</a>
+      {{range .Collections}}<a href="/?collection={{.Name}}"{{if eq $.Current .Name}} class="on"{{end}}>{{.Name}} ({{.Count}})</a>{{end}}
+      {{if .Uncategorized}}<a href="/?collection="{{if eq .Current "uncategorized"}} class="on"{{end}}>Uncategorized ({{.Uncategorized}})</a>{{end}}
+      <a href="/?view=all"{{if eq .Current "all"}} class="on"{{end}}>All ({{.Total}})</a>
+    </nav>
+
+    <div class="section-head"><h2>{{.ViewLabel}}</h2></div>
+
+    {{if .Books}}
+      <form id="organize" class="organize" method="post" action="/books/collection">
+        <input type="hidden" name="next" value="{{.Self}}">
+        <label class="check-all"><input type="checkbox" id="selall"> Select all</label>
+        <span class="organize-label">Move checked to</span>
+        <input type="text" name="collection" list="collections" placeholder="new or existing folder" aria-label="Folder name">
+        <button type="submit">Move</button>
+      </form>
+      <p class="hint organize-hint">Tick books, type a folder (a new name creates it), then Move. An empty name removes them from a folder.</p>
+
+      <div class="table-wrap">
+        <table class="books">
+          <thead>
+            <tr>
+              <th class="pick"></th><th></th><th>Title</th><th>Author</th><th>Folder</th><th>Size</th><th>Added</th><th></th>
+            </tr>
+          </thead>
+          <tbody>
+            {{range .Books}}
+              <tr>
+                <td class="pick"><input type="checkbox" name="cid" value="{{.CID}}" form="organize" aria-label="Select {{.Title}}"></td>
+                <td class="shrink">
+                  {{if .CoverCID}}
+                    <img class="cover" src="/opds/cover/{{.CoverCID}}" loading="lazy" alt="">
+                  {{else}}
+                    <span class="cover placeholder">epub</span>
+                  {{end}}
+                </td>
+                <td class="title" data-label="Title">{{.Title}}</td>
+                <td class="meta" data-label="Author">{{if .Author}}{{.Author}}{{else}}—{{end}}</td>
+                <td class="folder" data-label="Folder">{{if .Collection}}{{.Collection}}{{else}}—{{end}}</td>
+                <td class="meta" data-label="Size">{{humanSize .Size}}</td>
+                <td class="meta" data-label="Added">{{shortDate .CreatedAt}}</td>
+                <td class="actions" data-label="">
+                  <a href="/opds/download/{{.CID}}">Download</a>
+                  ·
+                  <form method="post" action="/books/{{.CID}}/delete"
+                        onsubmit="return confirm('Delete this book? It is removed from the catalog and the store.')">
+                    <button type="submit">Delete</button>
+                  </form>
+                </td>
+              </tr>
+            {{end}}
+          </tbody>
+        </table>
+      </div>
+
+      {{if .Pages}}{{if gt .Pages 1}}
+        <nav class="pager">
+          {{if .HasPrev}}<a href="/?view=all&page={{.Prev}}">← Prev</a>{{else}}<span class="muted">← Prev</span>{{end}}
+          <span class="muted">Page {{.Page}} of {{.Pages}}</span>
+          {{if .HasNext}}<a href="/?view=all&page={{.Next}}">Next →</a>{{else}}<span class="muted">Next →</span>{{end}}
+        </nav>
+      {{end}}{{end}}
+    {{else}}
+      <p class="muted">No books in “{{.ViewLabel}}”. <a href="/">← All folders</a></p>
     {{end}}
   {{end}}
 
