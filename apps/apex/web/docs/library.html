@@ -1,0 +1,121 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>Library — Farfield Docs</title>
+<link rel="stylesheet" href="/static/styles.css?v=20260602-1">
+<link rel="stylesheet" href="style.css?v=20260602-docs4">
+</head>
+<body>
+<input type="checkbox" id="nav-toggle" class="nav-toggle" hidden>
+<header class="bar">
+  <a href="/" class="brand">farfield · docs</a>
+  <label for="nav-toggle" class="nav-burger" aria-label="Toggle navigation"><span></span></label>
+</header>
+<div class="docs-layout">
+<aside class="sidebar">
+  <nav class="docs-nav" aria-label="Docs navigation">
+  <a href="index.html">Docs</a>
+  <a href="apex.html">Apex</a>
+  <a href="content.html">Content</a>
+  <a href="feed.html">Feed</a>
+  <a href="blobs.html">Blobs</a>
+  <a href="library.html" aria-current="page">Library</a>
+  <a href="calendar.html">Calendar</a>
+  <a href="bookmarks.html">Bookmarks</a>
+  <a href="qr.html">QR</a>
+  <a href="bard.html">Bard</a>
+  <a href="dead-presidents.html">Dead Presidents</a>
+  <a href="backup.html">Backup</a>
+  <a href="skills.html">Skills</a>
+</nav>
+  </aside>
+
+<main class="page">
+  <h1>library</h1>
+  <p class="meta"><code>library.farfield.systems</code></p>
+
+  <p>A self-hosted OPDS e-book catalog. Upload EPUBs through the admin UI and browse them from any OPDS reader — KOReader, Thorium, Foliate, Cantook. Title, author, language, and cover are read from each EPUB's OPF on upload. Book and cover bytes are content-addressed (CIDv1 sha-256) and stored on Cloudflare R2; metadata lives in SQLite. Books are organised into folders (collections), surfaced as a navigation feed the reader browses.</p>
+
+  <h2>Connecting a reader</h2>
+  <p>Point an OPDS reader at the catalog root and authenticate with HTTP Basic Auth — any username, the catalog key as the password:</p>
+<pre class="record-shape">URL:      https://library.farfield.systems/opds
+Username: (anything)
+Password: (the catalog key)</pre>
+  <p>The root is an OPDS <em>navigation</em> feed of folders; each folder links to an <em>acquisition</em> feed of books. Every catalog endpoint requires the Basic credential (or a logged-in admin session).</p>
+
+  <h2>OPDS catalog</h2>
+
+  <div class="endpoint">
+    <span class="method">GET</span>
+    <span class="path">/opds</span>
+    <div class="returns">Navigation feed — a folder per collection, plus <em>Uncategorized</em> and <em>All books</em></div>
+  </div>
+
+  <div class="endpoint">
+    <span class="method">GET</span>
+    <span class="path">/opds/all</span>
+    <div class="returns">Acquisition feed of every book</div>
+  </div>
+
+  <div class="endpoint">
+    <span class="method">GET</span>
+    <span class="path">/opds/collection?c={name}</span>
+    <div class="returns">Acquisition feed of one folder (empty <code>c</code> is the uncategorised books)</div>
+  </div>
+
+  <div class="endpoint">
+    <span class="method">GET</span>
+    <span class="path">/opds/download/{cid}</span>
+    <div class="returns">The EPUB bytes — <code>application/epub+zip</code>, immutable <code>ETag</code></div>
+  </div>
+
+  <div class="endpoint">
+    <span class="method">GET</span>
+    <span class="path">/opds/cover/{cid}</span>
+    <div class="returns">The cover image — immutable <code>ETag</code></div>
+  </div>
+
+  <h2>Upload API</h2>
+  <p>One credential covers the whole API surface: the catalog Basic password and the upload <code>X-API-Key</code> are the same key.</p>
+
+  <div class="endpoint">
+    <span class="method">POST</span>
+    <span class="path">/api/books?filename={name}&amp;collection={folder}</span>
+    <div class="returns">Upload one raw EPUB body → <code>Book</code> — <code>X-API-Key</code>. <code>filename</code> and <code>collection</code> are optional.</div>
+  </div>
+
+  <div class="endpoint">
+    <span class="method">DELETE</span>
+    <span class="path">/api/books/{cid}</span>
+    <div class="returns">Delete a book — <code>X-API-Key</code></div>
+  </div>
+
+  <div class="endpoint">
+    <span class="method">GET</span>
+    <span class="path">/status</span>
+    <div class="returns"><code>{ "service": "library", "ok": true, "books": N }</code> — public</div>
+  </div>
+
+  <h2>Record Shape</h2>
+
+  <h3>Book</h3>
+<pre class="record-shape">{
+  "cid": "bafk…",            // CID of the EPUB bytes
+  "title": "Catch-22",
+  "author": "Joseph Heller",
+  "language": "en",
+  "identifier": "urn:isbn:…",
+  "description": "…",
+  "collection": "Sci-Fi",    // folder, or "" for uncategorised
+  "filename": "catch-22.epub",
+  "size": 468000,
+  "coverCid": "bafk…",       // CID of the cover image, or ""
+  "coverMime": "image/jpeg",
+  "createdAt": "2026-06-04T00:00:00Z"
+}</pre>
+</main>
+</div>
+</body>
+</html>
