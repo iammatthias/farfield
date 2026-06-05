@@ -10,7 +10,7 @@
 /apps/content/content
 /apps/dead-presidents/dead-presidents
 /apps/feed/feed
-/apps/opds/opds
+/apps/library/library
 /apps/qr/qr
 
 # Compiled iOS Shortcuts — source of truth is the .cherri files.

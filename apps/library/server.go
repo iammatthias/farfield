@@ -48,9 +48,9 @@ type Server struct {
 
 // openStore selects the byte-store backend from the environment.
 func openStore() (ByteStore, string, error) {
-	switch store.Env("OPDS_BACKEND", "local") {
+	switch store.Env("LIBRARY_BACKEND", "local") {
 	case "local":
-		dir := store.Env("OPDS_DIR", "opds-data")
+		dir := store.Env("LIBRARY_DIR", "library-data")
 		bs, err := OpenLocalDir(dir)
 		return bs, "local:" + dir, err
 	case "r2":
@@ -63,13 +63,13 @@ func openStore() (ByteStore, string, error) {
 		})
 		return bs, "r2:" + bucket, err
 	default:
-		return nil, "", fmt.Errorf(`OPDS_BACKEND must be "local" or "r2"`)
+		return nil, "", fmt.Errorf(`LIBRARY_BACKEND must be "local" or "r2"`)
 	}
 }
 
 // run wires up the service and serves until interrupted.
 func run(host, port string) error {
-	db, err := openDB(store.Env("OPDS_DB_PATH", "opds.sqlite"))
+	db, err := openDB(store.Env("LIBRARY_DB_PATH", "library.sqlite"))
 	if err != nil {
 		return err
 	}
@@ -91,7 +91,7 @@ func run(host, port string) error {
 		store:        bs,
 		templates:    tmpl,
 		password:     store.Env("PASSWORD", ""),
-		apiKey:       store.Env("OPDS_API_KEY", ""),
+		apiKey:       store.Env("LIBRARY_API_KEY", ""),
 		cookieSecure: store.Env("COOKIE_SECURE", "false") == "true",
 		maxUpload:    defaultMaxUpload,
 		assetVer:     cid.Of([]byte(theme.CSS))[:16],
@@ -439,7 +439,7 @@ func (s *Server) handleOPDSAll(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, "could not read catalog")
 		return
 	}
-	s.writeAcquisition(w, books, "farfield · opds — All books", "/opds/all")
+	s.writeAcquisition(w, books, "farfield · library — All books", "/opds/all")
 }
 
 // handleOPDSCollection serves one collection's acquisition feed (an empty c is
@@ -455,7 +455,7 @@ func (s *Server) handleOPDSCollection(w http.ResponseWriter, r *http.Request) {
 	if label == "" {
 		label = "Uncategorized"
 	}
-	s.writeAcquisition(w, books, "farfield · opds — "+label, "/opds/collection?c="+url.QueryEscape(name))
+	s.writeAcquisition(w, books, "farfield · library — "+label, "/opds/collection?c="+url.QueryEscape(name))
 }
 
 // writeAcquisition renders and writes an OPDS acquisition feed.
@@ -605,7 +605,7 @@ func (s *Server) handleStatus(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{
-		"service": "opds", "ok": true, "books": total,
+		"service": "library", "ok": true, "books": total,
 	})
 }
 

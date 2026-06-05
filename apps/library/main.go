@@ -1,4 +1,4 @@
-// Command opds is the farfield e-book service — an OPDS catalog of EPUBs. It
+// Command library is the farfield e-book service — an OPDS catalog of EPUBs. It
 // exposes an HTML admin UI for uploading and moderating books, an OPDS
 // acquisition feed that e-reader apps browse over HTTP Basic Auth, and an
 // API-key-gated upload API. Book bytes (and cover images) live in a byte store
@@ -6,7 +6,7 @@
 //
 // Usage:
 //
-//	opds   serve the HTTP service (default and only mode)
+//	library   serve the HTTP service (default and only mode)
 package main
 
 import (
@@ -21,7 +21,7 @@ func main() {
 	slog.SetDefault(slog.New(slog.NewTextHandler(os.Stderr, nil)))
 
 	host := store.Env("HOST", "127.0.0.1")
-	port := store.Env("OPDS_PORT", "8797")
+	port := store.Env("LIBRARY_PORT", "8797")
 	if err := run(host, port); err != nil {
 		slog.Error("fatal", "err", err)
 		os.Exit(1)

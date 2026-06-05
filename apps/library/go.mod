@@ -1,4 +1,4 @@
-module github.com/iammatthias/farfield/apps/opds
+module github.com/iammatthias/farfield/apps/library
 
 go 1.25.0
 

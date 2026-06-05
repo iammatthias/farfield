@@ -94,7 +94,7 @@ func buildEPUB(t *testing.T, title, author string, cover []byte) []byte {
 
 func newTestServer(t *testing.T) *Server {
 	t.Helper()
-	db, err := openDB(filepath.Join(t.TempDir(), "opds.sqlite"))
+	db, err := openDB(filepath.Join(t.TempDir(), "library.sqlite"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -599,7 +599,7 @@ func TestCatalogFlow(t *testing.T) {
 	if err := json.Unmarshal(rec.Body.Bytes(), &status); err != nil {
 		t.Fatalf("decode status: %v", err)
 	}
-	if status.Service != "opds" || !status.OK || status.Books != 1 {
+	if status.Service != "library" || !status.OK || status.Books != 1 {
 		t.Errorf("status = %+v", status)
 	}
 }

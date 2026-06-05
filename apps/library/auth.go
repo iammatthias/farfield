@@ -39,7 +39,7 @@ func (s *Server) requireAPIKey(next http.HandlerFunc) http.HandlerFunc {
 // requireCatalogAuth guards the OPDS catalog endpoints. It passes for a logged
 // in admin session — so the browser loads covers and downloads without a Basic
 // prompt — otherwise it falls back to HTTP Basic Auth, the scheme OPDS readers
-// speak: any username with the password set to OPDS_API_KEY. A failure returns
+// speak: any username with the password set to LIBRARY_API_KEY. A failure returns
 // 401 with a Basic challenge so a reader knows to prompt for credentials.
 func (s *Server) requireCatalogAuth(next http.HandlerFunc) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
@@ -53,7 +53,7 @@ func (s *Server) requireCatalogAuth(next http.HandlerFunc) http.HandlerFunc {
 				return
 			}
 		}
-		w.Header().Set("WWW-Authenticate", `Basic realm="farfield opds"`)
+		w.Header().Set("WWW-Authenticate", `Basic realm="farfield library"`)
 		writeError(w, http.StatusUnauthorized, "authentication required")
 	}
 }

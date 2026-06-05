@@ -83,7 +83,7 @@ func catalogXML(books []Book, title, selfHref, updated string) ([]byte, error) {
 		Xmlns:     atomNS,
 		XmlnsDC:   dcNS,
 		XmlnsOPDS: opdsNS,
-		ID:        "urn:farfield:opds:" + selfHref,
+		ID:        "urn:farfield:library:" + selfHref,
 		Title:     title,
 		Updated:   updated,
 		Links: []opdsLink{
@@ -142,8 +142,8 @@ func navFeedXML(items []NavItem, selfHref, updated string) ([]byte, error) {
 		Xmlns:     atomNS,
 		XmlnsDC:   dcNS,
 		XmlnsOPDS: opdsNS,
-		ID:        "urn:farfield:opds:nav",
-		Title:     "farfield · opds",
+		ID:        "urn:farfield:library:nav",
+		Title:     "farfield · library",
 		Updated:   updated,
 		Links: []opdsLink{
 			{Rel: relSelf, Href: selfHref, Type: navFeedType},
@@ -153,7 +153,7 @@ func navFeedXML(items []NavItem, selfHref, updated string) ([]byte, error) {
 	for _, it := range items {
 		e := opdsEntry{
 			Title:   it.Title,
-			ID:      "urn:farfield:opds:nav:" + it.Href,
+			ID:      "urn:farfield:library:nav:" + it.Href,
 			Updated: updated,
 			Links:   []opdsLink{{Rel: relSubsection, Href: it.Href, Type: feedType}},
 		}
