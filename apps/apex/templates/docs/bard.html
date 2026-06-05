@@ -1,38 +1,4 @@
-<!DOCTYPE html>
-<html lang="en">
-<head>
-<meta charset="UTF-8">
-<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
-<title>Bard — Farfield Docs</title>
-<link rel="stylesheet" href="/static/styles.css?v=20260602-1">
-<link rel="stylesheet" href="style.css?v=20260602-docs4">
-</head>
-<body>
-<input type="checkbox" id="nav-toggle" class="nav-toggle" hidden>
-<header class="bar">
-  <a href="/" class="brand">farfield · docs</a>
-  <label for="nav-toggle" class="nav-burger" aria-label="Toggle navigation"><span></span></label>
-</header>
-<div class="docs-layout">
-<aside class="sidebar">
-  <nav class="docs-nav" aria-label="Docs navigation">
-  <a href="index.html">Docs</a>
-  <a href="apex.html">Apex</a>
-  <a href="content.html">Content</a>
-  <a href="feed.html">Feed</a>
-  <a href="blobs.html">Blobs</a>
-  <a href="library.html">Library</a>
-  <a href="calendar.html">Calendar</a>
-  <a href="bookmarks.html">Bookmarks</a>
-  <a href="qr.html">QR</a>
-  <a href="bard.html" aria-current="page">Bard</a>
-  <a href="dead-presidents.html">Dead Presidents</a>
-  <a href="backup.html">Backup</a>
-  <a href="skills.html">Skills</a>
-</nav>
-  </aside>
-
-<main class="page">
+{{define "content"}}
   <h1>bard</h1>
   <p class="meta"><code>bard.farfield.systems</code></p>
 
@@ -60,7 +26,4 @@
 
   <h2>Inference</h2>
   <p>Generation runs in a Web Worker so the page stays responsive. The sampling controls are the usual set: temperature, top-k, top-p, max tokens, frequency penalty, and a seed. Output streams token by token. There is no wallet and no server-side inference; everything after the chunk fetch happens locally.</p>
-</main>
-</div>
-</body>
-</html>
+{{end}}

@@ -1,38 +1,4 @@
-<!DOCTYPE html>
-<html lang="en">
-<head>
-<meta charset="UTF-8">
-<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
-<title>Backup — Farfield Docs</title>
-<link rel="stylesheet" href="/static/styles.css?v=20260602-1">
-<link rel="stylesheet" href="style.css?v=20260602-docs4">
-</head>
-<body>
-<input type="checkbox" id="nav-toggle" class="nav-toggle" hidden>
-<header class="bar">
-  <a href="/" class="brand">farfield · docs</a>
-  <label for="nav-toggle" class="nav-burger" aria-label="Toggle navigation"><span></span></label>
-</header>
-<div class="docs-layout">
-<aside class="sidebar">
-  <nav class="docs-nav" aria-label="Docs navigation">
-  <a href="index.html">Docs</a>
-  <a href="apex.html">Apex</a>
-  <a href="content.html">Content</a>
-  <a href="feed.html">Feed</a>
-  <a href="blobs.html">Blobs</a>
-  <a href="library.html">Library</a>
-  <a href="calendar.html">Calendar</a>
-  <a href="bookmarks.html">Bookmarks</a>
-  <a href="qr.html">QR</a>
-  <a href="bard.html">Bard</a>
-  <a href="dead-presidents.html">Dead Presidents</a>
-  <a href="backup.html" aria-current="page">Backup</a>
-  <a href="skills.html">Skills</a>
-</nav>
-  </aside>
-
-<main class="page">
+{{define "content"}}
   <h1>backup</h1>
   <p class="meta"><code>tailnet-only</code></p>
 
@@ -54,7 +20,4 @@
 
   <h2>Why tailnet-only?</h2>
   <p>SQLite database files contain all content in plain text. Keeping the backup endpoint off the public internet eliminates an entire class of attack surface. The only way to reach the backup service is through the private mesh network.</p>
-</main>
-</div>
-</body>
-</html>
+{{end}}

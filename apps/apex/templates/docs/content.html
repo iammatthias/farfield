@@ -1,38 +1,4 @@
-<!DOCTYPE html>
-<html lang="en">
-<head>
-<meta charset="UTF-8">
-<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
-<title>Content — Farfield Docs</title>
-<link rel="stylesheet" href="/static/styles.css?v=20260602-1">
-<link rel="stylesheet" href="style.css?v=20260602-docs4">
-</head>
-<body>
-<input type="checkbox" id="nav-toggle" class="nav-toggle" hidden>
-<header class="bar">
-  <a href="/" class="brand">farfield · docs</a>
-  <label for="nav-toggle" class="nav-burger" aria-label="Toggle navigation"><span></span></label>
-</header>
-<div class="docs-layout">
-<aside class="sidebar">
-  <nav class="docs-nav" aria-label="Docs navigation">
-  <a href="index.html">Docs</a>
-  <a href="apex.html">Apex</a>
-  <a href="content.html" aria-current="page">Content</a>
-  <a href="feed.html">Feed</a>
-  <a href="blobs.html">Blobs</a>
-  <a href="library.html">Library</a>
-  <a href="calendar.html">Calendar</a>
-  <a href="bookmarks.html">Bookmarks</a>
-  <a href="qr.html">QR</a>
-  <a href="bard.html">Bard</a>
-  <a href="dead-presidents.html">Dead Presidents</a>
-  <a href="backup.html">Backup</a>
-  <a href="skills.html">Skills</a>
-</nav>
-  </aside>
-
-<main class="page">
+{{define "content"}}
   <h1>content</h1>
   <p class="meta"><code>content.farfield.systems</code></p>
 
@@ -124,7 +90,4 @@
     <li><code>blob://&lt;cid&gt;</code> — rewrite to <code>https://blobs.farfield.systems/blobs/&lt;cid&gt;</code>. For dimensions, blurhash, or a blur-up placeholder, read <code>GET /blobs/&lt;cid&gt;/meta</code>.</li>
     <li><code>![](series://&lt;slug&gt;)</code> — fetch <code>GET /api/series/&lt;slug&gt;</code> and splice the fragment's <code>body</code> markdown in place of the whole image construct. The fragment itself contains <code>blob://</code> images.</li>
   </ul>
-</main>
-</div>
-</body>
-</html>
+{{end}}
