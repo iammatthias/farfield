@@ -269,8 +269,17 @@ func validateCode(c *Code) string {
 	if !validMode(c.Mode) {
 		return "Mode must be 'direct' or 'proxy'."
 	}
-	if _, ok := ParseECLevel(c.EC); !ok {
+	ec, ok := ParseECLevel(c.EC)
+	if !ok {
 		return "Error-correction level must be one of L, M, Q, H."
+	}
+	// Direct mode encodes the target itself — dry-run the version pick so an
+	// oversized payload is rejected here instead of persisting a code that
+	// 500s at render time. Proxy payloads are short server URLs; skip them.
+	if c.Mode == ModeDirect {
+		if _, err := pickVersion(len(c.Target), ec); err != nil {
+			return "Target is too large to encode as a QR code at this error-correction level."
+		}
 	}
 	return ""
 }
@@ -529,7 +538,9 @@ func parseTemplates() (map[string]*template.Template, error) {
 			ec, _ := ParseECLevel(c.EC)
 			svg, _, err := EncodeSVG([]byte(payload), ec)
 			if err != nil {
-				return template.HTML("")
+				// A visible failure beats an empty figure with no explanation.
+				return template.HTML(`<p class="error">QR encode failed: ` +
+					template.HTMLEscapeString(err.Error()) + `</p>`)
 			}
 			return template.HTML(svg)
 		},
