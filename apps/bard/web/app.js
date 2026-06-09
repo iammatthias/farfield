@@ -1,4 +1,4 @@
-const ASSET_VERSION = '20260602-bard-3';
+const ASSET_VERSION = '20260609-bard-4';
 const DEFAULT_RPC = 'https://ethereum-sepolia-rpc.publicnode.com';
 const worker = new Worker(`./worker.js?v=${ASSET_VERSION}`, { type: 'module' });
 
@@ -36,6 +36,7 @@ const els = {
 
 let loaded = false;
 let streaming = false;
+let loading = false; // a chain load is in flight; ignore further load clicks
 let currentText = '';
 
 function syncSliderLabels() {
@@ -52,6 +53,8 @@ function setStatus(text) {
 }
 
 function loadWeightsFromChain() {
+  if (loading) return; // don't start a second interleaved load
+  loading = true;
   setStatus('starting');
   setProgress('pointers → chunks → decompress → verify → done');
   setOutput('');
@@ -87,7 +90,7 @@ function setControlsEnabled(ok) {
 }
 
 function updateBusy() {
-  els.load.disabled = streaming;
+  els.load.disabled = streaming || loading;
   els.generate.disabled = !loaded || streaming;
   els.abort.disabled = !streaming;
 }
@@ -145,7 +148,9 @@ worker.addEventListener('message', (event) => {
   if (msg.type === 'loaded') {
     loaded = true;
     streaming = false;
+    loading = false;
     setControlsEnabled(true);
+    updateBusy();
     setStatus('ready');
     setProgress('done');
     els.verified.textContent = '✓ in-browser recompute matches the onchain hash';
@@ -167,6 +172,7 @@ worker.addEventListener('message', (event) => {
   }
   if (msg.type === 'error') {
     streaming = false;
+    loading = false;
     updateBusy();
     setStatus('error');
     setProgress(msg.message);
@@ -176,6 +182,7 @@ worker.addEventListener('message', (event) => {
 
 worker.addEventListener('error', (event) => {
   streaming = false;
+  loading = false;
   updateBusy();
   setStatus('error');
   setProgress(event.message || 'worker error');

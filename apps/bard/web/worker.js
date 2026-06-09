@@ -78,21 +78,34 @@ function quantName(quant) {
   return `unknown(${quant})`;
 }
 
+const RPC_TIMEOUT_MS = 15000;
+let rpcId = 0;
+
 function rpcCall(rpcUrl, method, params = []) {
+  rpcId += 1;
   return fetch(rpcUrl, {
     method: 'POST',
     headers: { 'content-type': 'application/json' },
-    body: JSON.stringify({ jsonrpc: '2.0', id: 1, method, params }),
-  }).then(async (res) => {
-    if (!res.ok) {
-      throw new Error(`RPC ${method} failed: ${res.status} ${res.statusText}`);
-    }
-    const payload = await res.json();
-    if (payload.error) {
-      throw new Error(payload.error.message || `RPC ${method} failed`);
-    }
-    return payload.result;
-  });
+    body: JSON.stringify({ jsonrpc: '2.0', id: rpcId, method, params }),
+    signal: AbortSignal.timeout(RPC_TIMEOUT_MS),
+  }).then(
+    async (res) => {
+      if (!res.ok) {
+        throw new Error(`RPC ${method} failed: ${res.status} ${res.statusText}`);
+      }
+      const payload = await res.json();
+      if (payload.error) {
+        throw new Error(payload.error.message || `RPC ${method} failed`);
+      }
+      return payload.result;
+    },
+    (err) => {
+      if (err && (err.name === 'TimeoutError' || err.name === 'AbortError')) {
+        throw new Error(`RPC ${method} timed out after ${RPC_TIMEOUT_MS / 1000}s — hit "Reload weights" to retry`);
+      }
+      throw new Error(`RPC ${method} failed: ${err && err.message ? err.message : err} — hit "Reload weights" to retry`);
+    },
+  );
 }
 
 function ethCall(rpcUrl, to, data) {
@@ -193,28 +206,79 @@ async function loadManifest(rpcUrl) {
   };
 }
 
-async function loadWeights(rpcUrl) {
-  const manifest = await loadManifest(rpcUrl);
-  postMessage({ type: 'manifest', manifest: manifestSummary(manifest) });
-  progress('pointers', `found ${manifest.chunkCount} pointers`, { manifest: manifestSummary(manifest) });
+// Client-side cache of the verified gzip artifact, keyed by the onchain
+// artifact hash. A hit skips all 29 eth_getCode chunk fetches; the SHA-256
+// verification below still runs over the bytes either way, so the trust model
+// is unchanged. The Cache API is missing outside secure contexts, so every
+// helper degrades to a no-op.
+const WEIGHT_CACHE = 'bard-weights';
 
-  const chunks = [];
-  for (let i = 0; i < manifest.chunks.length; i++) {
-    if (abortRequested) throw new Error('aborted');
-    const address = manifest.chunks[i];
-    progress('chunks', `${i + 1}/${manifest.chunkCount} ${address}`, { manifest: manifestSummary(manifest) });
-    const codeHex = await ethGetCode(rpcUrl, address);
-    const code = hexToBytes(codeHex);
-    if (code.length === 0) throw new Error(`empty pointer code at ${address}`);
-    if (code[0] !== 0x00) {
-      throw new Error(`pointer ${address} does not start with STOP`);
-    }
-    chunks.push(code.subarray(1));
+function artifactCacheUrl(artifactHash) {
+  return '/artifact/' + strip0x(artifactHash).toLowerCase();
+}
+
+async function readCachedArtifact(artifactHash) {
+  if (typeof caches === 'undefined') return null;
+  try {
+    const cache = await caches.open(WEIGHT_CACHE);
+    const res = await cache.match(artifactCacheUrl(artifactHash));
+    if (!res) return null;
+    return new Uint8Array(await res.arrayBuffer());
+  } catch {
+    return null;
   }
+}
 
-  const gzBytes = concatBytes(chunks);
+async function writeCachedArtifact(artifactHash, gzBytes) {
+  if (typeof caches === 'undefined') return;
+  try {
+    const cache = await caches.open(WEIGHT_CACHE);
+    await cache.put(artifactCacheUrl(artifactHash), new Response(gzBytes, { headers: { 'content-type': 'application/gzip' } }));
+  } catch {
+    // The cache is a best-effort accelerator; loading must not fail on it.
+  }
+}
+
+async function deleteCachedArtifact(artifactHash) {
+  if (typeof caches === 'undefined') return;
+  try {
+    const cache = await caches.open(WEIGHT_CACHE);
+    await cache.delete(artifactCacheUrl(artifactHash));
+  } catch {
+    // Best effort, as above.
+  }
+}
+
+// Fetch all chunk pointers with a bounded number of RPC calls in flight,
+// placing each result by index so chunk order is preserved.
+const CHUNK_CONCURRENCY = 6;
+
+async function fetchChunks(rpcUrl, manifest) {
+  const results = new Array(manifest.chunks.length);
+  let nextIndex = 0;
+  let fetched = 0;
+  const lane = async () => {
+    while (nextIndex < manifest.chunks.length) {
+      if (abortRequested) throw new Error('aborted');
+      const i = nextIndex++;
+      const address = manifest.chunks[i];
+      const codeHex = await ethGetCode(rpcUrl, address);
+      const code = hexToBytes(codeHex);
+      if (code.length === 0) throw new Error(`empty pointer code at ${address}`);
+      if (code[0] !== 0x00) {
+        throw new Error(`pointer ${address} does not start with STOP`);
+      }
+      results[i] = code.subarray(1);
+      fetched += 1;
+      progress('chunks', `${fetched}/${manifest.chunkCount} ${address}`, { manifest: manifestSummary(manifest) });
+    }
+  };
+  await Promise.all(Array.from({ length: Math.min(CHUNK_CONCURRENCY, manifest.chunks.length) }, lane));
+  return results;
+}
+
+async function decompressAndVerify(gzBytes, manifest) {
   progress('decompress', `gzip ${gzBytes.length} bytes`, { manifest: manifestSummary(manifest) });
-
   const stream = new Blob([gzBytes]).stream().pipeThrough(new DecompressionStream('gzip'));
   const decompressed = new Uint8Array(await new Response(stream).arrayBuffer());
   progress('verify', `sha-256 ${decompressed.length} bytes`, { manifest: manifestSummary(manifest) });
@@ -224,12 +288,44 @@ async function loadWeights(rpcUrl) {
   if (hashHex.toLowerCase() !== manifest.artifactHash.slice(2).toLowerCase()) {
     throw new Error(`artifact hash mismatch: expected ${manifest.artifactHash}, got 0x${hashHex}`);
   }
+  return { decompressed, hashHex };
+}
+
+async function loadWeights(rpcUrl) {
+  const manifest = await loadManifest(rpcUrl);
+  postMessage({ type: 'manifest', manifest: manifestSummary(manifest) });
+
+  let gzBytes = await readCachedArtifact(manifest.artifactHash);
+  let fromCache = gzBytes !== null;
+  let verified = null;
+  if (fromCache) {
+    progress('chunks', 'cached artifact found — skipping chunk fetches', { manifest: manifestSummary(manifest) });
+    try {
+      verified = await decompressAndVerify(gzBytes, manifest);
+    } catch {
+      // A stale or corrupt cache entry must never brick the load: evict it
+      // and fall through to a fresh fetch from the chain.
+      await deleteCachedArtifact(manifest.artifactHash);
+      fromCache = false;
+      verified = null;
+    }
+  }
+  if (!verified) {
+    progress('pointers', `found ${manifest.chunkCount} pointers`, { manifest: manifestSummary(manifest) });
+    const chunks = await fetchChunks(rpcUrl, manifest);
+    gzBytes = concatBytes(chunks);
+    verified = await decompressAndVerify(gzBytes, manifest);
+  }
+  const { decompressed, hashHex } = verified;
 
   model = parseArtifact(decompressed);
   if (model.vocabSize !== manifest.vocabSize) throw new Error('header vocab size does not match manifest');
   if (model.paramCount !== manifest.paramCount) throw new Error('header param count does not match manifest');
   if (model.quant !== manifest.quant) throw new Error('header quant does not match manifest');
   if (model.vocab.length !== manifest.vocabSize - 1) throw new Error('vocab length mismatch');
+
+  // Only store after a successful chain load + full verification.
+  if (!fromCache) await writeCachedArtifact(manifest.artifactHash, gzBytes);
 
   postMessage({
     type: 'loaded',
@@ -455,8 +551,11 @@ function forward(tokens, m) {
     for (let i = 0; i < x.length; i++) x[i] += mlp2[i];
   }
 
-  const xf = rmsnormRows(x, T, D);
-  return linearRows(xf, m.tensors.lm_head.data, T, D, vocab);
+  // Only the last position is ever sampled, so the final rmsnorm + lm_head
+  // matmul run on that single row instead of all T. Both ops are row-local,
+  // so the last row's floats are bit-identical to the full-T computation.
+  const xf = rmsnormRows(x.subarray((T - 1) * D), 1, D);
+  return linearRows(xf, m.tensors.lm_head.data, 1, D, vocab);
 }
 
 function argmax(values) {
@@ -548,9 +647,8 @@ async function generate(settings) {
   for (let step = 0; step < settings.maxTokens; step++) {
     if (abortRequested) break;
     const window = tokens.slice(-model.blockSize);
-    const logits = forward(window, model);
-    const last = logits.subarray((window.length - 1) * model.vocabSize, window.length * model.vocabSize);
-    const tok = sample(last, settings, counts, rng, model.bosId);
+    const logits = forward(window, model); // logits for the last position only
+    const tok = sample(logits, settings, counts, rng, model.bosId);
     if (tok === model.bosId) break;
     tokens.push(tok);
     counts[tok] += 1;
@@ -561,14 +659,22 @@ async function generate(settings) {
   postMessage({ type: 'done', text });
 }
 
+let loadInFlight = false;
+
 onmessage = async (event) => {
   const msg = event.data || {};
   try {
     if (msg.type === 'load') {
+      if (loadInFlight) return; // never interleave two chain loads
       abortRequested = false;
       const rpcUrl = (msg.rpcUrl || RPC_DEFAULT).trim() || RPC_DEFAULT;
       progress('pointers', 'fetching manifest');
-      await loadWeights(rpcUrl);
+      loadInFlight = true;
+      try {
+        await loadWeights(rpcUrl);
+      } finally {
+        loadInFlight = false;
+      }
       return;
     }
     if (msg.type === 'generate') {

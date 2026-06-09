@@ -44,10 +44,28 @@ func main() {
 			OK      bool   `json:"ok"`
 		}{Service: "bard", OK: true})
 	})
-	mux.Handle("/", http.FileServerFS(site))
+	mux.Handle("/", cacheControl(http.FileServerFS(site)))
 
 	if err := web.Serve(host, port, web.LogRequests(web.Gzip(mux))); err != nil {
 		slog.Error("server failed", "err", err)
 		os.Exit(1)
 	}
+}
+
+// cacheControl sets cache headers for the embedded assets: versioned URLs
+// (?v=...) are content-addressed by the ASSET_VERSION bump convention and can
+// be cached forever, the HTML shell must revalidate so a deploy is picked up
+// immediately, and anything else gets a modest TTL.
+func cacheControl(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.URL.Query().Get("v") != "":
+			w.Header().Set("Cache-Control", "public, max-age=31536000, immutable")
+		case r.URL.Path == "/" || r.URL.Path == "/index.html":
+			w.Header().Set("Cache-Control", "no-cache")
+		default:
+			w.Header().Set("Cache-Control", "public, max-age=3600")
+		}
+		next.ServeHTTP(w, r)
+	})
 }
