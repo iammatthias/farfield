@@ -4,8 +4,6 @@ import (
 	"database/sql"
 	"encoding/json"
 	"errors"
-	"fmt"
-	"time"
 
 	"github.com/iammatthias/farfield/lib/cid"
 	"github.com/iammatthias/farfield/lib/store"
@@ -40,13 +38,8 @@ const postCols = `slug, cid, body, tags, created_at, updated_at`
 
 // openDB opens the SQLite database, applies pragmas, and migrates.
 func openDB(path string) (*sql.DB, error) {
-	dsn := fmt.Sprintf(
-		"file:%s?_pragma=busy_timeout(5000)&_pragma=journal_mode(WAL)", path)
-	db, err := sql.Open("sqlite", dsn)
+	db, err := store.OpenDB(path)
 	if err != nil {
-		return nil, err
-	}
-	if err := db.Ping(); err != nil {
 		return nil, err
 	}
 	if _, err := db.Exec(schema); err != nil {
@@ -56,11 +49,11 @@ func openDB(path string) (*sql.DB, error) {
 		return nil, err
 	}
 	// Migrate pre-rename databases: the post stable key went id -> slug.
-	if err := renameColumn(db, "posts", "id", "slug"); err != nil {
+	if err := store.RenameColumn(db, "posts", "id", "slug"); err != nil {
 		return nil, err
 	}
 	// Migrate databases created before CIDs: add the column, then backfill.
-	if err := ensureColumn(db, "posts", "cid", "TEXT NOT NULL DEFAULT ''"); err != nil {
+	if err := store.EnsureColumn(db, "posts", "cid", "TEXT NOT NULL DEFAULT ''"); err != nil {
 		return nil, err
 	}
 	if err := backfillCIDs(db); err != nil {
@@ -68,40 +61,6 @@ func openDB(path string) (*sql.DB, error) {
 	}
 	return db, nil
 }
-
-// ensureColumn adds a column to a table if it is not already present.
-func ensureColumn(db *sql.DB, table, column, decl string) error {
-	var n int
-	if err := db.QueryRow(
-		`SELECT COUNT(*) FROM pragma_table_info(?) WHERE name = ?`,
-		table, column).Scan(&n); err != nil {
-		return err
-	}
-	if n > 0 {
-		return nil
-	}
-	_, err := db.Exec("ALTER TABLE " + table + " ADD COLUMN " + column + " " + decl)
-	return err
-}
-
-// renameColumn renames a table column when the old name still exists and the
-// new one does not — a one-time migration for databases predating a rename.
-func renameColumn(db *sql.DB, table, oldName, newName string) error {
-	var hasOld, hasNew int
-	if err := db.QueryRow(`SELECT
-		(SELECT COUNT(*) FROM pragma_table_info(?) WHERE name = ?),
-		(SELECT COUNT(*) FROM pragma_table_info(?) WHERE name = ?)`,
-		table, oldName, table, newName).Scan(&hasOld, &hasNew); err != nil {
-		return err
-	}
-	if hasOld == 0 || hasNew > 0 {
-		return nil
-	}
-	_, err := db.Exec("ALTER TABLE " + table + " RENAME COLUMN " + oldName + " TO " + newName)
-	return err
-}
-
-func nowRFC3339() string { return time.Now().UTC().Format(time.RFC3339) }
 
 func encodeTags(tags []string) string {
 	if tags == nil {
@@ -210,7 +169,7 @@ func insertPost(db *sql.DB, p *Post) error {
 	if p.Slug == "" {
 		p.Slug = store.ShortID()
 	}
-	p.CreatedAt = nowRFC3339()
+	p.CreatedAt = store.NowRFC3339()
 	p.UpdatedAt = p.CreatedAt
 	p.CID = postCID(p)
 	_, err := db.Exec(
@@ -225,7 +184,7 @@ func updatePost(db *sql.DB, slug string, p *Post) (bool, error) {
 	p.CID = postCID(p)
 	res, err := db.Exec(
 		`UPDATE posts SET body = ?, tags = ?, cid = ?, updated_at = ? WHERE slug = ?`,
-		p.Body, encodeTags(p.Tags), p.CID, nowRFC3339(), slug)
+		p.Body, encodeTags(p.Tags), p.CID, store.NowRFC3339(), slug)
 	if err != nil {
 		return false, err
 	}
@@ -250,7 +209,7 @@ func importPost(db *sql.DB, p *Post) error {
 		p.Slug = store.ShortID()
 	}
 	if p.CreatedAt == "" {
-		p.CreatedAt = nowRFC3339()
+		p.CreatedAt = store.NowRFC3339()
 	}
 	if p.UpdatedAt == "" {
 		p.UpdatedAt = p.CreatedAt

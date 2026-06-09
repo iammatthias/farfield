@@ -7,6 +7,8 @@ import (
 	"net/http"
 	"strings"
 	"time"
+
+	"github.com/iammatthias/farfield/lib/web"
 )
 
 // embedClient calls the blobs and content services on behalf of the editor.
@@ -32,7 +34,7 @@ func (s *Server) handleEmbedBlob(w http.ResponseWriter, r *http.Request) {
 func (s *Server) handleEmbedSeries(w http.ResponseWriter, r *http.Request) {
 	var req embedSeriesRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil || len(req.CIDs) == 0 {
-		writeError(w, http.StatusBadRequest, "a series needs at least one blob")
+		web.WriteError(w, http.StatusBadRequest, "a series needs at least one blob")
 		return
 	}
 	payload, _ := json.Marshal(map[string]string{
@@ -42,14 +44,14 @@ func (s *Server) handleEmbedSeries(w http.ResponseWriter, r *http.Request) {
 	creq, err := http.NewRequest(http.MethodPost,
 		strings.TrimRight(s.contentURL, "/")+"/api/series", bytes.NewReader(payload))
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, "could not build request")
+		web.WriteError(w, http.StatusInternalServerError, "could not build request")
 		return
 	}
 	creq.Header.Set("X-API-Key", s.contentKey)
 	creq.Header.Set("Content-Type", "application/json")
 	resp, err := embedClient.Do(creq)
 	if err != nil {
-		writeError(w, http.StatusBadGateway, "content service unreachable")
+		web.WriteError(w, http.StatusBadGateway, "content service unreachable")
 		return
 	}
 	defer resp.Body.Close()
@@ -75,24 +77,24 @@ func seriesBodyFromCIDs(cids []string) string {
 // service as raw bytes with the API key attached, and relays the response.
 func proxyBlobUpload(w http.ResponseWriter, r *http.Request, blobsURL, apiKey string) {
 	if err := r.ParseMultipartForm(64 << 20); err != nil {
-		writeError(w, http.StatusBadRequest, "invalid upload")
+		web.WriteError(w, http.StatusBadRequest, "invalid upload")
 		return
 	}
 	file, hdr, err := r.FormFile("file")
 	if err != nil {
-		writeError(w, http.StatusBadRequest, "missing file")
+		web.WriteError(w, http.StatusBadRequest, "missing file")
 		return
 	}
 	defer file.Close()
 	data, err := io.ReadAll(file)
 	if err != nil {
-		writeError(w, http.StatusBadRequest, "could not read upload")
+		web.WriteError(w, http.StatusBadRequest, "could not read upload")
 		return
 	}
 	req, err := http.NewRequest(http.MethodPost,
 		strings.TrimRight(blobsURL, "/")+"/blobs", bytes.NewReader(data))
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, "could not build request")
+		web.WriteError(w, http.StatusInternalServerError, "could not build request")
 		return
 	}
 	req.Header.Set("X-API-Key", apiKey)
@@ -101,7 +103,7 @@ func proxyBlobUpload(w http.ResponseWriter, r *http.Request, blobsURL, apiKey st
 	}
 	resp, err := embedClient.Do(req)
 	if err != nil {
-		writeError(w, http.StatusBadGateway, "blobs service unreachable")
+		web.WriteError(w, http.StatusBadGateway, "blobs service unreachable")
 		return
 	}
 	defer resp.Body.Close()
