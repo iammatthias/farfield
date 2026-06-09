@@ -129,13 +129,17 @@ func (s *Server) routes() http.Handler {
 	return cors(logRequests(mux))
 }
 
-// postFromForm reads a Post from a posted admin form.
-func postFromForm(r *http.Request) *Post {
-	_ = r.ParseForm()
+// postFromForm reads a Post from a posted admin form. A form parse failure
+// surfaces as an error so callers answer 400 instead of treating the request
+// as an empty post.
+func postFromForm(r *http.Request) (*Post, error) {
+	if err := r.ParseForm(); err != nil {
+		return nil, err
+	}
 	return &Post{
 		Body: strings.TrimSpace(r.FormValue("body")),
 		Tags: splitTags(r.FormValue("tags")),
-	}
+	}, nil
 }
 
 // ── HTML admin handlers ────────────────────────────────────────────────────
@@ -159,7 +163,11 @@ func (s *Server) handleNewPost(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleCreatePost(w http.ResponseWriter, r *http.Request) {
-	p := postFromForm(r)
+	p, err := postFromForm(r)
+	if err != nil {
+		http.Error(w, "bad form", http.StatusBadRequest)
+		return
+	}
 	if p.Body == "" {
 		s.renderPostForm(w, p, true, "/posts", "A post needs a body.")
 		return
@@ -186,7 +194,11 @@ func (s *Server) handleEditPost(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) handleUpdatePost(w http.ResponseWriter, r *http.Request) {
 	slug := r.PathValue("slug")
-	p := postFromForm(r)
+	p, err := postFromForm(r)
+	if err != nil {
+		http.Error(w, "bad form", http.StatusBadRequest)
+		return
+	}
 	if p.Body == "" {
 		p.Slug = slug
 		s.renderPostForm(w, p, false, "/posts/"+slug, "A post needs a body.")
@@ -307,6 +319,10 @@ func (s *Server) handleAPIUpdate(w http.ResponseWriter, r *http.Request) {
 	var p Post
 	if err := json.NewDecoder(r.Body).Decode(&p); err != nil {
 		writeError(w, http.StatusBadRequest, "invalid JSON")
+		return
+	}
+	if strings.TrimSpace(p.Body) == "" {
+		writeError(w, http.StatusBadRequest, "body is required")
 		return
 	}
 	ok, err := updatePost(s.db, slug, &p)
