@@ -8,22 +8,17 @@ package main
 
 import (
 	"bytes"
-	"context"
 	"embed"
 	"html/template"
-	"io"
 	"io/fs"
 	"log/slog"
-	"net"
 	"net/http"
 	"os"
-	"os/signal"
 	"strings"
-	"syscall"
-	"time"
 
 	"github.com/iammatthias/farfield/lib/store"
 	"github.com/iammatthias/farfield/lib/theme"
+	"github.com/iammatthias/farfield/lib/web"
 )
 
 //go:embed web
@@ -54,16 +49,23 @@ var docPages = []doc{
 	{"skills", "skills.html", "Skills", "Skills — Farfield Docs"},
 }
 
-// pageData is the template context for a rendered docs page.
+// pageData is the template context for a rendered docs page. AssetVer
+// fingerprints the shared theme stylesheet so it can cache as immutable.
 type pageData struct {
-	Title  string
-	Active string
-	Nav    []doc
+	Title    string
+	Active   string
+	Nav      []doc
+	AssetVer string
 }
 
 func main() {
 	_ = store.LoadEnv() // finds the root .env, wherever the app is run from
 	slog.SetDefault(slog.New(slog.NewTextHandler(os.Stderr, nil)))
+
+	// "health" probes the running server's /status for Docker healthchecks.
+	if len(os.Args) > 1 && os.Args[1] == "health" {
+		os.Exit(web.Health(store.Env("APEX_PORT", "8790")))
+	}
 
 	host := store.Env("HOST", "127.0.0.1")
 	port := store.Env("APEX_PORT", "8790")
@@ -74,27 +76,10 @@ func main() {
 		os.Exit(1)
 	}
 
-	srv := &http.Server{
-		Addr:    net.JoinHostPort(host, port),
-		Handler: logRequests(handler),
+	if err := web.Serve(host, port, web.LogRequests(web.Gzip(handler))); err != nil {
+		slog.Error("server failed", "err", err)
+		os.Exit(1)
 	}
-
-	go func() {
-		slog.Info("listening", "addr", srv.Addr)
-		if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
-			slog.Error("server failed", "err", err)
-			os.Exit(1)
-		}
-	}()
-
-	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
-	defer stop()
-	<-ctx.Done()
-
-	slog.Info("shutting down")
-	shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-	defer cancel()
-	_ = srv.Shutdown(shutdownCtx)
 }
 
 // routes builds the apex handler: docs pages rendered over the shared layout,
@@ -121,7 +106,7 @@ func routes() (http.Handler, error) {
 	render := func(w http.ResponseWriter, key string) {
 		var buf bytes.Buffer
 		if err := pages[key].ExecuteTemplate(&buf, "layout",
-			pageData{Title: titles[key], Active: key, Nav: docPages}); err != nil {
+			pageData{Title: titles[key], Active: key, Nav: docPages, AssetVer: theme.Version}); err != nil {
 			slog.Error("render doc", "key", key, "err", err)
 			http.Error(w, "internal error", http.StatusInternalServerError)
 			return
@@ -134,10 +119,10 @@ func routes() (http.Handler, error) {
 	mux := http.NewServeMux()
 
 	// Shared farfield theme at the canonical path; docs layer style.css over it.
-	mux.HandleFunc("GET /static/styles.css", func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Type", "text/css; charset=utf-8")
-		w.Header().Set("Cache-Control", "public, max-age=3600")
-		_, _ = io.WriteString(w, theme.CSS)
+	mux.Handle("GET /static/styles.css", theme.CSSHandler())
+
+	mux.HandleFunc("GET /status", func(w http.ResponseWriter, r *http.Request) {
+		web.WriteJSON(w, http.StatusOK, map[string]any{"service": "apex", "ok": true})
 	})
 
 	// Docs: /docs/ is the index; /docs/<page>.html renders a page; other
@@ -161,13 +146,4 @@ func routes() (http.Handler, error) {
 	// Landing page and nested doc assets (/docs/assets/*).
 	mux.Handle("/", files)
 	return mux, nil
-}
-
-func logRequests(next http.Handler) http.Handler {
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		start := time.Now()
-		next.ServeHTTP(w, r)
-		slog.Info("request",
-			"method", r.Method, "path", r.URL.Path, "dur", time.Since(start))
-	})
 }
