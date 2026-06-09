@@ -1,28 +1,18 @@
 package main
 
 import (
-	"bytes"
-	"context"
 	"database/sql"
 	"embed"
-	"encoding/json"
 	"fmt"
 	"html/template"
-	"io"
-	"io/fs"
 	"log/slog"
-	"net"
 	"net/http"
-	"os"
-	"os/signal"
-	"path"
 	"strconv"
-	"syscall"
 	"time"
 
-	"github.com/iammatthias/farfield/lib/cid"
 	"github.com/iammatthias/farfield/lib/store"
 	"github.com/iammatthias/farfield/lib/theme"
+	"github.com/iammatthias/farfield/lib/web"
 )
 
 //go:embed templates
@@ -38,10 +28,9 @@ const publicMaxAge = 86400
 
 // Server holds the running calendar service.
 type Server struct {
-	db        *sql.DB
-	fetcher   *fetcher
-	templates map[string]*template.Template
-	assetVer  string // content hash of the stylesheet — cache-busts the URL
+	db      *sql.DB
+	fetcher *fetcher
+	rd      *web.Renderer
 }
 
 // backfillCommand warms the NASA cache from the configured calendar start
@@ -91,40 +80,22 @@ func run(host, port string) error {
 	}
 	defer db.Close()
 
-	tmpl, err := parseTemplates()
+	tmpl, err := web.ParseTemplates(assets, calendarFuncs)
 	if err != nil {
 		return err
 	}
 
 	s := &Server{
-		db:        db,
-		fetcher:   newFetcher(store.Env("NASA_API_KEY", "DEMO_KEY")),
-		templates: tmpl,
-		assetVer:  cid.Of([]byte(theme.CSS))[:16],
+		db:      db,
+		fetcher: newFetcher(store.Env("NASA_API_KEY", "DEMO_KEY")),
+		rd:      &web.Renderer{Templates: tmpl, AssetVer: theme.Version},
 	}
 
 	// Backfill the whole calendar — Jan 1 through today — in the background so
 	// a fresh deploy is populated without blocking startup.
 	go s.backfillOnStartup()
 
-	srv := &http.Server{Addr: net.JoinHostPort(host, port), Handler: s.routes()}
-
-	go func() {
-		slog.Info("listening", "addr", srv.Addr)
-		if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
-			slog.Error("server failed", "err", err)
-			os.Exit(1)
-		}
-	}()
-
-	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
-	defer stop()
-	<-ctx.Done()
-
-	slog.Info("shutting down")
-	shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-	defer cancel()
-	return srv.Shutdown(shutdownCtx)
+	return web.Serve(host, port, s.routes())
 }
 
 func (s *Server) routes() http.Handler {
@@ -142,9 +113,12 @@ func (s *Server) routes() http.Handler {
 	mux.HandleFunc("GET /api/photos", s.handleAPIPhotos)
 
 	// Shared theme stylesheet.
-	mux.HandleFunc("GET /static/styles.css", handleCSS)
+	mux.HandleFunc("GET /static/styles.css", theme.CSSHandler())
 
-	return cors(logRequests(mux))
+	// Everything the calendar serves itself is text — HTML, JSON; the photos
+	// are hot-linked from NASA — so Gzip wraps the whole mux. The default CORS
+	// method list (GET, OPTIONS) matches this read-only API.
+	return web.CORS(web.LogRequests(web.Gzip(mux)))
 }
 
 // ── archive paging ─────────────────────────────────────────────────────────
@@ -251,7 +225,7 @@ func (s *Server) renderPhoto(w http.ResponseWriter, photo *Photo, date string, i
 	if !isToday {
 		jsonURL = "/api/photo/" + date
 	}
-	s.render(w, "photo.html", map[string]any{
+	s.rd.Render(w, "photo.html", map[string]any{
 		"Photo":      photo,
 		"Date":       date,
 		"ArchiveURL": "/archive",
@@ -275,7 +249,7 @@ func (s *Server) handleArchive(w http.ResponseWriter, r *http.Request) {
 	if res.HasNext {
 		nextURL = archiveURL(res.Page + 1)
 	}
-	s.render(w, "archive.html", map[string]any{
+	s.rd.Render(w, "archive.html", map[string]any{
 		"Photos":  res.Photos,
 		"Page":    res.Page,
 		"Pages":   res.Pages,
@@ -291,10 +265,10 @@ func (s *Server) handleArchive(w http.ResponseWriter, r *http.Request) {
 func (s *Server) handleStatus(w http.ResponseWriter, r *http.Request) {
 	nasa, err := countPhotos(s.db, sourceNASA)
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, "could not read index")
+		web.WriteError(w, http.StatusInternalServerError, "could not read index")
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{
+	web.WriteJSON(w, http.StatusOK, map[string]any{
 		"service": "calendar", "ok": true, "nasa": nasa,
 	})
 }
@@ -302,7 +276,7 @@ func (s *Server) handleStatus(w http.ResponseWriter, r *http.Request) {
 func (s *Server) handleAPIToday(w http.ResponseWriter, r *http.Request) {
 	photo, _, err := s.todayPhoto()
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, "could not load photo")
+		web.WriteError(w, http.StatusInternalServerError, "could not load photo")
 		return
 	}
 	s.writePhoto(w, r, photo)
@@ -311,12 +285,12 @@ func (s *Server) handleAPIToday(w http.ResponseWriter, r *http.Request) {
 func (s *Server) handleAPIDay(w http.ResponseWriter, r *http.Request) {
 	date := r.PathValue("date")
 	if !validDate(date) {
-		writeError(w, http.StatusBadRequest, "malformed date — expected YYYY-MM-DD")
+		web.WriteError(w, http.StatusBadRequest, "malformed date — expected YYYY-MM-DD")
 		return
 	}
 	photo, err := s.photoForDate(date)
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, "could not load photo")
+		web.WriteError(w, http.StatusInternalServerError, "could not load photo")
 		return
 	}
 	s.writePhoto(w, r, photo)
@@ -325,11 +299,11 @@ func (s *Server) handleAPIDay(w http.ResponseWriter, r *http.Request) {
 func (s *Server) handleAPIPhotos(w http.ResponseWriter, r *http.Request) {
 	res, err := s.archive(pageParam(r))
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, "could not list photos")
+		web.WriteError(w, http.StatusInternalServerError, "could not list photos")
 		return
 	}
 	cacheable(w)
-	writeJSON(w, http.StatusOK, map[string]any{
+	web.WriteJSON(w, http.StatusOK, map[string]any{
 		"source": sourceNASA,
 		"page":   res.Page,
 		"pages":  res.Pages,
@@ -344,18 +318,17 @@ func (s *Server) handleAPIPhotos(w http.ResponseWriter, r *http.Request) {
 func (s *Server) writePhoto(w http.ResponseWriter, r *http.Request, photo *Photo) {
 	cacheable(w)
 	if photo == nil {
-		writeError(w, http.StatusNotFound, "no photo for that date")
+		web.WriteError(w, http.StatusNotFound, "no photo for that date")
 		return
 	}
 	prev, _ := neighborDate(s.db, sourceNASA, photo.Date, true)
 	next, _ := neighborDate(s.db, sourceNASA, photo.Date, false)
-	etag := `"` + photo.CID + `"`
-	w.Header().Set("ETag", etag)
-	if r.Header.Get("If-None-Match") == etag {
+	w.Header().Set("ETag", `"`+photo.CID+`"`)
+	if web.ETagMatch(r, photo.CID) {
 		w.WriteHeader(http.StatusNotModified)
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{
+	web.WriteJSON(w, http.StatusOK, map[string]any{
 		"source": sourceNASA,
 		"photo":  photo,
 		"prev":   prev,
@@ -391,93 +364,12 @@ func cacheable(w http.ResponseWriter) {
 	w.Header().Set("Cache-Control", fmt.Sprintf("public, max-age=%d", publicMaxAge))
 }
 
-func handleCSS(w http.ResponseWriter, r *http.Request) {
-	w.Header().Set("Content-Type", "text/css; charset=utf-8")
-	w.Header().Set("Cache-Control", "public, max-age=3600")
-	_, _ = io.WriteString(w, theme.CSS)
-}
-
 // calendarFuncs are the template helpers. mediaKind lets the photo template
 // branch on whether a video URL is a directly-playable file versus an embed.
 var calendarFuncs = template.FuncMap{"mediaKind": mediaKind}
-
-func parseTemplates() (map[string]*template.Template, error) {
-	pages, err := fs.Glob(assets, "templates/*.html")
-	if err != nil {
-		return nil, err
-	}
-	out := make(map[string]*template.Template)
-	for _, page := range pages {
-		name := path.Base(page)
-		if name == "base.html" {
-			continue
-		}
-		t, err := template.New("base.html").Funcs(calendarFuncs).ParseFS(
-			assets, "templates/base.html", page)
-		if err != nil {
-			return nil, err
-		}
-		out[name] = t
-	}
-	return out, nil
-}
-
-// render writes a page through base.html, buffering first so a template error
-// never produces a half-written response.
-func (s *Server) render(w http.ResponseWriter, page string, data map[string]any) {
-	t, ok := s.templates[page]
-	if !ok {
-		slog.Error("unknown template", "page", page)
-		http.Error(w, "internal error", http.StatusInternalServerError)
-		return
-	}
-	data["AssetVer"] = s.assetVer
-	var buf bytes.Buffer
-	if err := t.ExecuteTemplate(&buf, "base", data); err != nil {
-		slog.Error("render failed", "page", page, "err", err)
-		http.Error(w, "internal error", http.StatusInternalServerError)
-		return
-	}
-	w.Header().Set("Content-Type", "text/html; charset=utf-8")
-	_, _ = buf.WriteTo(w)
-}
 
 // fail logs an internal error and returns a 500.
 func (s *Server) fail(w http.ResponseWriter, what string, err error) {
 	slog.Error(what, "err", err)
 	http.Error(w, "internal error", http.StatusInternalServerError)
-}
-
-func writeJSON(w http.ResponseWriter, status int, v any) {
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(status)
-	_ = json.NewEncoder(w).Encode(v)
-}
-
-func writeError(w http.ResponseWriter, status int, msg string) {
-	writeJSON(w, status, map[string]string{"error": msg})
-}
-
-// cors adds permissive CORS headers so a browser on another origin (the
-// website) can read the public API, and answers preflight requests.
-func cors(next http.Handler) http.Handler {
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Access-Control-Allow-Origin", "*")
-		w.Header().Set("Access-Control-Allow-Methods", "GET, OPTIONS")
-		w.Header().Set("Access-Control-Allow-Headers", "Content-Type, If-None-Match")
-		if r.Method == http.MethodOptions {
-			w.WriteHeader(http.StatusNoContent)
-			return
-		}
-		next.ServeHTTP(w, r)
-	})
-}
-
-func logRequests(next http.Handler) http.Handler {
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		start := time.Now()
-		next.ServeHTTP(w, r)
-		slog.Info("request",
-			"method", r.Method, "path", r.URL.Path, "dur", time.Since(start))
-	})
 }

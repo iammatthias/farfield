@@ -8,6 +8,8 @@ import (
 	"net/url"
 	"strings"
 	"time"
+
+	"github.com/iammatthias/farfield/lib/store"
 )
 
 // calendarStart is the first day Farfield's public calendar records. NASA APOD
@@ -59,7 +61,7 @@ func apodToPhoto(a apodResponse) Photo {
 		MediaType:   media,
 		Credit:      strings.TrimSpace(a.Copyright),
 		SourceURL:   apodPageURL(a.Date),
-		FetchedAt:   nowRFC3339(),
+		FetchedAt:   store.NowRFC3339(),
 	}
 	return p
 }

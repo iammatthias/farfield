@@ -15,6 +15,7 @@ import (
 	"os"
 
 	"github.com/iammatthias/farfield/lib/store"
+	"github.com/iammatthias/farfield/lib/web"
 )
 
 func main() {
@@ -36,10 +37,13 @@ func main() {
 				os.Exit(1)
 			}
 			return
+		case "health":
+			// Probes /status — backs the Docker healthcheck (distroless: no curl).
+			os.Exit(web.Health(store.Env("CALENDAR_PORT", "8792")))
 		case "serve":
 			// explicit serve is accepted; falling through starts the HTTP service
 		default:
-			_, _ = fmt.Fprintf(os.Stderr, "usage: calendar [serve|backfill [start YYYY-MM-DD] [end YYYY-MM-DD]]\n")
+			_, _ = fmt.Fprintf(os.Stderr, "usage: calendar [serve|health|backfill [start YYYY-MM-DD] [end YYYY-MM-DD]]\n")
 			os.Exit(2)
 		}
 	}

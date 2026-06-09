@@ -3,6 +3,8 @@ package main
 import (
 	"path/filepath"
 	"testing"
+
+	"github.com/iammatthias/farfield/lib/store"
 )
 
 func TestValidDateAndRange(t *testing.T) {
@@ -142,7 +144,7 @@ func TestPhotoCID(t *testing.T) {
 	// the key, fetch time, and placeholder flag are excluded from the CID
 	c := a
 	c.Date, c.Source = "2024-01-01", sourceNASA
-	c.FetchedAt, c.Placeholder = nowRFC3339(), true
+	c.FetchedAt, c.Placeholder = store.NowRFC3339(), true
 	if photoCID(&a) != photoCID(&c) {
 		t.Error("non-content fields must not affect the CID")
 	}

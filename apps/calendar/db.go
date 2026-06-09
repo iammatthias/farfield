@@ -3,10 +3,9 @@ package main
 import (
 	"database/sql"
 	"errors"
-	"fmt"
-	"time"
 
 	"github.com/iammatthias/farfield/lib/cid"
+	"github.com/iammatthias/farfield/lib/store"
 	_ "modernc.org/sqlite" // registers the "sqlite" driver
 )
 
@@ -58,13 +57,8 @@ const photoCols = `source, date, cid, title, explanation, image_url, thumb_url, 
 // The migration sequence is idempotent — it brings any database, fresh or old,
 // to the current schema on every startup. See the self-migrating-sqlite skill.
 func openDB(path string) (*sql.DB, error) {
-	dsn := fmt.Sprintf(
-		"file:%s?_pragma=busy_timeout(5000)&_pragma=journal_mode(WAL)", path)
-	db, err := sql.Open("sqlite", dsn)
+	db, err := store.OpenDB(path)
 	if err != nil {
-		return nil, err
-	}
-	if err := db.Ping(); err != nil {
 		return nil, err
 	}
 	// 1. Current schema — builds fresh databases, no-ops on existing ones.
@@ -81,7 +75,7 @@ func openDB(path string) (*sql.DB, error) {
 		{"source_url", "TEXT NOT NULL DEFAULT ''"},
 		{"placeholder", "INTEGER NOT NULL DEFAULT 0"},
 	} {
-		if err := ensureColumn(db, "photos", c.col, c.decl); err != nil {
+		if err := store.EnsureColumn(db, "photos", c.col, c.decl); err != nil {
 			return nil, err
 		}
 	}
@@ -102,24 +96,6 @@ func pruneBeforeCalendarStart(db *sql.DB) error {
 	_, err := db.Exec(`DELETE FROM photos WHERE source = ? AND date < ?`, sourceNASA, calendarStart)
 	return err
 }
-
-// ensureColumn adds a column to a table if it is not already present. The
-// table/column/decl are code constants, so the built DDL is safe.
-func ensureColumn(db *sql.DB, table, column, decl string) error {
-	var n int
-	if err := db.QueryRow(
-		`SELECT COUNT(*) FROM pragma_table_info(?) WHERE name = ?`,
-		table, column).Scan(&n); err != nil {
-		return err
-	}
-	if n > 0 {
-		return nil // already there — nothing to do
-	}
-	_, err := db.Exec("ALTER TABLE " + table + " ADD COLUMN " + column + " " + decl)
-	return err
-}
-
-func nowRFC3339() string { return time.Now().UTC().Format(time.RFC3339) }
 
 // photoCID is the content identifier of a photo — a CIDv1 over its content.
 // The key (source, date), fetch time, and placeholder flag are excluded so the
@@ -198,7 +174,7 @@ func upsertPhoto(db *sql.DB, p *Photo) error {
 		p.MediaType = "image"
 	}
 	if p.FetchedAt == "" {
-		p.FetchedAt = nowRFC3339()
+		p.FetchedAt = store.NowRFC3339()
 	}
 	p.CID = photoCID(p)
 	placeholder := 0
