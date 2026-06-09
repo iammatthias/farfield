@@ -23,7 +23,7 @@ const fetchTimeout = 10 * time.Second
 
 // maxFetchBytes caps the bytes we read from a target page. The interesting
 // metadata lives in the first few KB of <head>; reading more is wasted I/O.
-const maxFetchBytes = 512 * 1024
+const maxFetchBytes = 128 * 1024
 
 // metaResult is the bag of fields extracted from an HTML page.
 type metaResult struct {
@@ -70,6 +70,14 @@ func fetchMetadata(ctx context.Context, client *http.Client, rawURL string) (met
 
 	if resp.StatusCode < 200 || resp.StatusCode >= 400 {
 		return metaResult{}, fmt.Errorf("HTTP %d", resp.StatusCode)
+	}
+
+	// Only HTML carries the metadata we scan for — bail before reading the
+	// body when the server declares something else (a PDF, an image, a zip).
+	// A missing Content-Type is given the benefit of the doubt.
+	if ct := resp.Header.Get("Content-Type"); ct != "" &&
+		!strings.Contains(strings.ToLower(ct), "html") {
+		return metaResult{}, fmt.Errorf("not HTML: Content-Type %q", ct)
 	}
 
 	body, err := io.ReadAll(io.LimitReader(resp.Body, maxFetchBytes))

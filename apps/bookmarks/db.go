@@ -55,8 +55,8 @@ CREATE TABLE IF NOT EXISTS bookmarks (
 	created_at      TEXT NOT NULL,
 	updated_at      TEXT NOT NULL
 );
-CREATE INDEX IF NOT EXISTS bookmarks_by_public_category
-	ON bookmarks (public, category, created_at DESC);`
+CREATE INDEX IF NOT EXISTS bookmarks_public_category_nocase
+	ON bookmarks (public, category COLLATE NOCASE, created_at DESC, id DESC);`
 
 // bookmarkCols is the column list, in Bookmark-field order, shared by queries.
 const bookmarkCols = `id, url, title, description, category, public, admin_notes, ` +
@@ -70,6 +70,13 @@ const bookmarkCols = `id, url, title, description, category, public, admin_notes
 func openDB(path string) (*sql.DB, error) {
 	db, err := store.OpenDB(path)
 	if err != nil {
+		return nil, err
+	}
+	// The original index collated category case-sensitively, so the public
+	// listing's ORDER BY category COLLATE NOCASE could not use it and SQLite
+	// fell back to a sort. Drop it; the schema above creates the NOCASE
+	// replacement. Both statements are idempotent.
+	if _, err := db.Exec(`DROP INDEX IF EXISTS bookmarks_by_public_category`); err != nil {
 		return nil, err
 	}
 	if _, err := db.Exec(schema); err != nil {
@@ -221,6 +228,28 @@ func listPublicBookmarks(db *sql.DB) ([]Bookmark, error) {
 	return out, rows.Err()
 }
 
+// countPublicBookmarks returns how many public bookmarks exist — an indexed
+// count, so /status never loads and scans full rows just to measure len().
+func countPublicBookmarks(db *sql.DB) (int, error) {
+	var n int
+	err := db.QueryRow(
+		`SELECT COUNT(*) FROM bookmarks WHERE public = 1`).Scan(&n)
+	return n, err
+}
+
+// publicBookmarksVersion returns a cheap fingerprint of the public bookmark
+// set — row count plus the newest updated_at. Any insert, delete, or edit
+// moves it, so it serves as an ETag source that costs one indexed aggregate
+// instead of a full scan and marshal. (Admin-notes-only edits bump it too —
+// a spurious cache miss, never a stale hit.)
+func publicBookmarksVersion(db *sql.DB) (string, error) {
+	var v string
+	err := db.QueryRow(
+		`SELECT COUNT(*) || '-' || COALESCE(MAX(updated_at), '') ` +
+			`FROM bookmarks WHERE public = 1`).Scan(&v)
+	return v, err
+}
+
 // getBookmark returns a bookmark by id, or (nil, nil) if absent.
 func getBookmark(db *sql.DB, id string) (*Bookmark, error) {
 	b, err := scanBookmark(db.QueryRow(
@@ -284,6 +313,41 @@ func updateBookmark(db *sql.DB, id string, b *Bookmark) (bool, error) {
 	return true, nil
 }
 
+// updateBookmarkMetadata merges fetched page metadata into a stored bookmark.
+// It re-reads the row inside a transaction and writes back only the fetched
+// fields (plus title/description fill-if-empty via applyMetadata, and the
+// recomputed CID) — never url, category, public, or admin notes — so a
+// background fetch that races an admin edit cannot clobber it with a stale
+// full-record write. A row deleted in the meantime is a silent no-op.
+func updateBookmarkMetadata(db *sql.DB, id string, m metaResult) error {
+	tx, err := db.Begin()
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	b, err := scanBookmark(tx.QueryRow(
+		`SELECT `+bookmarkCols+` FROM bookmarks WHERE id = ?`, id))
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil // deleted while the fetch was in flight
+	}
+	if err != nil {
+		return err
+	}
+	applyMetadata(b, m)
+	b.UpdatedAt = store.NowRFC3339()
+	b.CID = bookmarkCID(b)
+	if _, err := tx.Exec(
+		`UPDATE bookmarks SET title = ?, description = ?, og_title = ?,
+			og_description = ?, og_image = ?, og_site_name = ?, og_type = ?,
+			meta_author = ?, favicon = ?, cid = ?, updated_at = ? WHERE id = ?`,
+		b.Title, b.Description, b.OGTitle, b.OGDescription, b.OGImage,
+		b.OGSiteName, b.OGType, b.MetaAuthor, b.Favicon, b.CID, b.UpdatedAt,
+		id); err != nil {
+		return err
+	}
+	return tx.Commit()
+}
+
 // deleteBookmark removes a bookmark by id.
 func deleteBookmark(db *sql.DB, id string) (bool, error) {
 	res, err := db.Exec(`DELETE FROM bookmarks WHERE id = ?`, id)
@@ -305,50 +369,27 @@ type CategoryGroup struct {
 // under the label "Uncategorized."
 func groupByCategory(bs []Bookmark) []CategoryGroup {
 	const empty = "Uncategorized"
-	order := []string{}
+	out := []CategoryGroup{}
 	idx := map[string]int{}
+	var uncategorized []Bookmark
 	for _, b := range bs {
 		name := b.Category
 		if strings.TrimSpace(name) == "" {
-			name = empty
-		}
-		if _, ok := idx[name]; !ok {
-			idx[name] = len(order)
-			order = append(order, name)
-		}
-		i := idx[name]
-		_ = i
-	}
-	// Move the empty bucket to the end if present.
-	out := make([]CategoryGroup, 0, len(order))
-	for _, name := range order {
-		if name == empty {
+			// Empty categories sort first in the SQL ordering but render
+			// last — hold them aside and append the bucket at the end.
+			uncategorized = append(uncategorized, b)
 			continue
 		}
-		out = append(out, CategoryGroup{Name: name})
-	}
-	hasEmpty := false
-	for _, name := range order {
-		if name == empty {
-			hasEmpty = true
-			break
+		i, ok := idx[name]
+		if !ok {
+			i = len(out)
+			idx[name] = i
+			out = append(out, CategoryGroup{Name: name})
 		}
-	}
-	if hasEmpty {
-		out = append(out, CategoryGroup{Name: empty})
-	}
-	// Refill in a single pass keyed by name.
-	pos := map[string]int{}
-	for i, g := range out {
-		pos[g.Name] = i
-	}
-	for _, b := range bs {
-		name := b.Category
-		if strings.TrimSpace(name) == "" {
-			name = empty
-		}
-		i := pos[name]
 		out[i].Bookmarks = append(out[i].Bookmarks, b)
+	}
+	if len(uncategorized) > 0 {
+		out = append(out, CategoryGroup{Name: empty, Bookmarks: uncategorized})
 	}
 	return out
 }

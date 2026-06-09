@@ -132,11 +132,11 @@ func (s *Server) handleCreate(w http.ResponseWriter, r *http.Request) {
 		s.renderForm(w, b, true, "/bookmarks", "URL is malformed.")
 		return
 	}
-	s.fetchAndApply(r.Context(), b)
 	if err := insertBookmark(s.db, b); err != nil {
 		s.fail(w, "create bookmark", err)
 		return
 	}
+	s.fetchInBackground(*b)
 	http.Redirect(w, r, "/", http.StatusSeeOther)
 }
 
@@ -235,6 +235,29 @@ func (s *Server) fetchAndApply(ctx context.Context, b *Bookmark) {
 	applyMetadata(b, meta)
 }
 
+// fetchInBackground fetches metadata for a just-saved bookmark in a goroutine,
+// so the create path responds immediately instead of blocking on a remote GET
+// for up to fetchTimeout (the iOS Shortcut share path felt every second of
+// that). b is a copy — the handler's *Bookmark is never touched after the
+// response, so there is no data race. When the fetch lands, only the metadata
+// fields are merged into the stored row by ID (see updateBookmarkMetadata), so
+// an admin edit that raced the fetch is never clobbered. Failures are logged
+// and the bookmark simply keeps its bare URL.
+func (s *Server) fetchInBackground(b Bookmark) {
+	go func() {
+		ctx, cancel := context.WithTimeout(context.Background(), fetchTimeout)
+		defer cancel()
+		meta, err := fetchMetadata(ctx, s.http, b.URL)
+		if err != nil {
+			slog.Warn("background metadata fetch failed", "id", b.ID, "url", b.URL, "err", err)
+			return
+		}
+		if err := updateBookmarkMetadata(s.db, b.ID, meta); err != nil {
+			slog.Warn("could not store fetched metadata", "id", b.ID, "err", err)
+		}
+	}()
+}
+
 // bookmarkFromForm reads a Bookmark from a posted admin form. All trimming
 // happens here so handlers see consistently shaped values.
 func bookmarkFromForm(r *http.Request) *Bookmark {
@@ -258,7 +281,7 @@ func (s *Server) handleLoginForm(w http.ResponseWriter, r *http.Request) {
 // ── public JSON read API ───────────────────────────────────────────────────
 
 func (s *Server) handleStatus(w http.ResponseWriter, r *http.Request) {
-	bs, err := listPublicBookmarks(s.db)
+	n, err := countPublicBookmarks(s.db)
 	if err != nil {
 		web.WriteError(w, http.StatusInternalServerError, "could not read database")
 		return
@@ -266,24 +289,51 @@ func (s *Server) handleStatus(w http.ResponseWriter, r *http.Request) {
 	web.WriteJSON(w, http.StatusOK, map[string]any{
 		"service":   "bookmarks",
 		"ok":        true,
-		"bookmarks": len(bs),
+		"bookmarks": n,
 	})
 }
 
+// listETag computes the conditional-GET validator for a public list endpoint
+// from the cheap COUNT/MAX(updated_at) version, salted per endpoint so the
+// two list resources never share a tag. Returns ok=false (and writes the
+// error) when the version query fails. When the client's If-None-Match
+// matches, the 304 is written here and ok is false — the caller is done. On
+// ok=true the ETag and Cache-Control headers are already set; the caller
+// scans, marshals once, and writes the bytes.
+func (s *Server) listETag(w http.ResponseWriter, r *http.Request, salt string) bool {
+	ver, err := publicBookmarksVersion(s.db)
+	if err != nil {
+		web.WriteError(w, http.StatusInternalServerError, "could not read database")
+		return false
+	}
+	etag := cid.Of([]byte(salt + ":" + ver))
+	w.Header().Set("ETag", `"`+etag+`"`)
+	w.Header().Set("Cache-Control", "no-cache")
+	if web.ETagMatch(r, etag) {
+		w.WriteHeader(http.StatusNotModified)
+		return false
+	}
+	return true
+}
+
 func (s *Server) handleAPIList(w http.ResponseWriter, r *http.Request) {
+	// Answer 304 from the cheap version probe before scanning any rows.
+	if !s.listETag(w, r, "bookmarks") {
+		return
+	}
 	bs, err := listPublicBookmarks(s.db)
 	if err != nil {
 		web.WriteError(w, http.StatusInternalServerError, "could not list bookmarks")
 		return
 	}
-	public := publicList(bs)
-	etag := `"` + cid.OfValue(public) + `"`
-	w.Header().Set("ETag", etag)
-	if r.Header.Get("If-None-Match") == etag {
-		w.WriteHeader(http.StatusNotModified)
+	body, err := json.Marshal(map[string]any{"bookmarks": publicList(bs)})
+	if err != nil {
+		web.WriteError(w, http.StatusInternalServerError, "could not encode bookmarks")
 		return
 	}
-	web.WriteJSON(w, http.StatusOK, map[string]any{"bookmarks": public})
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusOK)
+	_, _ = w.Write(body)
 }
 
 func (s *Server) handleAPIGet(w http.ResponseWriter, r *http.Request) {
@@ -304,6 +354,10 @@ func (s *Server) handleAPIGet(w http.ResponseWriter, r *http.Request) {
 // last). Useful to clients that want to render a sectioned list without
 // re-sorting client-side.
 func (s *Server) handleAPICategories(w http.ResponseWriter, r *http.Request) {
+	// Answer 304 from the cheap version probe before scanning any rows.
+	if !s.listETag(w, r, "categories") {
+		return
+	}
 	bs, err := listPublicBookmarks(s.db)
 	if err != nil {
 		web.WriteError(w, http.StatusInternalServerError, "could not list bookmarks")
@@ -318,13 +372,14 @@ func (s *Server) handleAPICategories(w http.ResponseWriter, r *http.Request) {
 	for _, g := range groups {
 		out = append(out, group{Name: g.Name, Bookmarks: g.Bookmarks})
 	}
-	etag := `"` + cid.OfValue(out) + `"`
-	w.Header().Set("ETag", etag)
-	if r.Header.Get("If-None-Match") == etag {
-		w.WriteHeader(http.StatusNotModified)
+	body, err := json.Marshal(map[string]any{"categories": out})
+	if err != nil {
+		web.WriteError(w, http.StatusInternalServerError, "could not encode categories")
 		return
 	}
-	web.WriteJSON(w, http.StatusOK, map[string]any{"categories": out})
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusOK)
+	_, _ = w.Write(body)
 }
 
 // ── API-key-gated write API ────────────────────────────────────────────────
@@ -340,11 +395,15 @@ func (s *Server) handleAPICreate(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	b.ID = "" // server-assigned
-	s.fetchAndApply(r.Context(), &b)
 	if err := insertBookmark(s.db, &b); err != nil {
 		web.WriteError(w, http.StatusInternalServerError, "could not create bookmark")
 		return
 	}
+	// Metadata is fetched after the response, so the 201 returns the bare
+	// record without OG fields — the trade-off for an instant save (the iOS
+	// Shortcut path used to block on a remote GET for up to 10s). Clients
+	// that need the enriched record re-GET it by ID once the fetch lands.
+	s.fetchInBackground(b)
 	web.WriteJSON(w, http.StatusCreated, &b)
 }
 
