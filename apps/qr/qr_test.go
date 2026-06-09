@@ -31,20 +31,21 @@ func newTestDB(t *testing.T) *sql.DB {
 func newTestServer(t *testing.T) *Server {
 	t.Helper()
 	db := newTestDB(t)
-	tmpl, err := web.ParseTemplates(assets, templateFuncs())
-	if err != nil {
-		t.Fatalf("ParseTemplates: %v", err)
-	}
-	return &Server{
+	s := &Server{
 		db: db,
 		auth: &web.Auth{
 			DB:       db,
 			Password: "secret",
 			APIKey:   "k1",
 		},
-		rd:        &web.Renderer{Templates: tmpl, AssetVer: "test"},
 		publicURL: "https://qr.test",
 	}
+	tmpl, err := web.ParseTemplates(assets, s.templateFuncs())
+	if err != nil {
+		t.Fatalf("ParseTemplates: %v", err)
+	}
+	s.rd = &web.Renderer{Templates: tmpl, AssetVer: "test"}
+	return s
 }
 
 func noRedirectClient() *http.Client {

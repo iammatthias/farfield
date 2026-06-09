@@ -254,6 +254,16 @@ func listPublicCodes(db *sql.DB) ([]Code, error) {
 	return out, rows.Err()
 }
 
+// countPublicCodes returns how many codes are public AND enabled — a pure
+// index scan over codes_by_public_enabled, with no row decode. Used by
+// /status, which only needs the count.
+func countPublicCodes(db *sql.DB) (int, error) {
+	var n int
+	err := db.QueryRow(
+		`SELECT COUNT(*) FROM codes WHERE public = 1 AND enabled = 1`).Scan(&n)
+	return n, err
+}
+
 func deleteCode(db *sql.DB, id string) (bool, error) {
 	res, err := db.Exec(`DELETE FROM codes WHERE id = ?`, id)
 	if err != nil {

@@ -496,9 +496,12 @@ func rsGenerator(n int) []byte {
 	return g
 }
 
-// rsEncode returns the n EC codewords for data using polynomial division.
-func rsEncode(data []byte, n int) []byte {
-	gen := rsGenerator(n)
+// rsEncode returns the EC codewords for data using polynomial division by
+// gen, a generator polynomial from rsGenerator. The caller computes gen once
+// and reuses it across blocks — every block in a symbol shares the same EC
+// codeword count.
+func rsEncode(data []byte, gen []byte) []byte {
+	n := len(gen) - 1
 	// result starts as data shifted left by n zeros
 	buf := make([]byte, len(data)+n)
 	copy(buf, data)
@@ -520,6 +523,9 @@ func rsEncode(data []byte, n int) []byte {
 // followed by the remainder zero bits (added by the matrix placer).
 func buildCodewords(data []byte, ec ECLevel, version int) []byte {
 	info := versionTable[version-1][ec]
+	// Every block shares ecPerBlock, so the generator polynomial is built
+	// once here instead of per block inside rsEncode.
+	gen := rsGenerator(info.ecPerBlock)
 	// split data into blocks per the spec
 	dataBlocks := make([][]byte, 0)
 	ecBlocks := make([][]byte, 0)
@@ -529,7 +535,7 @@ func buildCodewords(data []byte, ec ECLevel, version int) []byte {
 			db := data[i : i+bs.dataPerBlock]
 			i += bs.dataPerBlock
 			dataBlocks = append(dataBlocks, db)
-			ecBlocks = append(ecBlocks, rsEncode(db, info.ecPerBlock))
+			ecBlocks = append(ecBlocks, rsEncode(db, gen))
 		}
 	}
 	// interleave data by column
@@ -578,10 +584,6 @@ func newMatrix(size int) *matrix {
 
 func (m *matrix) set(x, y int, v byte) {
 	m.mod[y][x] = v
-}
-
-func (m *matrix) get(x, y int) byte {
-	return m.mod[y][x]
 }
 
 func (m *matrix) reserve(x, y int) {
@@ -1010,7 +1012,6 @@ func Encode(payload []byte, ec ECLevel) ([][]byte, int, error) {
 	m.placeData(codewords)
 
 	// 4. Try every mask, score, pick the best.
-	bestMask := 0
 	bestPen := -1
 	var bestMod [][]byte
 	for mk := 0; mk < 8; mk++ {
@@ -1022,7 +1023,6 @@ func Encode(payload []byte, ec ECLevel) ([][]byte, int, error) {
 		p := trial.penalty()
 		if bestPen < 0 || p < bestPen {
 			bestPen = p
-			bestMask = mk
 			bestMod = make([][]byte, size)
 			for i := range trial.mod {
 				bestMod[i] = make([]byte, size)
@@ -1030,7 +1030,6 @@ func Encode(payload []byte, ec ECLevel) ([][]byte, int, error) {
 			}
 		}
 	}
-	_ = bestMask
 	return bestMod, version, nil
 }
 
@@ -1042,20 +1041,29 @@ func copyMatrix(dst, src *matrix) {
 }
 
 // RenderSVG converts a QR module grid to a self-contained SVG string. A
-// 4-module quiet zone is included, per the spec.
+// 4-module quiet zone is included, per the spec. Horizontal runs of dark
+// modules merge into a single path segment each — roughly 4x smaller output
+// than one op per module, and deterministic for a given grid.
 func RenderSVG(mod [][]byte) string {
 	n := len(mod)
 	const quiet = 4
 	full := n + quiet*2
 	var b strings.Builder
-	fmt.Fprintf(&b, `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 %d %d" shape-rendering="crispEdges">`, full, full)
+	fmt.Fprintf(&b, `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 %d %d" shape-rendering="crispEdges" role="img" aria-label="QR code">`, full, full)
 	fmt.Fprintf(&b, `<rect width="%d" height="%d" fill="#fff"/>`, full, full)
 	b.WriteString(`<path fill="#0a0a0a" d="`)
 	for y := 0; y < n; y++ {
-		for x := 0; x < n; x++ {
-			if mod[y][x] == 1 {
-				fmt.Fprintf(&b, "M%d %dh1v1h-1z", x+quiet, y+quiet)
+		for x := 0; x < n; {
+			if mod[y][x] != 1 {
+				x++
+				continue
 			}
+			x0 := x
+			for x < n && mod[y][x] == 1 {
+				x++
+			}
+			run := x - x0
+			fmt.Fprintf(&b, "M%d %dh%dv1h-%dz", x0+quiet, y+quiet, run, run)
 		}
 	}
 	b.WriteString(`"/></svg>`)

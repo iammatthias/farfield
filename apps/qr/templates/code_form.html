@@ -38,12 +38,12 @@
 
     <div class="field check">
       <input type="checkbox" id="public" name="public"{{if .Code.Public}} checked{{end}}>
-      <label for="public" style="font:inherit;text-transform:none;letter-spacing:normal;opacity:1;margin:0">Public — expose the QR image and JSON record</label>
+      <label for="public">Public — expose the QR image and JSON record</label>
     </div>
 
     <div class="field check">
       <input type="checkbox" id="enabled" name="enabled"{{if .Code.Enabled}} checked{{end}}>
-      <label for="enabled" style="font:inherit;text-transform:none;letter-spacing:normal;opacity:1;margin:0">Enabled — proxy redirects and public images resolve. Disable to take a live QR offline without deleting it.</label>
+      <label for="enabled">Enabled — proxy redirects and public images resolve. Disable to take a live QR offline without deleting it.</label>
     </div>
 
     <div class="field">
@@ -55,7 +55,7 @@
     {{if not .IsNew}}
       <section class="qr-panel">
         <figure>
-          {{qrFor .Code .PublicURL}}
+          {{qrFor .Code}}
           <figcaption>Preview · {{.Code.Mode}} mode · EC {{.Code.EC}}</figcaption>
         </figure>
         <div class="qr-meta">

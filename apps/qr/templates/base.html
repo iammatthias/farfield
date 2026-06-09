@@ -75,6 +75,19 @@
       font: 0.78rem/1.3 var(--font-mono);
     }
     .endpoints code { display: inline-block; padding: 0.1em 0.35em; word-break: break-all; }
+
+    /* Checkbox rows: the label is body copy, not a field caption. */
+    .field.check label {
+      font: inherit;
+      text-transform: none;
+      letter-spacing: normal;
+      opacity: 1;
+      margin: 0;
+    }
+
+    @media (max-width: 40rem) {
+      .qr-panel { grid-template-columns: 1fr; }
+    }
   </style>
 </head>
 <body>

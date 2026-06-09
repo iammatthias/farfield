@@ -10,6 +10,7 @@ import (
 	"net"
 	"net/http"
 	"strings"
+	"sync"
 
 	"github.com/iammatthias/farfield/lib/cid"
 	"github.com/iammatthias/farfield/lib/store"
@@ -26,7 +27,18 @@ type Server struct {
 	auth      *web.Auth
 	rd        *web.Renderer
 	publicURL string // base URL for proxy QR targets, e.g. https://qr.farfield.systems
+
+	// svgCache memoizes rendered SVGs. Encoding is a pure function of
+	// (payload, EC) and the CID moves whenever either input changes, so a
+	// CID-keyed entry never goes stale — edits simply miss into a new key.
+	mu       sync.RWMutex
+	svgCache map[string]string
 }
+
+// maxSVGCache bounds the memo map. Stale CIDs accumulate as codes are
+// edited; past the cap the map is reset rather than evicted piecemeal —
+// the next requests simply re-encode.
+const maxSVGCache = 1024
 
 // run wires up dependencies and serves until interrupted.
 func run(host, port string) error {
@@ -39,11 +51,6 @@ func run(host, port string) error {
 		slog.Warn("could not prune sessions", "err", err)
 	}
 
-	tmpl, err := web.ParseTemplates(assets, templateFuncs())
-	if err != nil {
-		return err
-	}
-
 	s := &Server{
 		db: db,
 		auth: &web.Auth{
@@ -52,9 +59,16 @@ func run(host, port string) error {
 			APIKey:       store.Env("QR_API_KEY", ""),
 			CookieSecure: store.Env("COOKIE_SECURE", "false") == "true",
 		},
-		rd:        &web.Renderer{Templates: tmpl, AssetVer: theme.Version},
 		publicURL: strings.TrimRight(store.Env("QR_PUBLIC_URL", "http://"+net.JoinHostPort(host, port)), "/"),
 	}
+
+	// Templates parse after the Server exists so qrFor can close over s and
+	// share the SVG cache with the HTTP handlers.
+	tmpl, err := web.ParseTemplates(assets, s.templateFuncs())
+	if err != nil {
+		return err
+	}
+	s.rd = &web.Renderer{Templates: tmpl, AssetVer: theme.Version}
 
 	return web.Serve(host, port, s.routes())
 }
@@ -265,13 +279,58 @@ func validateCode(c *Code) string {
 
 // encodeFor renders the QR SVG for a code, choosing what to encode based on
 // Mode. Returns the SVG, the chosen QR version, and any encoder error.
+//
+// Results are memoized: encoding is pure in (payload, EC) and the full
+// pipeline (Reed-Solomon + 8 mask trials) is the most expensive work in the
+// service, so repeat renders of the same code hit the cache.
 func (s *Server) encodeFor(c *Code) (string, int, error) {
 	ec, _ := ParseECLevel(c.EC)
 	payload := c.Target
 	if c.Mode == ModeProxy {
 		payload = s.publicURL + "/r/" + c.ID
 	}
-	return EncodeSVG([]byte(payload), ec)
+
+	key := svgCacheKey(c)
+	if key != "" {
+		s.mu.RLock()
+		svg, ok := s.svgCache[key]
+		s.mu.RUnlock()
+		if ok {
+			// The version is a cheap pure table lookup — recompute instead of
+			// caching a second value alongside the SVG.
+			v, err := pickVersion(len(payload), ec)
+			return svg, v, err
+		}
+	}
+
+	svg, v, err := EncodeSVG([]byte(payload), ec)
+	if err != nil {
+		return "", 0, err
+	}
+	if key != "" {
+		s.mu.Lock()
+		if s.svgCache == nil || len(s.svgCache) >= maxSVGCache {
+			s.svgCache = make(map[string]string)
+		}
+		s.svgCache[key] = svg
+		s.mu.Unlock()
+	}
+	return svg, v, nil
+}
+
+// svgCacheKey derives the memo key for a code, or "" when the code is not
+// cacheable (unsaved form previews have no CID yet). The CID covers every
+// encoding input for direct codes; proxy payloads additionally embed the
+// record ID (the CID deliberately excludes it), so the ID joins the key to
+// keep two same-content proxy codes from sharing an entry.
+func svgCacheKey(c *Code) string {
+	if c.CID == "" {
+		return ""
+	}
+	if c.Mode == ModeProxy {
+		return c.CID + "/" + c.ID
+	}
+	return c.CID
 }
 
 // ── login ──────────────────────────────────────────────────────────────────
@@ -340,7 +399,7 @@ func (s *Server) handleProxyRedirect(w http.ResponseWriter, r *http.Request) {
 // ── public JSON read API ───────────────────────────────────────────────────
 
 func (s *Server) handleStatus(w http.ResponseWriter, r *http.Request) {
-	cs, err := listPublicCodes(s.db)
+	n, err := countPublicCodes(s.db)
 	if err != nil {
 		web.WriteError(w, http.StatusInternalServerError, "could not read database")
 		return
@@ -348,7 +407,7 @@ func (s *Server) handleStatus(w http.ResponseWriter, r *http.Request) {
 	web.WriteJSON(w, http.StatusOK, map[string]any{
 		"service": "qr",
 		"ok":      true,
-		"codes":   len(cs),
+		"codes":   n,
 	})
 }
 
@@ -461,16 +520,12 @@ func (s *Server) handleAPIDelete(w http.ResponseWriter, r *http.Request) {
 // ── render helpers ─────────────────────────────────────────────────────────
 
 // templateFuncs returns the FuncMap the qr templates use — qrFor renders a
-// code's QR inline as SVG.
-func templateFuncs() template.FuncMap {
+// code's QR inline as SVG. It is a method so the closure shares the Server's
+// SVG cache (and publicURL) with the HTTP handlers via encodeFor.
+func (s *Server) templateFuncs() template.FuncMap {
 	return template.FuncMap{
-		"qrFor": func(c *Code, publicURL string) template.HTML {
-			payload := c.Target
-			if c.Mode == ModeProxy {
-				payload = strings.TrimRight(publicURL, "/") + "/r/" + c.ID
-			}
-			ec, _ := ParseECLevel(c.EC)
-			svg, _, err := EncodeSVG([]byte(payload), ec)
+		"qrFor": func(c *Code) template.HTML {
+			svg, _, err := s.encodeFor(c)
 			if err != nil {
 				// A visible failure beats an empty figure with no explanation.
 				return template.HTML(`<p class="error">QR encode failed: ` +
