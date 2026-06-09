@@ -2,6 +2,7 @@ package main
 
 import (
 	"errors"
+	"io"
 	"os"
 	"path/filepath"
 	"sort"
@@ -20,7 +21,13 @@ type ObjectInfo struct {
 // not here. The backend is a local directory (dev) or Cloudflare R2 (server).
 type ByteStore interface {
 	Put(key string, data []byte, contentType string) error
+	// PutFile streams the file at path into the store — for payloads too
+	// large to hold in memory (backup snapshots).
+	PutFile(key, path, contentType string) error
 	Get(key string) ([]byte, error) // returns (nil, nil) when absent
+	// GetStream returns the object's bytes as a stream plus its size, or
+	// (nil, 0, nil) when absent. The caller closes the reader.
+	GetStream(key string) (io.ReadCloser, int64, error)
 	Delete(key string) error
 	List() ([]ObjectInfo, error)
 }
@@ -51,6 +58,27 @@ func (d *LocalDir) Put(key string, data []byte, _ string) error {
 	return os.WriteFile(p, data, 0o644)
 }
 
+func (d *LocalDir) PutFile(key, path, _ string) error {
+	p, err := d.keyPath(key)
+	if err != nil {
+		return err
+	}
+	src, err := os.Open(path)
+	if err != nil {
+		return err
+	}
+	defer src.Close()
+	dst, err := os.OpenFile(p, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0o644)
+	if err != nil {
+		return err
+	}
+	if _, err := io.Copy(dst, src); err != nil {
+		dst.Close()
+		return err
+	}
+	return dst.Close()
+}
+
 func (d *LocalDir) Get(key string) ([]byte, error) {
 	p, err := d.keyPath(key)
 	if err != nil {
@@ -61,6 +89,26 @@ func (d *LocalDir) Get(key string) ([]byte, error) {
 		return nil, nil
 	}
 	return data, err
+}
+
+func (d *LocalDir) GetStream(key string) (io.ReadCloser, int64, error) {
+	p, err := d.keyPath(key)
+	if err != nil {
+		return nil, 0, err
+	}
+	f, err := os.Open(p)
+	if errors.Is(err, os.ErrNotExist) {
+		return nil, 0, nil
+	}
+	if err != nil {
+		return nil, 0, err
+	}
+	info, err := f.Stat()
+	if err != nil {
+		f.Close()
+		return nil, 0, err
+	}
+	return f, info.Size(), nil
 }
 
 func (d *LocalDir) Delete(key string) error {
