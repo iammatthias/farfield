@@ -9,6 +9,8 @@ import (
 	"net/http"
 	"net/url"
 	"strconv"
+	"sync"
+	"time"
 
 	"github.com/iammatthias/farfield/lib/backup"
 	"github.com/iammatthias/farfield/lib/store"
@@ -24,6 +26,9 @@ type Server struct {
 	db   *sql.DB
 	auth *web.Auth
 	rd   *web.Renderer
+	// snapMu single-flights snapshot runs: the scheduler tick and the admin
+	// button can never run concurrently against the same registry.
+	snapMu sync.Mutex
 }
 
 func run(host, port string) error {
@@ -51,7 +56,50 @@ func run(host, port string) error {
 		rd: &web.Renderer{Templates: tmpl, AssetVer: theme.Version},
 	}
 
+	// In-process scheduler: snapshots no longer depend on a host cron
+	// existing. BACKUP_INTERVAL accepts any Go duration; "0" disables.
+	if interval := store.Env("BACKUP_INTERVAL", "6h"); interval != "0" {
+		d, err := time.ParseDuration(interval)
+		if err != nil {
+			return fmt.Errorf("BACKUP_INTERVAL %q: %w", interval, err)
+		}
+		go s.snapshotLoop(d)
+	} else {
+		slog.Info("snapshot scheduler disabled (BACKUP_INTERVAL=0)")
+	}
+
 	return web.Serve(host, port, s.routes())
+}
+
+// snapshotLoop snapshots every app shortly after boot (deploys restart the
+// stack, so this doubles as a post-deploy backup), then on every interval.
+func (s *Server) snapshotLoop(interval time.Duration) {
+	slog.Info("snapshot scheduler running", "interval", interval)
+	timer := time.NewTimer(2 * time.Minute)
+	defer timer.Stop()
+	for {
+		<-timer.C
+		s.runScheduledSnapshot()
+		timer.Reset(interval)
+	}
+}
+
+func (s *Server) runScheduledSnapshot() {
+	if !s.snapMu.TryLock() {
+		slog.Info("snapshot already running — scheduler tick skipped")
+		return
+	}
+	defer s.snapMu.Unlock()
+	for _, res := range snapshotAll(s.db) {
+		switch {
+		case res.Err != "":
+			slog.Error("scheduled snapshot failed", "app", res.App, "err", res.Err)
+		case res.Skipped:
+			slog.Info("scheduled snapshot unchanged", "app", res.App, "cid", res.CID)
+		default:
+			slog.Info("scheduled snapshot", "app", res.App, "cid", res.CID, "size", res.Size)
+		}
+	}
 }
 
 func (s *Server) routes() http.Handler {
@@ -91,6 +139,12 @@ func (s *Server) handleIndex(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleSnapshot(w http.ResponseWriter, r *http.Request) {
+	if !s.snapMu.TryLock() {
+		http.Redirect(w, r, "/?msg="+url.QueryEscape("A snapshot is already running."),
+			http.StatusSeeOther)
+		return
+	}
+	defer s.snapMu.Unlock()
 	fresh, unchanged, failed := 0, 0, 0
 	for _, res := range snapshotAll(s.db) {
 		switch {

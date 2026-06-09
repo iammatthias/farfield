@@ -75,7 +75,9 @@ func snapshotAll(db *sql.DB) []snapResult {
 
 // snapshotOne snapshots a single app's database. The snapshot is content-
 // addressed: if its CID is one this app has already backed up — the database
-// has not changed — nothing is uploaded and no row is recorded.
+// has not changed — nothing is uploaded and no row is recorded. The snapshot
+// lives in a temp file end to end; it is hashed and uploaded as a stream,
+// never held in memory.
 func snapshotOne(db *sql.DB, t appTarget, blobsURL, apiKey string) (cid string, size int64, skipped bool, err error) {
 	appDB, err := sql.Open("sqlite", "file:"+t.DBPath+"?_pragma=busy_timeout(5000)")
 	if err != nil {
@@ -83,11 +85,15 @@ func snapshotOne(db *sql.DB, t appTarget, blobsURL, apiKey string) (cid string, 
 	}
 	defer appDB.Close()
 
-	data, err := backup.Snapshot(appDB)
+	tmp, err := backup.Snapshot(appDB)
 	if err != nil {
 		return "", 0, false, err
 	}
-	cid = backup.CID(data)
+	defer os.Remove(tmp)
+	cid, size, err = backup.FileCID(tmp)
+	if err != nil {
+		return "", 0, false, err
+	}
 
 	has, err := appHasCID(db, t.Name, cid)
 	if err != nil {
@@ -95,13 +101,13 @@ func snapshotOne(db *sql.DB, t appTarget, blobsURL, apiKey string) (cid string, 
 	}
 	if has {
 		// Unchanged — this exact snapshot is already in R2 and on record.
-		return cid, int64(len(data)), true, nil
+		return cid, size, true, nil
 	}
 
-	if _, err := backup.Push(blobsURL, apiKey, data); err != nil {
+	if _, err := backup.PushFile(blobsURL, apiKey, tmp); err != nil {
 		return "", 0, false, err
 	}
-	rec := &Backup{App: t.Name, CID: cid, Size: int64(len(data)), CreatedAt: store.NowRFC3339()}
+	rec := &Backup{App: t.Name, CID: cid, Size: size, CreatedAt: store.NowRFC3339()}
 	if err := insertBackup(db, rec); err != nil {
 		return "", 0, false, err
 	}

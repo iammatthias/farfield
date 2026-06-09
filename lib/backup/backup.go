@@ -5,11 +5,8 @@
 package backup
 
 import (
-	"bytes"
 	"crypto/rand"
-	"crypto/sha256"
 	"database/sql"
-	"encoding/base32"
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
@@ -19,34 +16,37 @@ import (
 	"path/filepath"
 	"strings"
 	"time"
+
+	"github.com/iammatthias/farfield/lib/cid"
 )
 
-// CID returns the content identifier of data — a CIDv1 (raw codec, sha2-256,
-// multibase-base32), the same scheme the blobs service uses. Identical bytes
-// always yield the same CID, so an unchanged database hashes to a CID already
-// on record — which is how the backup app skips needless uploads.
-func CID(data []byte) string {
-	digest := sha256.Sum256(data)
-	buf := make([]byte, 0, 4+sha256.Size)
-	buf = append(buf, 0x01, 0x55, 0x12, 0x20)
-	buf = append(buf, digest[:]...)
-	enc := base32.StdEncoding.WithPadding(base32.NoPadding).EncodeToString(buf)
-	return "b" + strings.ToLower(enc)
-}
-
-// Snapshot returns a consistent point-in-time copy of db's contents, produced
-// by SQLite's `VACUUM INTO`. It is safe to call against a live database.
-func Snapshot(db *sql.DB) ([]byte, error) {
+// Snapshot writes a consistent point-in-time copy of db's contents to a temp
+// file via SQLite's `VACUUM INTO` and returns the file's path. It is safe to
+// call against a live database. The caller removes the file when done — the
+// snapshot stays on disk, never in memory, so multi-hundred-MB databases
+// back up in constant space.
+func Snapshot(db *sql.DB) (string, error) {
 	var r [8]byte
 	_, _ = rand.Read(r[:])
 	tmp := filepath.Join(os.TempDir(), "farfield-snapshot-"+hex.EncodeToString(r[:])+".sqlite")
 	// VACUUM INTO's target must not exist; the random name guarantees that.
 	stmt := "VACUUM INTO '" + strings.ReplaceAll(tmp, "'", "''") + "'"
 	if _, err := db.Exec(stmt); err != nil {
-		return nil, fmt.Errorf("VACUUM INTO: %w", err)
+		return "", fmt.Errorf("VACUUM INTO: %w", err)
 	}
-	defer os.Remove(tmp)
-	return os.ReadFile(tmp)
+	return tmp, nil
+}
+
+// FileCID streams the file at path once and returns its CIDv1 — the same
+// scheme the blobs service uses, so an unchanged database hashes to a CID
+// already on record — along with its size in bytes.
+func FileCID(path string) (string, int64, error) {
+	f, err := os.Open(path)
+	if err != nil {
+		return "", 0, err
+	}
+	defer f.Close()
+	return cid.OfReader(f)
 }
 
 // WriteDB replaces the database file at path with data, clearing any stale
@@ -64,14 +64,25 @@ func WriteDB(path string, data []byte) error {
 
 var client = &http.Client{Timeout: 5 * time.Minute}
 
-// Push uploads a snapshot to the blobs service's /backups endpoint and returns
-// its content-addressed CID.
-func Push(blobsURL, apiKey string, data []byte) (string, error) {
-	req, err := http.NewRequest(http.MethodPost,
-		strings.TrimRight(blobsURL, "/")+"/backups", bytes.NewReader(data))
+// PushFile streams the snapshot file at path to the blobs service's /backups
+// endpoint and returns its content-addressed CID. The body is the open file —
+// the snapshot is never buffered in memory.
+func PushFile(blobsURL, apiKey, path string) (string, error) {
+	f, err := os.Open(path)
 	if err != nil {
 		return "", err
 	}
+	defer f.Close()
+	info, err := f.Stat()
+	if err != nil {
+		return "", err
+	}
+	req, err := http.NewRequest(http.MethodPost,
+		strings.TrimRight(blobsURL, "/")+"/backups", f)
+	if err != nil {
+		return "", err
+	}
+	req.ContentLength = info.Size()
 	req.Header.Set("X-API-Key", apiKey)
 	req.Header.Set("Content-Type", "application/x-sqlite3")
 	resp, err := client.Do(req)
