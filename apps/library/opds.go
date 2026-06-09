@@ -112,15 +112,23 @@ func catalogXML(books []Book, title, selfHref, updated string) ([]byte, error) {
 			if ct == "" {
 				ct = "image/jpeg"
 			}
+			// The thumbnail link prefers the downscaled JPEG; books stored
+			// before thumbnails existed fall back to the full cover.
+			thumbHref, thumbType := "/opds/cover/"+b.CoverCID, ct
+			if b.ThumbCID != "" {
+				thumbHref, thumbType = "/opds/cover/"+b.ThumbCID, "image/jpeg"
+			}
 			e.Links = append(e.Links,
 				opdsLink{Rel: relImage, Href: "/opds/cover/" + b.CoverCID, Type: ct},
-				opdsLink{Rel: relThumbnail, Href: "/opds/cover/" + b.CoverCID, Type: ct},
+				opdsLink{Rel: relThumbnail, Href: thumbHref, Type: thumbType},
 			)
 		}
 		feed.Entries = append(feed.Entries, e)
 	}
 
-	body, err := xml.MarshalIndent(feed, "", "  ")
+	// Compact marshalling: feeds are machine-read, indentation is 20–30% of
+	// the bytes for nothing.
+	body, err := xml.Marshal(feed)
 	if err != nil {
 		return nil, err
 	}
@@ -164,7 +172,7 @@ func navFeedXML(items []NavItem, selfHref, updated string) ([]byte, error) {
 		e.Content = &opdsContent{Type: "text", Text: fmt.Sprintf("%d %s", it.Count, unit)}
 		feed.Entries = append(feed.Entries, e)
 	}
-	body, err := xml.MarshalIndent(feed, "", "  ")
+	body, err := xml.Marshal(feed)
 	if err != nil {
 		return nil, err
 	}

@@ -2,28 +2,25 @@ package main
 
 import (
 	"errors"
+	"io"
 	"os"
 	"path/filepath"
-	"sort"
 	"strings"
-	"time"
 )
-
-// ObjectInfo describes one object in a ByteStore.
-type ObjectInfo struct {
-	Key          string
-	Size         int64
-	LastModified time.Time
-}
 
 // ByteStore stores raw object bytes, keyed by string. Metadata lives in
 // SQLite, not here. The backend is a local directory (dev) or Cloudflare R2
-// (server). opds keys both EPUB files and cover images by their CID.
+// (server). library keys EPUB files, cover images, and thumbnails by their CID.
 type ByteStore interface {
 	Put(key string, data []byte, contentType string) error
+	// PutFile streams the file at path into the store — for payloads too
+	// large to hold in memory.
+	PutFile(key, path, contentType string) error
 	Get(key string) ([]byte, error) // returns (nil, nil) when absent
+	// GetStream returns the object's bytes as a stream plus its size, or
+	// (nil, 0, nil) when absent. The caller closes the reader.
+	GetStream(key string) (io.ReadCloser, int64, error)
 	Delete(key string) error
-	List() ([]ObjectInfo, error)
 }
 
 // LocalDir is a ByteStore backed by a directory on disk.
@@ -52,6 +49,27 @@ func (d *LocalDir) Put(key string, data []byte, _ string) error {
 	return os.WriteFile(p, data, 0o644)
 }
 
+func (d *LocalDir) PutFile(key, path, _ string) error {
+	p, err := d.keyPath(key)
+	if err != nil {
+		return err
+	}
+	src, err := os.Open(path)
+	if err != nil {
+		return err
+	}
+	defer src.Close()
+	dst, err := os.OpenFile(p, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0o644)
+	if err != nil {
+		return err
+	}
+	if _, err := io.Copy(dst, src); err != nil {
+		dst.Close()
+		return err
+	}
+	return dst.Close()
+}
+
 func (d *LocalDir) Get(key string) ([]byte, error) {
 	p, err := d.keyPath(key)
 	if err != nil {
@@ -64,6 +82,26 @@ func (d *LocalDir) Get(key string) ([]byte, error) {
 	return data, err
 }
 
+func (d *LocalDir) GetStream(key string) (io.ReadCloser, int64, error) {
+	p, err := d.keyPath(key)
+	if err != nil {
+		return nil, 0, err
+	}
+	f, err := os.Open(p)
+	if errors.Is(err, os.ErrNotExist) {
+		return nil, 0, nil
+	}
+	if err != nil {
+		return nil, 0, err
+	}
+	info, err := f.Stat()
+	if err != nil {
+		f.Close()
+		return nil, 0, err
+	}
+	return f, info.Size(), nil
+}
+
 func (d *LocalDir) Delete(key string) error {
 	p, err := d.keyPath(key)
 	if err != nil {
@@ -73,28 +111,4 @@ func (d *LocalDir) Delete(key string) error {
 		return err
 	}
 	return nil
-}
-
-func (d *LocalDir) List() ([]ObjectInfo, error) {
-	entries, err := os.ReadDir(d.root)
-	if err != nil {
-		return nil, err
-	}
-	var out []ObjectInfo
-	for _, e := range entries {
-		if e.IsDir() {
-			continue
-		}
-		info, err := e.Info()
-		if err != nil {
-			return nil, err
-		}
-		out = append(out, ObjectInfo{
-			Key:          e.Name(),
-			Size:         info.Size(),
-			LastModified: info.ModTime(),
-		})
-	}
-	sort.Slice(out, func(i, j int) bool { return out[i].Key < out[j].Key })
-	return out, nil
 }

@@ -92,7 +92,7 @@
               <td class="pick"><input type="checkbox" name="cid" value="{{.CID}}" form="organize" aria-label="Select {{.Title}}"></td>
               <td class="shrink">
                 {{if .CoverCID}}
-                  <img class="cover" src="/opds/cover/{{.CoverCID}}" loading="lazy" alt="">
+                  <img class="cover" src="/opds/cover/{{if .ThumbCID}}{{.ThumbCID}}{{else}}{{.CoverCID}}{{end}}" loading="lazy" alt="">
                 {{else}}
                   <span class="cover placeholder">epub</span>
                 {{end}}

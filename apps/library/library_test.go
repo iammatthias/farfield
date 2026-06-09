@@ -6,6 +6,8 @@ import (
 	"database/sql"
 	"encoding/json"
 	"fmt"
+	"image"
+	"image/png"
 	"io"
 	"mime/multipart"
 	"net/http"
@@ -269,7 +271,7 @@ func TestEnsureCollectionColumn(t *testing.T) {
 	if b == nil || b.Title != "Old Book" || b.Collection != "" {
 		t.Fatalf("migrated book = %+v", b)
 	}
-	if _, err := updateBookCollection(db, "bafold", "Archive"); err != nil {
+	if err := updateBooksCollection(db, []string{"bafold"}, "Archive"); err != nil {
 		t.Fatal(err)
 	}
 	if b, _ = getBook(db, "bafold"); b.Collection != "Archive" {
@@ -458,6 +460,162 @@ func TestCollections(t *testing.T) {
 		if !strings.Contains(all, "<title>"+want+"</title>") {
 			t.Errorf("all feed missing %s", want)
 		}
+	}
+}
+
+// pngCover encodes a real, decodable PNG of the given dimensions.
+func pngCover(t *testing.T, w, h int) []byte {
+	t.Helper()
+	img := image.NewRGBA(image.Rect(0, 0, w, h))
+	for i := range img.Pix {
+		img.Pix[i] = uint8(i)
+	}
+	var buf bytes.Buffer
+	if err := png.Encode(&buf, img); err != nil {
+		t.Fatal(err)
+	}
+	return buf.Bytes()
+}
+
+func TestCoverThumbnail(t *testing.T) {
+	s := newTestServer(t)
+	h := s.routes()
+
+	// A 400×600 cover is taller than thumbHeight, so a thumbnail is generated.
+	cover := pngCover(t, 400, 600)
+	data := buildEPUB(t, "Tall Cover", "Author", cover)
+	req := httptest.NewRequest(http.MethodPost, "/api/books?filename=tall.epub", bytes.NewReader(data))
+	req.Header.Set("X-API-Key", "secret")
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, req)
+	if rec.Code != http.StatusCreated {
+		t.Fatalf("upload: %d %s", rec.Code, rec.Body)
+	}
+	var book Book
+	if err := json.Unmarshal(rec.Body.Bytes(), &book); err != nil {
+		t.Fatal(err)
+	}
+	if book.ThumbCID == "" {
+		t.Fatal("no thumb cid for a decodable oversized cover")
+	}
+	if book.ThumbCID == book.CoverCID {
+		t.Error("thumb cid should differ from the cover cid")
+	}
+
+	// The thumbnail serves as a JPEG of thumbHeight, via the cover endpoint.
+	req = httptest.NewRequest(http.MethodGet, "/opds/cover/"+book.ThumbCID, nil)
+	req.SetBasicAuth("reader", "secret")
+	rec = httptest.NewRecorder()
+	h.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("thumb status = %d", rec.Code)
+	}
+	if ct := rec.Header().Get("Content-Type"); ct != "image/jpeg" {
+		t.Errorf("thumb content-type = %q, want image/jpeg", ct)
+	}
+	cfg, format, err := image.DecodeConfig(bytes.NewReader(rec.Body.Bytes()))
+	if err != nil {
+		t.Fatalf("decode thumb: %v", err)
+	}
+	if format != "jpeg" || cfg.Height != thumbHeight || cfg.Width != 400*thumbHeight/600 {
+		t.Errorf("thumb = %s %dx%d, want jpeg %dx%d", format, cfg.Width, cfg.Height, 400*thumbHeight/600, thumbHeight)
+	}
+
+	// The OPDS thumbnail link points at the thumb; the image link at the cover.
+	req = httptest.NewRequest(http.MethodGet, "/opds/all", nil)
+	req.SetBasicAuth("reader", "secret")
+	rec = httptest.NewRecorder()
+	h.ServeHTTP(rec, req)
+	feed := rec.Body.String()
+	if !strings.Contains(feed, `rel="http://opds-spec.org/image/thumbnail" href="/opds/cover/`+book.ThumbCID+`"`) {
+		t.Errorf("feed thumbnail link does not use the thumb cid\n%s", feed)
+	}
+	if !strings.Contains(feed, `rel="http://opds-spec.org/image" href="/opds/cover/`+book.CoverCID+`"`) {
+		t.Errorf("feed image link does not use the full cover cid\n%s", feed)
+	}
+
+	// A cover already at or below thumbHeight gets no separate thumbnail.
+	small := buildEPUB(t, "Small Cover", "Author", pngCover(t, 100, 150))
+	req = httptest.NewRequest(http.MethodPost, "/api/books?filename=small.epub", bytes.NewReader(small))
+	req.Header.Set("X-API-Key", "secret")
+	rec = httptest.NewRecorder()
+	h.ServeHTTP(rec, req)
+	var smallBook Book
+	if err := json.Unmarshal(rec.Body.Bytes(), &smallBook); err != nil {
+		t.Fatal(err)
+	}
+	if smallBook.ThumbCID != "" {
+		t.Errorf("small cover grew a thumbnail: %q", smallBook.ThumbCID)
+	}
+
+	// Deleting the book cleans up the thumb bytes along with the cover.
+	if _, err := s.deleteBookAndBytes(book.CID); err != nil {
+		t.Fatal(err)
+	}
+	for _, key := range []string{book.CID, book.CoverCID, book.ThumbCID} {
+		if got, _ := s.store.Get(key); got != nil {
+			t.Errorf("bytes for %s survived delete", key)
+		}
+	}
+}
+
+func TestFeedCachingAndRangeDownload(t *testing.T) {
+	s := newTestServer(t)
+	h := s.routes()
+
+	data := buildEPUB(t, "Cached", "Author", nil)
+	req := httptest.NewRequest(http.MethodPost, "/api/books?filename=c.epub", bytes.NewReader(data))
+	req.Header.Set("X-API-Key", "secret")
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, req)
+	if rec.Code != http.StatusCreated {
+		t.Fatalf("upload: %d", rec.Code)
+	}
+	var book Book
+	if err := json.Unmarshal(rec.Body.Bytes(), &book); err != nil {
+		t.Fatal(err)
+	}
+
+	// The feed carries an ETag + Cache-Control; the same validator 304s.
+	req = httptest.NewRequest(http.MethodGet, "/opds/all", nil)
+	req.SetBasicAuth("reader", "secret")
+	rec = httptest.NewRecorder()
+	h.ServeHTTP(rec, req)
+	etag := rec.Header().Get("ETag")
+	if etag == "" || rec.Header().Get("Cache-Control") != "max-age=60" {
+		t.Fatalf("feed validators missing: etag=%q cc=%q", etag, rec.Header().Get("Cache-Control"))
+	}
+	req = httptest.NewRequest(http.MethodGet, "/opds/all", nil)
+	req.SetBasicAuth("reader", "secret")
+	req.Header.Set("If-None-Match", etag)
+	rec = httptest.NewRecorder()
+	h.ServeHTTP(rec, req)
+	if rec.Code != http.StatusNotModified {
+		t.Errorf("conditional feed request = %d, want 304", rec.Code)
+	}
+
+	// Downloads advertise a Content-Length and honour Range requests.
+	req = httptest.NewRequest(http.MethodGet, "/opds/download/"+book.CID, nil)
+	req.SetBasicAuth("reader", "secret")
+	rec = httptest.NewRecorder()
+	h.ServeHTTP(rec, req)
+	if got := rec.Header().Get("Content-Length"); got != fmt.Sprint(len(data)) {
+		t.Errorf("Content-Length = %q, want %d", got, len(data))
+	}
+	if rec.Header().Get("Accept-Ranges") != "bytes" {
+		t.Errorf("Accept-Ranges = %q, want bytes", rec.Header().Get("Accept-Ranges"))
+	}
+
+	req = httptest.NewRequest(http.MethodGet, "/opds/download/"+book.CID, nil)
+	req.SetBasicAuth("reader", "secret")
+	req.Header.Set("Range", "bytes=0-9")
+	rec = httptest.NewRecorder()
+	h.ServeHTTP(rec, req)
+	if rec.Code != http.StatusPartialContent {
+		t.Fatalf("range request = %d, want 206", rec.Code)
+	}
+	if !bytes.Equal(rec.Body.Bytes(), data[:10]) {
+		t.Error("range bytes do not match the first 10 bytes of the EPUB")
 	}
 }
 

@@ -3,14 +3,16 @@ package main
 import (
 	"database/sql"
 	"errors"
+	"strings"
 
 	"github.com/iammatthias/farfield/lib/store"
 	_ "modernc.org/sqlite" // registers the "sqlite" driver
 )
 
 // Book is one EPUB in the catalog. The CID is the content identifier of the
-// EPUB bytes; CoverCID, when set, is the CID of the extracted cover image.
-// Both are keys into the ByteStore, where the bytes themselves live.
+// EPUB bytes; CoverCID, when set, is the CID of the extracted cover image and
+// ThumbCID the CID of its downscaled JPEG thumbnail. All are keys into the
+// ByteStore, where the bytes themselves live.
 type Book struct {
 	CID         string `json:"cid"`
 	Title       string `json:"title"`
@@ -23,6 +25,7 @@ type Book struct {
 	Size        int64  `json:"size"`
 	CoverCID    string `json:"coverCid"`
 	CoverMime   string `json:"coverMime"`
+	ThumbCID    string `json:"thumbCid"`
 	CreatedAt   string `json:"createdAt"`
 }
 
@@ -41,12 +44,13 @@ CREATE TABLE IF NOT EXISTS books (
 	size        INTEGER NOT NULL,
 	cover_cid   TEXT NOT NULL DEFAULT '',
 	cover_mime  TEXT NOT NULL DEFAULT '',
+	thumb_cid   TEXT NOT NULL DEFAULT '',
 	created_at  TEXT NOT NULL
 );
 CREATE INDEX IF NOT EXISTS books_by_created ON books (created_at DESC, cid);`
 
 // bookCols is the column list, in Book-field order, shared by every query.
-const bookCols = `cid, title, author, language, identifier, description, collection, filename, size, cover_cid, cover_mime, created_at`
+const bookCols = `cid, title, author, language, identifier, description, collection, filename, size, cover_cid, cover_mime, thumb_cid, created_at`
 
 // openDB opens the SQLite database, applies pragmas, and migrates. It holds the
 // book metadata index and admin login sessions; book and cover bytes live in
@@ -67,6 +71,10 @@ func openDB(path string) (*sql.DB, error) {
 	if err := store.EnsureColumn(db, "books", "collection", "TEXT NOT NULL DEFAULT ''"); err != nil {
 		return nil, err
 	}
+	// Self-migrate: cover thumbnails arrived after the first deployments.
+	if err := store.EnsureColumn(db, "books", "thumb_cid", "TEXT NOT NULL DEFAULT ''"); err != nil {
+		return nil, err
+	}
 	if _, err := db.Exec(
 		`CREATE INDEX IF NOT EXISTS books_by_collection ON books (collection, created_at DESC)`); err != nil {
 		return nil, err
@@ -80,7 +88,8 @@ type scanner interface{ Scan(...any) error }
 func scanBook(row scanner) (*Book, error) {
 	var b Book
 	err := row.Scan(&b.CID, &b.Title, &b.Author, &b.Language, &b.Identifier,
-		&b.Description, &b.Collection, &b.Filename, &b.Size, &b.CoverCID, &b.CoverMime, &b.CreatedAt)
+		&b.Description, &b.Collection, &b.Filename, &b.Size, &b.CoverCID, &b.CoverMime,
+		&b.ThumbCID, &b.CreatedAt)
 	if err != nil {
 		return nil, err
 	}
@@ -93,14 +102,15 @@ func scanBook(row scanner) (*Book, error) {
 // place in "newest first" feeds and its folder.
 func upsertBook(db *sql.DB, b *Book) error {
 	_, err := db.Exec(
-		`INSERT INTO books (`+bookCols+`) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+		`INSERT INTO books (`+bookCols+`) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 		 ON CONFLICT(cid) DO UPDATE SET
 		   title=excluded.title, author=excluded.author, language=excluded.language,
 		   identifier=excluded.identifier, description=excluded.description,
 		   filename=excluded.filename, size=excluded.size,
-		   cover_cid=excluded.cover_cid, cover_mime=excluded.cover_mime`,
+		   cover_cid=excluded.cover_cid, cover_mime=excluded.cover_mime,
+		   thumb_cid=excluded.thumb_cid`,
 		b.CID, b.Title, b.Author, b.Language, b.Identifier, b.Description,
-		b.Collection, b.Filename, b.Size, b.CoverCID, b.CoverMime, b.CreatedAt)
+		b.Collection, b.Filename, b.Size, b.CoverCID, b.CoverMime, b.ThumbCID, b.CreatedAt)
 	return err
 }
 
@@ -117,12 +127,11 @@ func getBook(db *sql.DB, cid string) (*Book, error) {
 	return b, nil
 }
 
-// listBooks returns book metadata, newest first. A negative limit returns every
-// book (used by the OPDS feed); a positive limit paginates the admin UI.
-func listBooks(db *sql.DB, limit, offset int) ([]Book, error) {
+// listBooks returns every book's metadata, newest first (the OPDS "All books"
+// feed).
+func listBooks(db *sql.DB) ([]Book, error) {
 	rows, err := db.Query(
-		`SELECT `+bookCols+` FROM books ORDER BY created_at DESC, cid LIMIT ? OFFSET ?`,
-		limit, offset)
+		`SELECT ` + bookCols + ` FROM books ORDER BY created_at DESC, cid`)
 	if err != nil {
 		return nil, err
 	}
@@ -143,6 +152,16 @@ func countBooks(db *sql.DB) (int, error) {
 	var n int
 	err := db.QueryRow(`SELECT COUNT(*) FROM books`).Scan(&n)
 	return n, err
+}
+
+// catalogVersion returns a cheap fingerprint of the catalog — the book count
+// plus the newest created_at stamp — used as the OPDS feeds' ETag so unchanged
+// catalogs revalidate with a 304 instead of a full XML rebuild.
+func catalogVersion(db *sql.DB) (string, error) {
+	var v string
+	err := db.QueryRow(
+		`SELECT COUNT(*) || '-' || COALESCE(MAX(created_at),'') FROM books`).Scan(&v)
+	return v, err
 }
 
 // listBooksByCollection returns every book in a collection, newest first. An
@@ -196,24 +215,32 @@ func collectionStats(db *sql.DB) (named []CollectionStat, uncategorized int, err
 	return named, uncategorized, rows.Err()
 }
 
-// updateBookCollection moves a book into a collection. It reports whether a
-// book with that CID existed.
-func updateBookCollection(db *sql.DB, cid, collection string) (bool, error) {
-	res, err := db.Exec(`UPDATE books SET collection = ? WHERE cid = ?`, collection, cid)
-	if err != nil {
-		return false, err
+// updateBooksCollection moves the given books into a collection with one
+// UPDATE, rather than a statement per book. Unknown CIDs are simply ignored.
+func updateBooksCollection(db *sql.DB, cids []string, collection string) error {
+	if len(cids) == 0 {
+		return nil
 	}
-	n, _ := res.RowsAffected()
-	return n > 0, nil
+	args := make([]any, 0, len(cids)+1)
+	args = append(args, collection)
+	for _, c := range cids {
+		args = append(args, c)
+	}
+	placeholders := strings.Repeat(",?", len(cids))[1:]
+	_, err := db.Exec(
+		`UPDATE books SET collection = ? WHERE cid IN (`+placeholders+`)`, args...)
+	return err
 }
 
-// coverInfo reports whether any book references coverCID as its cover, and the
-// cover's MIME type. It backs both the cover endpoint (a cover is only served
-// when it belongs to a book) and delete cleanup (a cover's bytes are only
-// removed once no book references them).
-func coverInfo(db *sql.DB, coverCID string) (mime string, exists bool, err error) {
+// coverInfo reports whether any book references id as its cover image or
+// cover thumbnail, and the image's MIME type (thumbnails are always JPEG).
+// It backs both the cover endpoint (an image is only served when it belongs
+// to a book) and delete cleanup (an image's bytes are only removed once no
+// book references them).
+func coverInfo(db *sql.DB, id string) (mime string, exists bool, err error) {
 	err = db.QueryRow(
-		`SELECT cover_mime FROM books WHERE cover_cid = ? LIMIT 1`, coverCID).Scan(&mime)
+		`SELECT CASE WHEN cover_cid = ? THEN cover_mime ELSE 'image/jpeg' END
+		 FROM books WHERE cover_cid = ? OR thumb_cid = ? LIMIT 1`, id, id, id).Scan(&mime)
 	if errors.Is(err, sql.ErrNoRows) {
 		return "", false, nil
 	}

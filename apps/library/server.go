@@ -13,7 +13,9 @@ import (
 	"net/url"
 	"os"
 	"path"
+	"strconv"
 	"strings"
+	"time"
 
 	"github.com/iammatthias/farfield/lib/cid"
 	"github.com/iammatthias/farfield/lib/store"
@@ -168,6 +170,17 @@ func (s *Server) storeUpload(data []byte, filename, collection string) (*Book, e
 		}
 		b.CoverCID = coverCID
 		b.CoverMime = coverMime
+		// A small list-view thumbnail, stored under its own CID. Best-effort:
+		// when the cover doesn't decode (or is already small) the full cover
+		// serves in its place.
+		if thumb := makeThumb(coverBytes); thumb != nil {
+			thumbCID := cid.Of(thumb)
+			if err := s.store.Put(thumbCID, thumb, "image/jpeg"); err != nil {
+				slog.Error("store cover thumbnail", "cid", thumbCID, "err", err)
+			} else {
+				b.ThumbCID = thumbCID
+			}
+		}
 	}
 	if err := s.store.Put(b.CID, data, epubMime); err != nil {
 		return nil, err
@@ -179,8 +192,8 @@ func (s *Server) storeUpload(data []byte, filename, collection string) (*Book, e
 }
 
 // deleteBookAndBytes removes a book row and its EPUB bytes, plus the cover
-// bytes once no remaining book references them. It reports whether the book
-// existed.
+// and thumbnail bytes once no remaining book references them. It reports
+// whether the book existed.
 func (s *Server) deleteBookAndBytes(cid string) (bool, error) {
 	b, err := deleteBook(s.db, cid)
 	if err != nil {
@@ -192,10 +205,13 @@ func (s *Server) deleteBookAndBytes(cid string) (bool, error) {
 	if err := s.store.Delete(b.CID); err != nil {
 		slog.Error("delete epub bytes", "cid", b.CID, "err", err)
 	}
-	if b.CoverCID != "" {
-		if _, stillUsed, err := coverInfo(s.db, b.CoverCID); err == nil && !stillUsed {
-			if err := s.store.Delete(b.CoverCID); err != nil {
-				slog.Error("delete cover bytes", "cid", b.CoverCID, "err", err)
+	for _, imgCID := range []string{b.CoverCID, b.ThumbCID} {
+		if imgCID == "" {
+			continue
+		}
+		if _, stillUsed, err := coverInfo(s.db, imgCID); err == nil && !stillUsed {
+			if err := s.store.Delete(imgCID); err != nil {
+				slog.Error("delete cover bytes", "cid", imgCID, "err", err)
 			}
 		}
 	}
@@ -333,13 +349,15 @@ func (s *Server) handleBulkCollection(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	collection := strings.TrimSpace(r.FormValue("collection"))
+	cids := make([]string, 0, len(r.Form["cid"]))
 	for _, cid := range r.Form["cid"] {
-		if !validCID(cid) {
-			continue
+		if validCID(cid) {
+			cids = append(cids, cid)
 		}
-		if _, err := updateBookCollection(s.db, cid, collection); err != nil {
-			slog.Error("set collection", "cid", cid, "err", err)
-		}
+	}
+	// One UPDATE ... IN (...) for the whole selection, not a statement per book.
+	if err := updateBooksCollection(s.db, cids, collection); err != nil {
+		slog.Error("set collection", "count", len(cids), "err", err)
 	}
 	// Return to the view they were on (validated to a local path).
 	dest := r.FormValue("next")
@@ -357,9 +375,30 @@ func (s *Server) handleLoginForm(w http.ResponseWriter, r *http.Request) {
 
 // ── OPDS catalog ───────────────────────────────────────────────────────────
 
+// feedNotModified stamps the feed's cache validators — an ETag derived from
+// the catalog version plus a short max-age — and reports whether the client's
+// cached copy is still current, in which case it has already written the 304
+// and the caller skips building the XML entirely.
+func (s *Server) feedNotModified(w http.ResponseWriter, r *http.Request) bool {
+	ver, err := catalogVersion(s.db)
+	if err != nil {
+		return false // no validators; build the feed as usual
+	}
+	w.Header().Set("ETag", `"`+ver+`"`)
+	w.Header().Set("Cache-Control", "max-age=60")
+	if web.ETagMatch(r, ver) {
+		w.WriteHeader(http.StatusNotModified)
+		return true
+	}
+	return false
+}
+
 // handleOPDSRoot serves the navigation feed: an "All books" folder, one folder
 // per collection, and "Uncategorized" when some books have none.
 func (s *Server) handleOPDSRoot(w http.ResponseWriter, r *http.Request) {
+	if s.feedNotModified(w, r) {
+		return
+	}
 	named, uncategorized, err := collectionStats(s.db)
 	if err != nil {
 		web.WriteError(w, http.StatusInternalServerError, "could not read catalog")
@@ -391,7 +430,10 @@ func (s *Server) handleOPDSRoot(w http.ResponseWriter, r *http.Request) {
 
 // handleOPDSAll serves the acquisition feed of every book.
 func (s *Server) handleOPDSAll(w http.ResponseWriter, r *http.Request) {
-	books, err := listBooks(s.db, -1, 0) // -1: every book, newest first
+	if s.feedNotModified(w, r) {
+		return
+	}
+	books, err := listBooks(s.db) // every book, newest first
 	if err != nil {
 		web.WriteError(w, http.StatusInternalServerError, "could not read catalog")
 		return
@@ -402,6 +444,9 @@ func (s *Server) handleOPDSAll(w http.ResponseWriter, r *http.Request) {
 // handleOPDSCollection serves one collection's acquisition feed (an empty c is
 // the uncategorised books).
 func (s *Server) handleOPDSCollection(w http.ResponseWriter, r *http.Request) {
+	if s.feedNotModified(w, r) {
+		return
+	}
 	name := r.URL.Query().Get("c")
 	books, err := listBooksByCollection(s.db, name)
 	if err != nil {
@@ -430,14 +475,32 @@ func (s *Server) writeAcquisition(w http.ResponseWriter, books []Book, title, se
 	_, _ = w.Write(body)
 }
 
+// serveObject streams one content-addressed object from the byte store with
+// its immutable cache headers. When the stream can seek (the local backend
+// hands back an *os.File) it serves through http.ServeContent, which gets
+// Range requests and Content-Length for free — the modtime is zero because
+// content-addressed bytes never change and the ETag carries validation.
+// Otherwise (R2's HTTP body) it sets Content-Length and copies.
+func serveObject(w http.ResponseWriter, r *http.Request, rc io.ReadCloser, size int64) {
+	if rs, ok := rc.(io.ReadSeeker); ok {
+		http.ServeContent(w, r, "", time.Time{}, rs)
+		return
+	}
+	if size >= 0 {
+		w.Header().Set("Content-Length", strconv.FormatInt(size, 10))
+	}
+	_, _ = io.Copy(w, rc)
+}
+
 func (s *Server) handleDownload(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("cid")
 	if !validCID(id) {
 		web.WriteError(w, http.StatusBadRequest, "malformed cid")
 		return
 	}
-	etag := `"` + id + `"`
-	if r.Header.Get("If-None-Match") == etag {
+	// Content-addressed: a matching ETag means the client's copy is current,
+	// before any database or byte-store work.
+	if web.ETagMatch(r, id) {
 		w.WriteHeader(http.StatusNotModified)
 		return
 	}
@@ -450,22 +513,23 @@ func (s *Server) handleDownload(w http.ResponseWriter, r *http.Request) {
 		web.WriteError(w, http.StatusNotFound, "book not found")
 		return
 	}
-	data, err := s.store.Get(id)
+	rc, size, err := s.store.GetStream(id)
 	if err != nil {
 		slog.Error("get epub bytes", "cid", id, "err", err)
 		web.WriteError(w, http.StatusInternalServerError, "could not read book")
 		return
 	}
-	if data == nil {
+	if rc == nil {
 		web.WriteError(w, http.StatusNotFound, "book not found")
 		return
 	}
+	defer rc.Close()
 	w.Header().Set("Content-Type", epubMime)
-	w.Header().Set("ETag", etag)
+	w.Header().Set("ETag", `"`+id+`"`)
 	// Content-addressed: the bytes for a CID never change.
 	w.Header().Set("Cache-Control", "public, max-age=31536000, immutable")
 	w.Header().Set("Content-Disposition", `attachment; filename="`+downloadName(b)+`"`)
-	_, _ = w.Write(data)
+	serveObject(w, r, rc, size)
 }
 
 func (s *Server) handleCover(w http.ResponseWriter, r *http.Request) {
@@ -474,8 +538,7 @@ func (s *Server) handleCover(w http.ResponseWriter, r *http.Request) {
 		web.WriteError(w, http.StatusBadRequest, "malformed cid")
 		return
 	}
-	etag := `"` + id + `"`
-	if r.Header.Get("If-None-Match") == etag {
+	if web.ETagMatch(r, id) {
 		w.WriteHeader(http.StatusNotModified)
 		return
 	}
@@ -489,23 +552,24 @@ func (s *Server) handleCover(w http.ResponseWriter, r *http.Request) {
 		web.WriteError(w, http.StatusNotFound, "cover not found")
 		return
 	}
-	data, err := s.store.Get(id)
+	rc, size, err := s.store.GetStream(id)
 	if err != nil {
 		slog.Error("get cover bytes", "cid", id, "err", err)
 		web.WriteError(w, http.StatusInternalServerError, "could not read cover")
 		return
 	}
-	if data == nil {
+	if rc == nil {
 		web.WriteError(w, http.StatusNotFound, "cover not found")
 		return
 	}
+	defer rc.Close()
 	if mime == "" {
 		mime = "application/octet-stream"
 	}
 	w.Header().Set("Content-Type", mime)
-	w.Header().Set("ETag", etag)
+	w.Header().Set("ETag", `"`+id+`"`)
 	w.Header().Set("Cache-Control", "public, max-age=31536000, immutable")
-	_, _ = w.Write(data)
+	serveObject(w, r, rc, size)
 }
 
 // ── single-EPUB JSON upload (shared) ────────────────────────────────────────

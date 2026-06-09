@@ -8,6 +8,7 @@ require (
 	github.com/iammatthias/farfield/lib/store v0.0.0
 	github.com/iammatthias/farfield/lib/theme v0.0.0
 	github.com/iammatthias/farfield/lib/web v0.0.0
+	golang.org/x/image v0.40.0
 	modernc.org/sqlite v1.50.1
 )
 
