@@ -148,8 +148,13 @@ func (s *Server) handleDelete(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		// Drop the snapshot bytes from blobs too — but only once no other
-		// record still points at that (content-addressed) CID.
-		if used, _ := cidReferenced(s.db, b.CID); !used {
+		// record still points at that (content-addressed) CID. If the
+		// reference check fails, keep the bytes: deleting a snapshot another
+		// record still points at would destroy a restorable backup.
+		used, err := cidReferenced(s.db, b.CID)
+		if err != nil {
+			slog.Warn("could not check snapshot references; keeping blob", "cid", b.CID, "err", err)
+		} else if !used {
 			if err := backup.Delete(blobsURL(), blobsKey(), b.CID); err != nil {
 				slog.Warn("could not delete snapshot from blobs", "cid", b.CID, "err", err)
 			}
