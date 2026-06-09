@@ -224,9 +224,15 @@ func (s *Server) handleAdminUpload(w http.ResponseWriter, r *http.Request) {
 	}
 	defer file.Close()
 
-	data, err := io.ReadAll(io.LimitReader(file, s.maxUpload))
+	// Read one byte past the limit so an oversize file is detected and
+	// rejected rather than silently truncated into a corrupt blob.
+	data, err := io.ReadAll(io.LimitReader(file, s.maxUpload+1))
 	if err != nil {
 		http.Redirect(w, r, "/upload?error=Could+not+read+file", http.StatusSeeOther)
+		return
+	}
+	if int64(len(data)) > s.maxUpload {
+		http.Redirect(w, r, "/upload?error=File+too+large", http.StatusSeeOther)
 		return
 	}
 	if _, err := s.storeUpload(data); err != nil {
@@ -238,11 +244,16 @@ func (s *Server) handleAdminUpload(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) handleAdminDelete(w http.ResponseWriter, r *http.Request) {
 	if cid := r.PathValue("cid"); validCID(cid) {
-		if _, err := deleteMeta(s.db, cid); err != nil {
+		// Only drop the stored bytes when a metadata row actually existed:
+		// backup snapshots share the bucket but have no meta row, and must
+		// not be deletable through the media routes.
+		existed, err := deleteMeta(s.db, cid)
+		if err != nil {
 			slog.Error("delete metadata", "cid", cid, "err", err)
-		}
-		if err := s.store.Delete(cid); err != nil {
-			slog.Error("delete bytes", "cid", cid, "err", err)
+		} else if existed {
+			if err := s.store.Delete(cid); err != nil {
+				slog.Error("delete bytes", "cid", cid, "err", err)
+			}
 		}
 	}
 	http.Redirect(w, r, "/", http.StatusSeeOther)
@@ -409,12 +420,14 @@ func (s *Server) handleAPIDelete(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, "could not delete blob")
 		return
 	}
-	if err := s.store.Delete(cid); err != nil {
-		slog.Error("delete bytes", "cid", cid, "err", err)
-	}
 	if !existed {
+		// No meta row means this CID was never a media blob — it may be a
+		// backup snapshot sharing the bucket, so leave the bytes alone.
 		writeError(w, http.StatusNotFound, "blob not found")
 		return
+	}
+	if err := s.store.Delete(cid); err != nil {
+		slog.Error("delete bytes", "cid", cid, "err", err)
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"deleted": cid})
 }

@@ -69,7 +69,7 @@ func upsertMeta(db *sql.DB, m *Meta) error {
 		 ON CONFLICT(cid) DO UPDATE SET
 		   size=excluded.size, mime=excluded.mime, width=excluded.width,
 		   height=excluded.height, blurhash=excluded.blurhash,
-		   dominant_color=excluded.dominant_color, created_at=excluded.created_at`,
+		   dominant_color=excluded.dominant_color`,
 		m.CID, m.Size, m.Mime, m.Width, m.Height,
 		m.Blurhash, m.DominantColor, m.CreatedAt)
 	return err
