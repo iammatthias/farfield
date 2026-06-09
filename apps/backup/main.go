@@ -17,6 +17,7 @@ import (
 	"os"
 
 	"github.com/iammatthias/farfield/lib/store"
+	"github.com/iammatthias/farfield/lib/web"
 )
 
 func main() {
@@ -36,6 +37,9 @@ func main() {
 			slog.Error("fatal", "err", err)
 			os.Exit(1)
 		}
+	case "health":
+		// Probes /status — backs the Docker healthcheck (distroless: no curl).
+		os.Exit(web.Health(store.Env("BACKUP_PORT", "8791")))
 	case "snapshot":
 		if err := runSnapshot(); err != nil {
 			slog.Error("snapshot failed", "err", err)
@@ -53,7 +57,7 @@ func main() {
 		}
 	default:
 		fmt.Fprintln(os.Stderr,
-			"usage: backup [serve | snapshot | restore <app> <cid> [--confirm]]")
+			"usage: backup [serve | health | snapshot | restore <app> <cid> [--confirm]]")
 		os.Exit(2)
 	}
 }

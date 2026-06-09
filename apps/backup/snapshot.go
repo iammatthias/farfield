@@ -101,7 +101,7 @@ func snapshotOne(db *sql.DB, t appTarget, blobsURL, apiKey string) (cid string, 
 	if _, err := backup.Push(blobsURL, apiKey, data); err != nil {
 		return "", 0, false, err
 	}
-	rec := &Backup{App: t.Name, CID: cid, Size: int64(len(data)), CreatedAt: nowRFC3339()}
+	rec := &Backup{App: t.Name, CID: cid, Size: int64(len(data)), CreatedAt: store.NowRFC3339()}
 	if err := insertBackup(db, rec); err != nil {
 		return "", 0, false, err
 	}

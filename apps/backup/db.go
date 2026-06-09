@@ -3,8 +3,6 @@ package main
 import (
 	"database/sql"
 	"errors"
-	"fmt"
-	"time"
 
 	"github.com/iammatthias/farfield/lib/store"
 	_ "modernc.org/sqlite" // registers the "sqlite" driver
@@ -35,13 +33,8 @@ const backupCols = `id, app, cid, size, created_at`
 // openDB opens the SQLite database, applies pragmas, and migrates. It holds
 // the backup registry and admin login sessions.
 func openDB(path string) (*sql.DB, error) {
-	dsn := fmt.Sprintf(
-		"file:%s?_pragma=busy_timeout(5000)&_pragma=journal_mode(WAL)", path)
-	db, err := sql.Open("sqlite", dsn)
+	db, err := store.OpenDB(path)
 	if err != nil {
-		return nil, err
-	}
-	if err := db.Ping(); err != nil {
 		return nil, err
 	}
 	if _, err := db.Exec(schema); err != nil {
@@ -52,8 +45,6 @@ func openDB(path string) (*sql.DB, error) {
 	}
 	return db, nil
 }
-
-func nowRFC3339() string { return time.Now().UTC().Format(time.RFC3339) }
 
 // scanner is satisfied by both *sql.Row and *sql.Rows.
 type scanner interface{ Scan(...any) error }
