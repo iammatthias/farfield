@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/iammatthias/farfield/lib/store"
+	"github.com/iammatthias/farfield/lib/web"
 )
 
 // embedClient calls the blobs service on behalf of the editor. The timeout is
@@ -35,10 +36,10 @@ func (s *Server) handleEmbedBlob(w http.ResponseWriter, r *http.Request) {
 func (s *Server) handleEmbedSeries(w http.ResponseWriter, r *http.Request) {
 	var req embedSeriesRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil || len(req.CIDs) == 0 {
-		writeError(w, http.StatusBadRequest, "a series needs at least one blob")
+		web.WriteError(w, http.StatusBadRequest, "a series needs at least one blob")
 		return
 	}
-	now := nowRFC3339()
+	now := store.NowRFC3339()
 	se := &Series{
 		Slug:      uniqueSlug(s.db, slugify(req.Title)),
 		Title:     strings.TrimSpace(req.Title),
@@ -50,7 +51,7 @@ func (s *Server) handleEmbedSeries(w http.ResponseWriter, r *http.Request) {
 		s.fail(w, "create series", err)
 		return
 	}
-	writeJSON(w, http.StatusCreated, se)
+	web.WriteJSON(w, http.StatusCreated, se)
 }
 
 // handleAPICreateSeries creates a series fragment from a posted JSON body. It
@@ -59,18 +60,18 @@ func (s *Server) handleEmbedSeries(w http.ResponseWriter, r *http.Request) {
 func (s *Server) handleAPICreateSeries(w http.ResponseWriter, r *http.Request) {
 	var se Series
 	if err := json.NewDecoder(r.Body).Decode(&se); err != nil {
-		writeError(w, http.StatusBadRequest, "invalid JSON")
+		web.WriteError(w, http.StatusBadRequest, "invalid JSON")
 		return
 	}
 	se.Slug = uniqueSlug(s.db, firstNonEmpty(slugify(se.Slug), slugify(se.Title)))
 	se.Title = strings.TrimSpace(se.Title)
-	now := nowRFC3339()
+	now := store.NowRFC3339()
 	se.CreatedAt, se.UpdatedAt = now, now
 	if err := upsertSeries(s.db, &se); err != nil {
-		writeError(w, http.StatusInternalServerError, "could not create series")
+		web.WriteError(w, http.StatusInternalServerError, "could not create series")
 		return
 	}
-	writeJSON(w, http.StatusCreated, se)
+	web.WriteJSON(w, http.StatusCreated, se)
 }
 
 // uniqueSlug returns a slug based on candidate that no series uses yet — the
@@ -102,24 +103,24 @@ func seriesBodyFromCIDs(cids []string) string {
 // service as raw bytes with the API key attached, and relays the response.
 func proxyBlobUpload(w http.ResponseWriter, r *http.Request, blobsURL, apiKey string) {
 	if err := r.ParseMultipartForm(64 << 20); err != nil {
-		writeError(w, http.StatusBadRequest, "invalid upload")
+		web.WriteError(w, http.StatusBadRequest, "invalid upload")
 		return
 	}
 	file, hdr, err := r.FormFile("file")
 	if err != nil {
-		writeError(w, http.StatusBadRequest, "missing file")
+		web.WriteError(w, http.StatusBadRequest, "missing file")
 		return
 	}
 	defer file.Close()
 	data, err := io.ReadAll(file)
 	if err != nil {
-		writeError(w, http.StatusBadRequest, "could not read upload")
+		web.WriteError(w, http.StatusBadRequest, "could not read upload")
 		return
 	}
 	req, err := http.NewRequest(http.MethodPost,
 		strings.TrimRight(blobsURL, "/")+"/blobs", bytes.NewReader(data))
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, "could not build request")
+		web.WriteError(w, http.StatusInternalServerError, "could not build request")
 		return
 	}
 	req.Header.Set("X-API-Key", apiKey)
@@ -128,7 +129,7 @@ func proxyBlobUpload(w http.ResponseWriter, r *http.Request, blobsURL, apiKey st
 	}
 	resp, err := embedClient.Do(req)
 	if err != nil {
-		writeError(w, http.StatusBadGateway, "blobs service unreachable")
+		web.WriteError(w, http.StatusBadGateway, "blobs service unreachable")
 		return
 	}
 	defer resp.Body.Close()

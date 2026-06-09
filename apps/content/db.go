@@ -93,14 +93,8 @@ CREATE TABLE IF NOT EXISTS series (
 // openDB opens the SQLite database, applies pragmas, and migrates. Foreign
 // keys are on so deleting a collection cascades to its entries.
 func openDB(path string) (*sql.DB, error) {
-	dsn := fmt.Sprintf(
-		"file:%s?_pragma=busy_timeout(5000)&_pragma=journal_mode(WAL)&_pragma=foreign_keys(ON)",
-		path)
-	db, err := sql.Open("sqlite", dsn)
+	db, err := store.OpenDB(path)
 	if err != nil {
-		return nil, err
-	}
-	if err := db.Ping(); err != nil {
 		return nil, err
 	}
 	if _, err := db.Exec(schema); err != nil {
@@ -110,14 +104,14 @@ func openDB(path string) (*sql.DB, error) {
 		return nil, err
 	}
 	// Migrate pre-rename databases: the series stable key went rkey -> slug.
-	if err := renameColumn(db, "series", "rkey", "slug"); err != nil {
+	if err := store.RenameColumn(db, "series", "rkey", "slug"); err != nil {
 		return nil, err
 	}
 	// Migrate databases created before CIDs: add the column, then backfill.
-	if err := ensureColumn(db, "entries", "cid", "TEXT NOT NULL DEFAULT ''"); err != nil {
+	if err := store.EnsureColumn(db, "entries", "cid", "TEXT NOT NULL DEFAULT ''"); err != nil {
 		return nil, err
 	}
-	if err := ensureColumn(db, "series", "cid", "TEXT NOT NULL DEFAULT ''"); err != nil {
+	if err := store.EnsureColumn(db, "series", "cid", "TEXT NOT NULL DEFAULT ''"); err != nil {
 		return nil, err
 	}
 	if err := backfillCIDs(db); err != nil {
@@ -125,41 +119,6 @@ func openDB(path string) (*sql.DB, error) {
 	}
 	return db, nil
 }
-
-// ensureColumn adds a column to a table if it is not already present. The
-// table/column/decl are code constants, so the string-built DDL is safe.
-func ensureColumn(db *sql.DB, table, column, decl string) error {
-	var n int
-	if err := db.QueryRow(
-		`SELECT COUNT(*) FROM pragma_table_info(?) WHERE name = ?`,
-		table, column).Scan(&n); err != nil {
-		return err
-	}
-	if n > 0 {
-		return nil
-	}
-	_, err := db.Exec("ALTER TABLE " + table + " ADD COLUMN " + column + " " + decl)
-	return err
-}
-
-// renameColumn renames a table column when the old name still exists and the
-// new one does not — a one-time migration for databases predating a rename.
-func renameColumn(db *sql.DB, table, oldName, newName string) error {
-	var hasOld, hasNew int
-	if err := db.QueryRow(`SELECT
-		(SELECT COUNT(*) FROM pragma_table_info(?) WHERE name = ?),
-		(SELECT COUNT(*) FROM pragma_table_info(?) WHERE name = ?)`,
-		table, oldName, table, newName).Scan(&hasOld, &hasNew); err != nil {
-		return err
-	}
-	if hasOld == 0 || hasNew > 0 {
-		return nil
-	}
-	_, err := db.Exec("ALTER TABLE " + table + " RENAME COLUMN " + oldName + " TO " + newName)
-	return err
-}
-
-func nowRFC3339() string { return time.Now().UTC().Format(time.RFC3339) }
 
 func encodeTags(tags []string) string {
 	if tags == nil {
@@ -309,7 +268,7 @@ func getCollection(db *sql.DB, slug string) (*Collection, error) {
 
 // insertCollection creates a collection. The slug must be unique.
 func insertCollection(db *sql.DB, c *Collection) error {
-	c.CreatedAt = nowRFC3339()
+	c.CreatedAt = store.NowRFC3339()
 	res, err := db.Exec(
 		`INSERT INTO collections (slug, name, description, created_at) VALUES (?, ?, ?, ?)`,
 		c.Slug, c.Name, c.Description, c.CreatedAt)
@@ -449,7 +408,7 @@ func updateEntry(db *sql.DB, currentSlug string, e *Entry) error {
 	if err != nil {
 		return err
 	}
-	e.UpdatedAt = nowRFC3339()
+	e.UpdatedAt = store.NowRFC3339()
 	e.CID = entryCID(e)
 	res, err := db.Exec(
 		`UPDATE entries SET collection_id = ?, slug = ?, title = ?, excerpt = ?,
@@ -505,7 +464,7 @@ func importEntry(db *sql.DB, e *Entry) error {
 		return err
 	}
 	if e.CreatedAt == "" {
-		e.CreatedAt = nowRFC3339()
+		e.CreatedAt = store.NowRFC3339()
 	}
 	if e.UpdatedAt == "" {
 		e.UpdatedAt = e.CreatedAt

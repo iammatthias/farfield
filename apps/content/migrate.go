@@ -11,6 +11,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/iammatthias/farfield/lib/store"
 	"gopkg.in/yaml.v3"
 )
 
@@ -59,7 +60,7 @@ func importSeries(db *sql.DB, oldDBPath string) error {
 		}
 		created := normalizeTime(old.Created)
 		if created == "" {
-			created = nowRFC3339()
+			created = store.NowRFC3339()
 		}
 		s := &Series{
 			Slug:      slug,

@@ -19,6 +19,7 @@ import (
 	"os"
 
 	"github.com/iammatthias/farfield/lib/store"
+	"github.com/iammatthias/farfield/lib/web"
 )
 
 func main() {
@@ -38,6 +39,9 @@ func main() {
 			slog.Error("fatal", "err", err)
 			os.Exit(1)
 		}
+	case "health":
+		// Probes /status — backs the Docker healthcheck (distroless: no curl).
+		os.Exit(web.Health(store.Env("CONTENT_PORT", "8787")))
 	case "import-vault":
 		if len(os.Args) < 3 {
 			fmt.Fprintln(os.Stderr, "usage: content import-vault <dir>")
@@ -68,7 +72,7 @@ func main() {
 		}
 	default:
 		fmt.Fprintln(os.Stderr,
-			"usage: content [serve | import-vault <dir> | import-series <old-content-db> | reslug-series | reslug-entries]")
+			"usage: content [serve | health | import-vault <dir> | import-series <old-content-db> | reslug-series | reslug-entries]")
 		os.Exit(2)
 	}
 }
