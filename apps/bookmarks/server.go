@@ -406,7 +406,10 @@ func (s *Server) handleAPIUpdate(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusNotFound, "bookmark not found")
 		return
 	}
-	var b Bookmark
+	// Decode over a copy of the existing record so a partial body updates
+	// only the fields it names — fetched OG metadata, favicon, category,
+	// and flags survive instead of being zeroed.
+	b := *existing
 	if err := json.NewDecoder(r.Body).Decode(&b); err != nil {
 		writeError(w, http.StatusBadRequest, "invalid JSON")
 		return
@@ -414,6 +417,7 @@ func (s *Server) handleAPIUpdate(w http.ResponseWriter, r *http.Request) {
 	if strings.TrimSpace(b.URL) == "" {
 		b.URL = existing.URL
 	}
+	b.ID = existing.ID
 	b.CreatedAt = existing.CreatedAt
 	ok, err := updateBookmark(s.db, id, &b)
 	if err != nil {
