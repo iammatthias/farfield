@@ -5,10 +5,13 @@ import (
 	"embed"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"log/slog"
 	"net/http"
+	"strconv"
 	"strings"
 
+	"github.com/iammatthias/farfield/lib/cid"
 	"github.com/iammatthias/farfield/lib/store"
 	"github.com/iammatthias/farfield/lib/theme"
 	"github.com/iammatthias/farfield/lib/web"
@@ -126,19 +129,20 @@ func (s *Server) handleDashboard(w http.ResponseWriter, r *http.Request) {
 		s.fail(w, "list collections", err)
 		return
 	}
-	entries, err := listEntries(s.db, "", false)
+	recent, err := listEntries(s.db, "", false, 12)
 	if err != nil {
 		s.fail(w, "list entries", err)
 		return
 	}
-	recent := entries
-	if len(recent) > 12 {
-		recent = recent[:12]
+	total, err := countEntries(s.db, "", false)
+	if err != nil {
+		s.fail(w, "count entries", err)
+		return
 	}
 	s.rd.Render(w, "dashboard.html", map[string]any{
 		"Collections": collections,
 		"Entries":     recent,
-		"TotalCount":  len(entries),
+		"TotalCount":  total,
 	})
 }
 
@@ -219,7 +223,7 @@ func (s *Server) handleDeleteCollection(w http.ResponseWriter, r *http.Request) 
 
 func (s *Server) handleEntries(w http.ResponseWriter, r *http.Request) {
 	filter := r.URL.Query().Get("collection")
-	entries, err := listEntries(s.db, filter, false)
+	entries, err := listEntries(s.db, filter, false, 0)
 	if err != nil {
 		s.fail(w, "list entries", err)
 		return
@@ -329,13 +333,13 @@ func (s *Server) handleLoginForm(w http.ResponseWriter, r *http.Request) {
 // ── public JSON read API ───────────────────────────────────────────────────
 
 func (s *Server) handleStatus(w http.ResponseWriter, r *http.Request) {
-	collections, err := listCollections(s.db)
+	n, err := countCollections(s.db)
 	if err != nil {
 		web.WriteError(w, http.StatusInternalServerError, "could not read database")
 		return
 	}
 	web.WriteJSON(w, http.StatusOK, map[string]any{
-		"service": "content", "ok": true, "collections": len(collections),
+		"service": "content", "ok": true, "collections": n,
 	})
 }
 
@@ -348,11 +352,33 @@ func (s *Server) handleAPICollections(w http.ResponseWriter, r *http.Request) {
 	if collections == nil {
 		collections = []Collection{}
 	}
-	web.WriteJSON(w, http.StatusOK, map[string]any{"collections": collections})
+	// Collections lack an updated_at column, so there is no cheap pre-query
+	// fingerprint that catches renames — the ETag comes from the loaded rows
+	// instead. The rows are tiny; the 304 saves serialization and bandwidth.
+	web.WriteRecord(w, r, cid.OfValue(collections), map[string]any{"collections": collections})
 }
 
 func (s *Server) handleAPIEntries(w http.ResponseWriter, r *http.Request) {
-	entries, err := listEntries(s.db, r.URL.Query().Get("collection"), true)
+	q := r.URL.Query()
+	collection := q.Get("collection")
+	limit, page := parsePaging(q.Get("limit"), q.Get("page"))
+
+	// List-level ETag from a cheap fingerprint, checked before the full list
+	// query — an unchanged client revalidates without a single body loading.
+	fp, err := entriesFingerprint(s.db, collection)
+	if err != nil {
+		web.WriteError(w, http.StatusInternalServerError, "could not list entries")
+		return
+	}
+	if listETagDone(w, r, fmt.Sprintf("entries|%s|%d|%d|%s", collection, limit, page, fp)) {
+		return
+	}
+
+	offset := 0
+	if limit > 0 {
+		offset = (page - 1) * limit
+	}
+	entries, err := listEntriesFull(s.db, collection, true, limit, offset)
 	if err != nil {
 		web.WriteError(w, http.StatusInternalServerError, "could not list entries")
 		return
@@ -361,6 +387,44 @@ func (s *Server) handleAPIEntries(w http.ResponseWriter, r *http.Request) {
 		entries = []Entry{}
 	}
 	web.WriteJSON(w, http.StatusOK, map[string]any{"entries": entries})
+}
+
+// maxPageSize caps a requested page of /api/entries.
+const maxPageSize = 500
+
+// parsePaging reads ?limit= and ?page= (1-based). No params means the full
+// list (limit 0) — the original, backward-compatible response. An explicit
+// limit is capped at maxPageSize; a page without a limit implies the cap.
+func parsePaging(limitStr, pageStr string) (limit, page int) {
+	if limitStr != "" {
+		limit, _ = strconv.Atoi(limitStr)
+	}
+	page = 1
+	if p, err := strconv.Atoi(pageStr); err == nil && p > 1 {
+		page = p
+	}
+	if limit <= 0 {
+		limit = 0
+		if page > 1 {
+			limit = maxPageSize
+		}
+	} else if limit > maxPageSize {
+		limit = maxPageSize
+	}
+	return limit, page
+}
+
+// listETagDone hashes fingerprint into a list-level ETag, sets the caching
+// headers, and reports whether the request was satisfied with a 304.
+func listETagDone(w http.ResponseWriter, r *http.Request, fingerprint string) bool {
+	etag := cid.Of([]byte(fingerprint))
+	w.Header().Set("ETag", `"`+etag+`"`)
+	w.Header().Set("Cache-Control", "no-cache")
+	if web.ETagMatch(r, etag) {
+		w.WriteHeader(http.StatusNotModified)
+		return true
+	}
+	return false
 }
 
 func (s *Server) handleAPIEntry(w http.ResponseWriter, r *http.Request) {
@@ -562,6 +626,14 @@ func (s *Server) renderSeriesForm(w http.ResponseWriter, se *Series, isNew bool,
 // ── series: public JSON ────────────────────────────────────────────────────
 
 func (s *Server) handleAPISeries(w http.ResponseWriter, r *http.Request) {
+	fp, err := seriesFingerprint(s.db)
+	if err != nil {
+		web.WriteError(w, http.StatusInternalServerError, "could not list series")
+		return
+	}
+	if listETagDone(w, r, "series|"+fp) {
+		return
+	}
 	series, err := listSeries(s.db)
 	if err != nil {
 		web.WriteError(w, http.StatusInternalServerError, "could not list series")

@@ -1,9 +1,9 @@
 package main
 
 import (
-	"bytes"
 	"database/sql"
 	"encoding/json"
+	"errors"
 	"io"
 	"net/http"
 	"strings"
@@ -99,41 +99,59 @@ func seriesBodyFromCIDs(cids []string) string {
 	return strings.Join(lines, "\n\n")
 }
 
+// maxEmbedUpload caps a proxied upload — it matches the blobs service's own
+// 100 MiB limit, so the proxy never accepts more than blobs would.
+const maxEmbedUpload = 100 << 20
+
 // proxyBlobUpload forwards a browser multipart upload ("file") to the blobs
 // service as raw bytes with the API key attached, and relays the response.
+// The file part streams straight through as the upstream request body — the
+// upload is never buffered in memory.
 func proxyBlobUpload(w http.ResponseWriter, r *http.Request, blobsURL, apiKey string) {
-	if err := r.ParseMultipartForm(64 << 20); err != nil {
+	r.Body = http.MaxBytesReader(w, r.Body, maxEmbedUpload)
+	mr, err := r.MultipartReader()
+	if err != nil {
 		web.WriteError(w, http.StatusBadRequest, "invalid upload")
 		return
 	}
-	file, hdr, err := r.FormFile("file")
-	if err != nil {
-		web.WriteError(w, http.StatusBadRequest, "missing file")
+	for {
+		part, err := mr.NextPart()
+		if errors.Is(err, io.EOF) {
+			web.WriteError(w, http.StatusBadRequest, "missing file")
+			return
+		}
+		if err != nil {
+			web.WriteError(w, http.StatusBadRequest, "invalid upload")
+			return
+		}
+		if part.FormName() != "file" {
+			continue
+		}
+
+		req, err := http.NewRequestWithContext(r.Context(), http.MethodPost,
+			strings.TrimRight(blobsURL, "/")+"/blobs", part)
+		if err != nil {
+			web.WriteError(w, http.StatusInternalServerError, "could not build request")
+			return
+		}
+		req.Header.Set("X-API-Key", apiKey)
+		if ct := part.Header.Get("Content-Type"); ct != "" {
+			req.Header.Set("Content-Type", ct)
+		}
+		resp, err := embedClient.Do(req)
+		if err != nil {
+			var tooBig *http.MaxBytesError
+			if errors.As(err, &tooBig) {
+				web.WriteError(w, http.StatusRequestEntityTooLarge, "upload too large")
+				return
+			}
+			web.WriteError(w, http.StatusBadGateway, "blobs service unreachable")
+			return
+		}
+		defer resp.Body.Close()
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(resp.StatusCode)
+		_, _ = io.Copy(w, resp.Body)
 		return
 	}
-	defer file.Close()
-	data, err := io.ReadAll(file)
-	if err != nil {
-		web.WriteError(w, http.StatusBadRequest, "could not read upload")
-		return
-	}
-	req, err := http.NewRequest(http.MethodPost,
-		strings.TrimRight(blobsURL, "/")+"/blobs", bytes.NewReader(data))
-	if err != nil {
-		web.WriteError(w, http.StatusInternalServerError, "could not build request")
-		return
-	}
-	req.Header.Set("X-API-Key", apiKey)
-	if ct := hdr.Header.Get("Content-Type"); ct != "" {
-		req.Header.Set("Content-Type", ct)
-	}
-	resp, err := embedClient.Do(req)
-	if err != nil {
-		web.WriteError(w, http.StatusBadGateway, "blobs service unreachable")
-		return
-	}
-	defer resp.Body.Close()
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(resp.StatusCode)
-	_, _ = io.Copy(w, resp.Body)
 }

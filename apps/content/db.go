@@ -252,6 +252,14 @@ func listCollections(db *sql.DB) ([]Collection, error) {
 	return out, rows.Err()
 }
 
+// countCollections returns the number of collections — a cheap status probe
+// that avoids loading every row.
+func countCollections(db *sql.DB) (int, error) {
+	var n int
+	err := db.QueryRow(`SELECT COUNT(*) FROM collections`).Scan(&n)
+	return n, err
+}
+
 // getCollection returns a collection by slug, or (nil, nil) if absent.
 func getCollection(db *sql.DB, slug string) (*Collection, error) {
 	c, err := scanCollection(db.QueryRow(
@@ -310,6 +318,12 @@ func deleteCollection(db *sql.DB, slug string) (bool, error) {
 const entryCols = `e.id, c.slug, e.slug, e.cid, e.title, e.excerpt, e.body, e.tags,
 	e.published, e.created_at, e.updated_at`
 
+// entryListCols is the body-less projection for list views: the same shape as
+// entryCols — so scanEntry works unchanged — with ” standing in for the
+// (potentially large) markdown body.
+const entryListCols = `e.id, c.slug, e.slug, e.cid, e.title, e.excerpt, '' AS body, e.tags,
+	e.published, e.created_at, e.updated_at`
+
 func scanEntry(row interface{ Scan(...any) error }) (*Entry, error) {
 	var e Entry
 	var tags string
@@ -321,10 +335,22 @@ func scanEntry(row interface{ Scan(...any) error }) (*Entry, error) {
 	return &e, nil
 }
 
-// listEntries returns entries, newest first. collection filters by collection
-// slug ("" = all); publishedOnly restricts to published entries.
-func listEntries(db *sql.DB, collection string, publishedOnly bool) ([]Entry, error) {
-	q := `SELECT ` + entryCols + `
+// listEntries returns entries without bodies (Body == ""), newest first — the
+// projection for list views, which never render bodies. collection filters by
+// collection slug ("" = all); publishedOnly restricts to published entries;
+// limit caps the result (<= 0 means no limit).
+func listEntries(db *sql.DB, collection string, publishedOnly bool, limit int) ([]Entry, error) {
+	return queryEntries(db, entryListCols, collection, publishedOnly, limit, 0)
+}
+
+// listEntriesFull is listEntries with full markdown bodies, plus an offset for
+// paging — for the public API and exports, whose consumers render bodies.
+func listEntriesFull(db *sql.DB, collection string, publishedOnly bool, limit, offset int) ([]Entry, error) {
+	return queryEntries(db, entryCols, collection, publishedOnly, limit, offset)
+}
+
+func queryEntries(db *sql.DB, cols, collection string, publishedOnly bool, limit, offset int) ([]Entry, error) {
+	q := `SELECT ` + cols + `
 	      FROM entries e JOIN collections c ON c.id = e.collection_id`
 	var where []string
 	var args []any
@@ -339,6 +365,14 @@ func listEntries(db *sql.DB, collection string, publishedOnly bool) ([]Entry, er
 		q += " WHERE " + strings.Join(where, " AND ")
 	}
 	q += " ORDER BY e.created_at DESC"
+	if limit > 0 {
+		q += " LIMIT ?"
+		args = append(args, limit)
+		if offset > 0 {
+			q += " OFFSET ?"
+			args = append(args, offset)
+		}
+	}
 
 	rows, err := db.Query(q, args...)
 	if err != nil {
@@ -354,6 +388,53 @@ func listEntries(db *sql.DB, collection string, publishedOnly bool) ([]Entry, er
 		out = append(out, *e)
 	}
 	return out, rows.Err()
+}
+
+// countEntries returns the number of entries, optionally filtered to one
+// collection and to published entries only.
+func countEntries(db *sql.DB, collection string, publishedOnly bool) (int, error) {
+	q := `SELECT COUNT(*) FROM entries e`
+	var where []string
+	var args []any
+	if collection != "" {
+		q += ` JOIN collections c ON c.id = e.collection_id`
+		where = append(where, "c.slug = ?")
+		args = append(args, collection)
+	}
+	if publishedOnly {
+		where = append(where, "e.published = 1")
+	}
+	if len(where) > 0 {
+		q += " WHERE " + strings.Join(where, " AND ")
+	}
+	var n int
+	err := db.QueryRow(q, args...).Scan(&n)
+	return n, err
+}
+
+// entriesFingerprint returns a cheap change fingerprint for the published
+// entry list — "<count>-<max updated_at>" — used to derive a list-level ETag
+// without loading any bodies. collection filters by collection slug ("" = all).
+func entriesFingerprint(db *sql.DB, collection string) (string, error) {
+	q := `SELECT COUNT(*) || '-' || COALESCE(MAX(e.updated_at), '') FROM entries e`
+	var args []any
+	if collection != "" {
+		q += ` JOIN collections c ON c.id = e.collection_id WHERE e.published = 1 AND c.slug = ?`
+		args = append(args, collection)
+	} else {
+		q += ` WHERE e.published = 1`
+	}
+	var fp string
+	err := db.QueryRow(q, args...).Scan(&fp)
+	return fp, err
+}
+
+// seriesFingerprint is entriesFingerprint for the series table.
+func seriesFingerprint(db *sql.DB) (string, error) {
+	var fp string
+	err := db.QueryRow(
+		`SELECT COUNT(*) || '-' || COALESCE(MAX(updated_at), '') FROM series`).Scan(&fp)
+	return fp, err
 }
 
 // getEntry returns an entry by slug, or (nil, nil) if absent.

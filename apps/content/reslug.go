@@ -20,7 +20,7 @@ var tsPrefix = regexp.MustCompile(`^[0-9]+-`)
 // reslugSeries, this is a mechanical key fix, not a content edit. All in one
 // transaction.
 func reslugEntries(db *sql.DB) error {
-	entries, err := listEntries(db, "", false)
+	entries, err := listEntriesFull(db, "", false, 0, 0)
 	if err != nil {
 		return err
 	}
@@ -90,7 +90,7 @@ func reslugSeries(db *sql.DB) error {
 	if err != nil {
 		return err
 	}
-	entries, err := listEntries(db, "", false)
+	entries, err := listEntriesFull(db, "", false, 0, 0)
 	if err != nil {
 		return err
 	}
