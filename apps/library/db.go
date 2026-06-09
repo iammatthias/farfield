@@ -3,7 +3,6 @@ package main
 import (
 	"database/sql"
 	"errors"
-	"fmt"
 
 	"github.com/iammatthias/farfield/lib/store"
 	_ "modernc.org/sqlite" // registers the "sqlite" driver
@@ -53,13 +52,8 @@ const bookCols = `cid, title, author, language, identifier, description, collect
 // book metadata index and admin login sessions; book and cover bytes live in
 // the ByteStore.
 func openDB(path string) (*sql.DB, error) {
-	dsn := fmt.Sprintf(
-		"file:%s?_pragma=busy_timeout(5000)&_pragma=journal_mode(WAL)", path)
-	db, err := sql.Open("sqlite", dsn)
+	db, err := store.OpenDB(path)
 	if err != nil {
-		return nil, err
-	}
-	if err := db.Ping(); err != nil {
 		return nil, err
 	}
 	if _, err := db.Exec(schema); err != nil {
@@ -70,7 +64,7 @@ func openDB(path string) (*sql.DB, error) {
 	}
 	// Self-migrate: add the collection column to databases created before it
 	// existed, then index it (the index can only be built once the column is).
-	if err := ensureColumn(db, "books", "collection", "TEXT NOT NULL DEFAULT ''"); err != nil {
+	if err := store.EnsureColumn(db, "books", "collection", "TEXT NOT NULL DEFAULT ''"); err != nil {
 		return nil, err
 	}
 	if _, err := db.Exec(
@@ -78,30 +72,6 @@ func openDB(path string) (*sql.DB, error) {
 		return nil, err
 	}
 	return db, nil
-}
-
-// ensureColumn adds a column to a table when it is missing, so an existing
-// database picks up a new field on deploy with no migration tooling.
-func ensureColumn(db *sql.DB, table, column, decl string) error {
-	rows, err := db.Query(`SELECT name FROM pragma_table_info(?)`, table)
-	if err != nil {
-		return err
-	}
-	defer rows.Close()
-	for rows.Next() {
-		var name string
-		if err := rows.Scan(&name); err != nil {
-			return err
-		}
-		if name == column {
-			return nil
-		}
-	}
-	if err := rows.Err(); err != nil {
-		return err
-	}
-	_, err = db.Exec(`ALTER TABLE ` + table + ` ADD COLUMN ` + column + ` ` + decl)
-	return err
 }
 
 // scanner is satisfied by both *sql.Row and *sql.Rows.

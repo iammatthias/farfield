@@ -19,6 +19,7 @@ import (
 	"github.com/iammatthias/farfield/lib/auth"
 	"github.com/iammatthias/farfield/lib/cid"
 	"github.com/iammatthias/farfield/lib/store"
+	"github.com/iammatthias/farfield/lib/web"
 )
 
 // buildEPUB assembles a minimal but valid EPUB in memory: the stored mimetype
@@ -103,18 +104,16 @@ func newTestServer(t *testing.T) *Server {
 	if err != nil {
 		t.Fatal(err)
 	}
-	tmpl, err := parseTemplates()
+	tmpl, err := web.ParseTemplates(assets, tmplFuncs)
 	if err != nil {
 		t.Fatal(err)
 	}
 	return &Server{
 		db:        db,
 		store:     bs,
-		templates: tmpl,
-		password:  "pw",
-		apiKey:    "secret",
+		auth:      &web.Auth{DB: db, Password: "pw", APIKey: "secret"},
+		rd:        &web.Renderer{Templates: tmpl, AssetVer: "test"},
 		maxUpload: defaultMaxUpload,
-		assetVer:  "test",
 	}
 }
 
@@ -155,7 +154,7 @@ func TestBulkUpload(t *testing.T) {
 	s := newTestServer(t)
 	h := s.routes()
 
-	// A live admin session so requireSession lets the upload through.
+	// A live admin session so RequireSession lets the upload through.
 	token := auth.NewSessionToken()
 	if err := store.InsertSession(s.db, token, time.Now().Add(time.Hour)); err != nil {
 		t.Fatal(err)

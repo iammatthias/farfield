@@ -1,32 +1,24 @@
 package main
 
 import (
-	"bytes"
-	"context"
 	"database/sql"
 	"embed"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"html/template"
 	"io"
-	"io/fs"
 	"log/slog"
 	"mime/multipart"
-	"net"
 	"net/http"
 	"net/url"
 	"os"
-	"os/signal"
 	"path"
 	"strings"
-	"syscall"
-	"time"
 
-	"github.com/iammatthias/farfield/lib/auth"
 	"github.com/iammatthias/farfield/lib/cid"
 	"github.com/iammatthias/farfield/lib/store"
 	"github.com/iammatthias/farfield/lib/theme"
+	"github.com/iammatthias/farfield/lib/web"
 )
 
 //go:embed templates
@@ -36,14 +28,11 @@ const defaultMaxUpload = 100 << 20 // 100 MiB
 
 // Server holds the running OPDS service.
 type Server struct {
-	db           *sql.DB
-	store        ByteStore
-	templates    map[string]*template.Template
-	password     string
-	apiKey       string
-	cookieSecure bool
-	maxUpload    int64
-	assetVer     string // content hash of the stylesheet — cache-busts the URL
+	db        *sql.DB
+	store     ByteStore
+	auth      *web.Auth
+	rd        *web.Renderer
+	maxUpload int64
 }
 
 // openStore selects the byte-store backend from the environment.
@@ -74,6 +63,9 @@ func run(host, port string) error {
 		return err
 	}
 	defer db.Close()
+	if err := store.PruneSessions(db); err != nil {
+		slog.Warn("could not prune sessions", "err", err)
+	}
 
 	bs, desc, err := openStore()
 	if err != nil {
@@ -81,57 +73,42 @@ func run(host, port string) error {
 	}
 	slog.Info("book store", "backend", desc)
 
-	tmpl, err := parseTemplates()
+	tmpl, err := web.ParseTemplates(assets, tmplFuncs)
 	if err != nil {
 		return err
 	}
 
 	s := &Server{
-		db:           db,
-		store:        bs,
-		templates:    tmpl,
-		password:     store.Env("PASSWORD", ""),
-		apiKey:       store.Env("LIBRARY_API_KEY", ""),
-		cookieSecure: store.Env("COOKIE_SECURE", "false") == "true",
-		maxUpload:    defaultMaxUpload,
-		assetVer:     cid.Of([]byte(theme.CSS))[:16],
+		db:    db,
+		store: bs,
+		auth: &web.Auth{
+			DB:           db,
+			Password:     store.Env("PASSWORD", ""),
+			APIKey:       store.Env("LIBRARY_API_KEY", ""),
+			CookieSecure: store.Env("COOKIE_SECURE", "false") == "true",
+		},
+		rd:        &web.Renderer{Templates: tmpl, AssetVer: theme.Version},
+		maxUpload: defaultMaxUpload,
 	}
 
-	srv := &http.Server{Addr: net.JoinHostPort(host, port), Handler: s.routes()}
-
-	go func() {
-		slog.Info("listening", "addr", srv.Addr)
-		if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
-			slog.Error("server failed", "err", err)
-			os.Exit(1)
-		}
-	}()
-
-	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
-	defer stop()
-	<-ctx.Done()
-
-	slog.Info("shutting down")
-	shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-	defer cancel()
-	return srv.Shutdown(shutdownCtx)
+	return web.Serve(host, port, s.routes())
 }
 
 func (s *Server) routes() http.Handler {
 	mux := http.NewServeMux()
 
 	// HTML admin UI — session-gated.
-	mux.HandleFunc("GET /{$}", s.requireSession(s.handleIndex))
-	mux.HandleFunc("GET /upload", s.requireSession(s.handleUploadForm))
-	mux.HandleFunc("POST /upload", s.requireSession(s.handleAdminUpload))
-	mux.HandleFunc("POST /upload/file", s.requireSession(s.handleUploadJSON))
-	mux.HandleFunc("POST /books/collection", s.requireSession(s.handleBulkCollection))
-	mux.HandleFunc("POST /books/{cid}/delete", s.requireSession(s.handleAdminDelete))
+	mux.HandleFunc("GET /{$}", s.auth.RequireSession(s.handleIndex))
+	mux.HandleFunc("GET /upload", s.auth.RequireSession(s.handleUploadForm))
+	mux.HandleFunc("POST /upload", s.auth.RequireSession(s.handleAdminUpload))
+	mux.HandleFunc("POST /upload/file", s.auth.RequireSession(s.handleUploadJSON))
+	mux.HandleFunc("POST /books/collection", s.auth.RequireSession(s.handleBulkCollection))
+	mux.HandleFunc("POST /books/{cid}/delete", s.auth.RequireSession(s.handleAdminDelete))
 
 	// Login — public HTML.
 	mux.HandleFunc("GET /login", s.handleLoginForm)
-	mux.HandleFunc("POST /login", s.handleLogin)
-	mux.HandleFunc("GET /logout", s.handleLogout)
+	mux.HandleFunc("POST /login", s.auth.HandleLogin)
+	mux.HandleFunc("GET /logout", s.auth.HandleLogout)
 
 	// OPDS catalog — session OR HTTP Basic (the credential e-readers send).
 	// /opds is a navigation feed of folders; /opds/all and /opds/collection are
@@ -143,14 +120,16 @@ func (s *Server) routes() http.Handler {
 	mux.HandleFunc("GET /opds/cover/{cid}", s.requireCatalogAuth(s.handleCover))
 
 	// JSON write API — API-key-gated.
-	mux.HandleFunc("POST /api/books", s.requireAPIKey(s.handleUploadJSON))
-	mux.HandleFunc("DELETE /api/books/{cid}", s.requireAPIKey(s.handleAPIDelete))
+	mux.HandleFunc("POST /api/books", s.auth.RequireAPIKey(s.handleUploadJSON))
+	mux.HandleFunc("DELETE /api/books/{cid}", s.auth.RequireAPIKey(s.handleAPIDelete))
 
 	// Public health + shared theme stylesheet.
 	mux.HandleFunc("GET /status", s.handleStatus)
-	mux.HandleFunc("GET /static/styles.css", handleCSS)
+	mux.HandleFunc("GET /static/styles.css", theme.CSSHandler())
 
-	return cors(logRequests(mux))
+	// No Gzip: library's hot paths serve raw EPUB bytes and cover images,
+	// which are already compressed.
+	return web.CORS(web.LogRequests(mux), "GET", "POST", "PUT", "DELETE", "OPTIONS")
 }
 
 // storeUpload validates EPUB bytes, extracts metadata and the cover, writes
@@ -179,7 +158,7 @@ func (s *Server) storeUpload(data []byte, filename, collection string) (*Book, e
 		Collection:  strings.TrimSpace(collection),
 		Filename:    sanitizeFilename(filename),
 		Size:        int64(len(data)),
-		CreatedAt:   nowRFC3339(),
+		CreatedAt:   store.NowRFC3339(),
 	}
 
 	if len(coverBytes) > 0 {
@@ -253,7 +232,7 @@ func (s *Server) handleIndex(w http.ResponseWriter, r *http.Request) {
 		data["Root"] = false
 		data["FolderName"] = name
 		data["Books"] = books
-		s.render(w, "index.html", data)
+		s.rd.Render(w, "index.html", data)
 		return
 	}
 
@@ -268,12 +247,12 @@ func (s *Server) handleIndex(w http.ResponseWriter, r *http.Request) {
 	data["Root"] = true
 	data["Folders"] = named
 	data["Books"] = loose
-	s.render(w, "index.html", data)
+	s.rd.Render(w, "index.html", data)
 }
 
 func (s *Server) handleUploadForm(w http.ResponseWriter, r *http.Request) {
 	named, _, _ := collectionStats(s.db) // a convenience datalist; ignore errors
-	s.render(w, "upload.html", map[string]any{
+	s.rd.Render(w, "upload.html", map[string]any{
 		"Error":       r.URL.Query().Get("error"),
 		"Collections": named,
 	})
@@ -373,34 +352,7 @@ func (s *Server) handleBulkCollection(w http.ResponseWriter, r *http.Request) {
 // ── login handlers ─────────────────────────────────────────────────────────
 
 func (s *Server) handleLoginForm(w http.ResponseWriter, r *http.Request) {
-	s.render(w, "login.html", map[string]any{"Error": r.URL.Query().Get("error")})
-}
-
-func (s *Server) handleLogin(w http.ResponseWriter, r *http.Request) {
-	if err := r.ParseForm(); err != nil {
-		http.Error(w, "bad form", http.StatusBadRequest)
-		return
-	}
-	if s.password == "" || !auth.VerifyPassword(r.FormValue("password"), s.password) {
-		http.Redirect(w, r, "/login?error=Invalid+password", http.StatusSeeOther)
-		return
-	}
-	token := auth.NewSessionToken()
-	if err := store.InsertSession(s.db, token, time.Now().Add(7*24*time.Hour)); err != nil {
-		slog.Error("create session", "err", err)
-		http.Error(w, "internal error", http.StatusInternalServerError)
-		return
-	}
-	http.SetCookie(w, auth.SessionCookie(token, s.cookieSecure))
-	http.Redirect(w, r, "/", http.StatusSeeOther)
-}
-
-func (s *Server) handleLogout(w http.ResponseWriter, r *http.Request) {
-	if token, ok := auth.Session(r); ok {
-		_ = store.DeleteSession(s.db, token)
-	}
-	http.SetCookie(w, auth.ClearCookie(s.cookieSecure))
-	http.Redirect(w, r, "/login", http.StatusSeeOther)
+	s.rd.Render(w, "login.html", map[string]any{"Error": r.URL.Query().Get("error")})
 }
 
 // ── OPDS catalog ───────────────────────────────────────────────────────────
@@ -410,7 +362,7 @@ func (s *Server) handleLogout(w http.ResponseWriter, r *http.Request) {
 func (s *Server) handleOPDSRoot(w http.ResponseWriter, r *http.Request) {
 	named, uncategorized, err := collectionStats(s.db)
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, "could not read catalog")
+		web.WriteError(w, http.StatusInternalServerError, "could not read catalog")
 		return
 	}
 	total := uncategorized
@@ -428,9 +380,9 @@ func (s *Server) handleOPDSRoot(w http.ResponseWriter, r *http.Request) {
 	if uncategorized > 0 {
 		items = append(items, NavItem{Title: "Uncategorized", Href: "/opds/collection?c=", Count: uncategorized})
 	}
-	body, err := navFeedXML(items, "/opds", nowRFC3339())
+	body, err := navFeedXML(items, "/opds", store.NowRFC3339())
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, "could not render catalog")
+		web.WriteError(w, http.StatusInternalServerError, "could not render catalog")
 		return
 	}
 	w.Header().Set("Content-Type", navFeedType)
@@ -441,7 +393,7 @@ func (s *Server) handleOPDSRoot(w http.ResponseWriter, r *http.Request) {
 func (s *Server) handleOPDSAll(w http.ResponseWriter, r *http.Request) {
 	books, err := listBooks(s.db, -1, 0) // -1: every book, newest first
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, "could not read catalog")
+		web.WriteError(w, http.StatusInternalServerError, "could not read catalog")
 		return
 	}
 	s.writeAcquisition(w, books, "farfield · library — All books", "/opds/all")
@@ -453,7 +405,7 @@ func (s *Server) handleOPDSCollection(w http.ResponseWriter, r *http.Request) {
 	name := r.URL.Query().Get("c")
 	books, err := listBooksByCollection(s.db, name)
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, "could not read catalog")
+		web.WriteError(w, http.StatusInternalServerError, "could not read catalog")
 		return
 	}
 	label := name
@@ -465,13 +417,13 @@ func (s *Server) handleOPDSCollection(w http.ResponseWriter, r *http.Request) {
 
 // writeAcquisition renders and writes an OPDS acquisition feed.
 func (s *Server) writeAcquisition(w http.ResponseWriter, books []Book, title, selfHref string) {
-	updated := nowRFC3339()
+	updated := store.NowRFC3339()
 	if len(books) > 0 {
 		updated = books[0].CreatedAt
 	}
 	body, err := catalogXML(books, title, selfHref, updated)
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, "could not render catalog")
+		web.WriteError(w, http.StatusInternalServerError, "could not render catalog")
 		return
 	}
 	w.Header().Set("Content-Type", feedType)
@@ -481,7 +433,7 @@ func (s *Server) writeAcquisition(w http.ResponseWriter, books []Book, title, se
 func (s *Server) handleDownload(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("cid")
 	if !validCID(id) {
-		writeError(w, http.StatusBadRequest, "malformed cid")
+		web.WriteError(w, http.StatusBadRequest, "malformed cid")
 		return
 	}
 	etag := `"` + id + `"`
@@ -491,21 +443,21 @@ func (s *Server) handleDownload(w http.ResponseWriter, r *http.Request) {
 	}
 	b, err := getBook(s.db, id)
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, "could not read book")
+		web.WriteError(w, http.StatusInternalServerError, "could not read book")
 		return
 	}
 	if b == nil {
-		writeError(w, http.StatusNotFound, "book not found")
+		web.WriteError(w, http.StatusNotFound, "book not found")
 		return
 	}
 	data, err := s.store.Get(id)
 	if err != nil {
 		slog.Error("get epub bytes", "cid", id, "err", err)
-		writeError(w, http.StatusInternalServerError, "could not read book")
+		web.WriteError(w, http.StatusInternalServerError, "could not read book")
 		return
 	}
 	if data == nil {
-		writeError(w, http.StatusNotFound, "book not found")
+		web.WriteError(w, http.StatusNotFound, "book not found")
 		return
 	}
 	w.Header().Set("Content-Type", epubMime)
@@ -519,7 +471,7 @@ func (s *Server) handleDownload(w http.ResponseWriter, r *http.Request) {
 func (s *Server) handleCover(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("cid")
 	if !validCID(id) {
-		writeError(w, http.StatusBadRequest, "malformed cid")
+		web.WriteError(w, http.StatusBadRequest, "malformed cid")
 		return
 	}
 	etag := `"` + id + `"`
@@ -530,21 +482,21 @@ func (s *Server) handleCover(w http.ResponseWriter, r *http.Request) {
 	// Only serve covers that belong to a book — never arbitrary store keys.
 	mime, ok, err := coverInfo(s.db, id)
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, "could not read cover")
+		web.WriteError(w, http.StatusInternalServerError, "could not read cover")
 		return
 	}
 	if !ok {
-		writeError(w, http.StatusNotFound, "cover not found")
+		web.WriteError(w, http.StatusNotFound, "cover not found")
 		return
 	}
 	data, err := s.store.Get(id)
 	if err != nil {
 		slog.Error("get cover bytes", "cid", id, "err", err)
-		writeError(w, http.StatusInternalServerError, "could not read cover")
+		web.WriteError(w, http.StatusInternalServerError, "could not read cover")
 		return
 	}
 	if data == nil {
-		writeError(w, http.StatusNotFound, "cover not found")
+		web.WriteError(w, http.StatusNotFound, "cover not found")
 		return
 	}
 	if mime == "" {
@@ -566,7 +518,7 @@ func (s *Server) handleUploadJSON(w http.ResponseWriter, r *http.Request) {
 	r.Body = http.MaxBytesReader(w, r.Body, s.maxUpload)
 	data, err := io.ReadAll(r.Body)
 	if err != nil {
-		writeError(w, http.StatusRequestEntityTooLarge, "upload too large")
+		web.WriteError(w, http.StatusRequestEntityTooLarge, "upload too large")
 		return
 	}
 	// Filename is advisory — a query param or X-Filename header; the title
@@ -577,28 +529,28 @@ func (s *Server) handleUploadJSON(w http.ResponseWriter, r *http.Request) {
 	}
 	b, err := s.storeUpload(data, filename, r.URL.Query().Get("collection"))
 	if err != nil {
-		writeError(w, http.StatusBadRequest, err.Error())
+		web.WriteError(w, http.StatusBadRequest, err.Error())
 		return
 	}
-	writeJSON(w, http.StatusCreated, b)
+	web.WriteJSON(w, http.StatusCreated, b)
 }
 
 func (s *Server) handleAPIDelete(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("cid")
 	if !validCID(id) {
-		writeError(w, http.StatusBadRequest, "malformed cid")
+		web.WriteError(w, http.StatusBadRequest, "malformed cid")
 		return
 	}
 	existed, err := s.deleteBookAndBytes(id)
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, "could not delete book")
+		web.WriteError(w, http.StatusInternalServerError, "could not delete book")
 		return
 	}
 	if !existed {
-		writeError(w, http.StatusNotFound, "book not found")
+		web.WriteError(w, http.StatusNotFound, "book not found")
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"deleted": id})
+	web.WriteJSON(w, http.StatusOK, map[string]any{"deleted": id})
 }
 
 // ── public health ──────────────────────────────────────────────────────────
@@ -606,21 +558,15 @@ func (s *Server) handleAPIDelete(w http.ResponseWriter, r *http.Request) {
 func (s *Server) handleStatus(w http.ResponseWriter, r *http.Request) {
 	total, err := countBooks(s.db)
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, "could not read index")
+		web.WriteError(w, http.StatusInternalServerError, "could not read index")
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{
+	web.WriteJSON(w, http.StatusOK, map[string]any{
 		"service": "library", "ok": true, "books": total,
 	})
 }
 
 // ── helpers ────────────────────────────────────────────────────────────────
-
-func handleCSS(w http.ResponseWriter, r *http.Request) {
-	w.Header().Set("Content-Type", "text/css; charset=utf-8")
-	w.Header().Set("Cache-Control", "public, max-age=3600")
-	_, _ = io.WriteString(w, theme.CSS)
-}
 
 // sanitizeFilename reduces an upload's name to a safe basename: no directory
 // components, no control characters, and no quotes or backslashes that could
@@ -672,27 +618,6 @@ var tmplFuncs = template.FuncMap{
 	"shortDate": shortDate,
 }
 
-func parseTemplates() (map[string]*template.Template, error) {
-	pages, err := fs.Glob(assets, "templates/*.html")
-	if err != nil {
-		return nil, err
-	}
-	out := make(map[string]*template.Template)
-	for _, page := range pages {
-		name := path.Base(page)
-		if name == "base.html" {
-			continue
-		}
-		t, err := template.New("base.html").Funcs(tmplFuncs).
-			ParseFS(assets, "templates/base.html", page)
-		if err != nil {
-			return nil, err
-		}
-		out[name] = t
-	}
-	return out, nil
-}
-
 // humanSize formats a byte count as B / KB / MB.
 func humanSize(n int64) string {
 	switch {
@@ -711,62 +636,4 @@ func shortDate(s string) string {
 		return s[:10]
 	}
 	return s
-}
-
-func nowRFC3339() string { return time.Now().UTC().Format(time.RFC3339) }
-
-// render writes a page through base.html, buffering first so a template error
-// never produces a half-written response.
-func (s *Server) render(w http.ResponseWriter, page string, data any) {
-	t, ok := s.templates[page]
-	if !ok {
-		slog.Error("unknown template", "page", page)
-		http.Error(w, "internal error", http.StatusInternalServerError)
-		return
-	}
-	if m, ok := data.(map[string]any); ok {
-		m["AssetVer"] = s.assetVer
-	}
-	var buf bytes.Buffer
-	if err := t.ExecuteTemplate(&buf, "base", data); err != nil {
-		slog.Error("render failed", "page", page, "err", err)
-		http.Error(w, "internal error", http.StatusInternalServerError)
-		return
-	}
-	w.Header().Set("Content-Type", "text/html; charset=utf-8")
-	_, _ = buf.WriteTo(w)
-}
-
-func writeJSON(w http.ResponseWriter, status int, v any) {
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(status)
-	_ = json.NewEncoder(w).Encode(v)
-}
-
-func writeError(w http.ResponseWriter, status int, msg string) {
-	writeJSON(w, status, map[string]string{"error": msg})
-}
-
-// cors adds permissive CORS headers so a browser on another origin can read
-// the public endpoints, and answers preflight requests.
-func cors(next http.Handler) http.Handler {
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Access-Control-Allow-Origin", "*")
-		w.Header().Set("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS")
-		w.Header().Set("Access-Control-Allow-Headers", "Content-Type, X-API-Key, Authorization")
-		if r.Method == http.MethodOptions {
-			w.WriteHeader(http.StatusNoContent)
-			return
-		}
-		next.ServeHTTP(w, r)
-	})
-}
-
-func logRequests(next http.Handler) http.Handler {
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		start := time.Now()
-		next.ServeHTTP(w, r)
-		slog.Info("request",
-			"method", r.Method, "path", r.URL.Path, "dur", time.Since(start))
-	})
 }
