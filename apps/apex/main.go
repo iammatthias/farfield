@@ -14,8 +14,10 @@ import (
 	"log/slog"
 	"net/http"
 	"os"
+	"strconv"
 	"strings"
 
+	"github.com/iammatthias/farfield/lib/cid"
 	"github.com/iammatthias/farfield/lib/store"
 	"github.com/iammatthias/farfield/lib/theme"
 	"github.com/iammatthias/farfield/lib/web"
@@ -34,19 +36,19 @@ type doc struct{ Key, Href, Label, Title string }
 // docPages is the single source of truth for the docs sidebar and routes — add
 // a page here and a templates/docs/<key>.html content file, nowhere else.
 var docPages = []doc{
-	{"index", "index.html", "Docs", "Farfield Systems — Docs"},
-	{"apex", "apex.html", "Apex", "Apex — Farfield Docs"},
-	{"content", "content.html", "Content", "Content — Farfield Docs"},
-	{"feed", "feed.html", "Feed", "Feed — Farfield Docs"},
-	{"blobs", "blobs.html", "Blobs", "Blobs — Farfield Docs"},
-	{"library", "library.html", "Library", "Library — Farfield Docs"},
-	{"calendar", "calendar.html", "Calendar", "Calendar — Farfield Docs"},
-	{"bookmarks", "bookmarks.html", "Bookmarks", "Bookmarks — Farfield Docs"},
-	{"qr", "qr.html", "QR", "QR — Farfield Docs"},
-	{"bard", "bard.html", "Bard", "Bard — Farfield Docs"},
-	{"dead-presidents", "dead-presidents.html", "Dead Presidents", "Dead Presidents — Farfield Docs"},
-	{"backup", "backup.html", "Backup", "Backup — Farfield Docs"},
-	{"skills", "skills.html", "Skills", "Skills — Farfield Docs"},
+	{"index", "./", "Docs", "Farfield Systems — Docs"},
+	{"apex", "apex", "Apex", "Apex — Farfield Docs"},
+	{"content", "content", "Content", "Content — Farfield Docs"},
+	{"feed", "feed", "Feed", "Feed — Farfield Docs"},
+	{"blobs", "blobs", "Blobs", "Blobs — Farfield Docs"},
+	{"library", "library", "Library", "Library — Farfield Docs"},
+	{"calendar", "calendar", "Calendar", "Calendar — Farfield Docs"},
+	{"bookmarks", "bookmarks", "Bookmarks", "Bookmarks — Farfield Docs"},
+	{"qr", "qr", "QR", "QR — Farfield Docs"},
+	{"bard", "bard", "Bard", "Bard — Farfield Docs"},
+	{"dead-presidents", "dead-presidents", "Dead Presidents", "Dead Presidents — Farfield Docs"},
+	{"backup", "backup", "Backup", "Backup — Farfield Docs"},
+	{"skills", "skills", "Skills", "Skills — Farfield Docs"},
 }
 
 // pageData is the template context for a rendered docs page. AssetVer
@@ -82,40 +84,88 @@ func main() {
 	}
 }
 
-// routes builds the apex handler: docs pages rendered over the shared layout,
-// the shared theme stylesheet, and the static landing page + doc assets.
-func routes() (http.Handler, error) {
-	site, err := fs.Sub(webFS, "web")
-	if err != nil {
-		return nil, err
-	}
+// page is a pre-rendered response: every apex page is fully known at startup,
+// so it renders once into bytes and serves from memory with its content ETag.
+type page struct {
+	body []byte
+	etag string // first 16 chars of the body's CID
+}
 
-	// Parse the layout with each page's content into its own template set.
-	pages := make(map[string]*template.Template, len(docPages))
-	titles := make(map[string]string, len(docPages))
+// serve writes the pre-rendered page with validators. Clients cache for five
+// minutes and then revalidate by ETag, which a redeploy with new content busts.
+func (p page) serve(w http.ResponseWriter, r *http.Request) {
+	h := w.Header()
+	h.Set("ETag", `"`+p.etag+`"`)
+	h.Set("Cache-Control", "public, max-age=300")
+	if web.ETagMatch(r, p.etag) {
+		w.WriteHeader(http.StatusNotModified)
+		return
+	}
+	h.Set("Content-Type", "text/html; charset=utf-8")
+	h.Set("Content-Length", strconv.Itoa(len(p.body)))
+	if r.Method != http.MethodHead {
+		_, _ = w.Write(p.body)
+	}
+}
+
+// renderDocs executes the shared layout over each docs page once, at startup.
+func renderDocs() (map[string]page, error) {
+	pages := make(map[string]page, len(docPages))
 	for _, d := range docPages {
 		t, err := template.New(d.Key).ParseFS(tmplFS,
 			"templates/docs/layout.html", "templates/docs/"+d.Key+".html")
 		if err != nil {
 			return nil, err
 		}
-		pages[d.Key] = t
-		titles[d.Key] = d.Title
-	}
-
-	render := func(w http.ResponseWriter, key string) {
 		var buf bytes.Buffer
-		if err := pages[key].ExecuteTemplate(&buf, "layout",
-			pageData{Title: titles[key], Active: key, Nav: docPages, AssetVer: theme.Version}); err != nil {
-			slog.Error("render doc", "key", key, "err", err)
-			http.Error(w, "internal error", http.StatusInternalServerError)
-			return
+		if err := t.ExecuteTemplate(&buf, "layout",
+			pageData{Title: d.Title, Active: d.Key, Nav: docPages, AssetVer: theme.Version}); err != nil {
+			return nil, err
 		}
-		w.Header().Set("Content-Type", "text/html; charset=utf-8")
-		_, _ = buf.WriteTo(w)
+		body := buf.Bytes()
+		pages[d.Key] = page{body: body, etag: cid.Of(body)[:16]}
+	}
+	return pages, nil
+}
+
+// cacheStatic wraps the embedded file server with Cache-Control. Embedded
+// files have a zero ModTime, so without this no validator is ever sent and
+// every visit refetches. Versioned assets (the screenshots under /docs/assets
+// and the ?v= stylesheet) cache forever — a content change changes the URL —
+// and everything else revalidates hourly.
+func cacheStatic(files http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if strings.HasPrefix(r.URL.Path, "/docs/assets/") ||
+			(r.URL.Path == "/docs/style.css" && r.URL.Query().Has("v")) {
+			w.Header().Set("Cache-Control", "public, max-age=31536000, immutable")
+		} else {
+			w.Header().Set("Cache-Control", "public, max-age=3600")
+		}
+		files.ServeHTTP(w, r)
+	})
+}
+
+// routes builds the apex handler: docs pages pre-rendered over the shared
+// layout, the shared theme stylesheet, and the static landing page + assets.
+func routes() (http.Handler, error) {
+	site, err := fs.Sub(webFS, "web")
+	if err != nil {
+		return nil, err
 	}
 
-	files := http.FileServerFS(site)
+	pages, err := renderDocs()
+	if err != nil {
+		return nil, err
+	}
+
+	// The landing page is static too — pre-load it for the same validators.
+	landingBody, err := fs.ReadFile(site, "index.html")
+	if err != nil {
+		return nil, err
+	}
+	landing := page{body: landingBody, etag: cid.Of(landingBody)[:16]}
+
+	files := cacheStatic(http.FileServerFS(site))
 	mux := http.NewServeMux()
 
 	// Shared farfield theme at the canonical path; docs layer style.css over it.
@@ -125,25 +175,35 @@ func routes() (http.Handler, error) {
 		web.WriteJSON(w, http.StatusOK, map[string]any{"service": "apex", "ok": true})
 	})
 
-	// Docs: /docs/ is the index; /docs/<page>.html renders a page; other
+	// Docs: /docs/ is the index; /docs/<page> serves a pre-rendered page; the
+	// legacy .html forms 301 to the canonical extensionless URL; other
 	// single-segment paths under /docs (style.css) fall through to the assets.
 	mux.HandleFunc("GET /docs/{$}", func(w http.ResponseWriter, r *http.Request) {
-		render(w, "index")
+		pages["index"].serve(w, r)
 	})
 	mux.HandleFunc("GET /docs/{page}", func(w http.ResponseWriter, r *http.Request) {
-		page := r.PathValue("page")
-		if _, ok := pages[strings.TrimSuffix(page, ".html")]; ok {
-			render(w, strings.TrimSuffix(page, ".html"))
+		name := r.PathValue("page")
+		stem := strings.TrimSuffix(name, ".html")
+		if _, ok := pages[stem]; ok {
+			switch {
+			case stem == "index": // /docs/index(.html) → the directory index
+				http.Redirect(w, r, "/docs/", http.StatusMovedPermanently)
+			case stem != name: // /docs/<page>.html → /docs/<page>
+				http.Redirect(w, r, "/docs/"+stem, http.StatusMovedPermanently)
+			default:
+				pages[stem].serve(w, r)
+			}
 			return
 		}
-		if strings.HasSuffix(page, ".html") { // an unknown doc — not an asset
+		if stem != name { // an unknown doc — not an asset
 			http.NotFound(w, r)
 			return
 		}
 		files.ServeHTTP(w, r)
 	})
 
-	// Landing page and nested doc assets (/docs/assets/*).
+	// Landing page from memory; nested doc assets (/docs/assets/*) from embed.
+	mux.HandleFunc("GET /{$}", landing.serve)
 	mux.Handle("/", files)
 	return mux, nil
 }

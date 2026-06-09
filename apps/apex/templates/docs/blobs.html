@@ -5,7 +5,7 @@
   <p>Image and media storage with content-addressed identifiers. Every uploaded file gets a CIDv1 sha-256 hash as its address. Raw bytes are stored on Cloudflare R2; metadata lives in SQLite. Because a blob's CID <em>is</em> the hash of its bytes, <code>GET /blobs/{cid}</code> is immutable — cache it forever.</p>
 
   <figure class="screenshot">
-    <img src="assets/blobs.png?v=20260520-loggedin" alt="Screenshot of the Farfield blobs UI" loading="lazy">
+    <img src="assets/blobs.png?v=20260520-loggedin" alt="Screenshot of the Farfield blobs UI" width="1280" height="800" loading="lazy">
     <figcaption>Blobs admin library in the logged-in state. Media bytes are public by CID; mutation requires auth.</figcaption>
   </figure>
 

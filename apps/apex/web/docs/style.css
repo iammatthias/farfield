@@ -70,6 +70,24 @@ html, body { overflow-x: hidden; }
 /* Hamburger — mobile only (see media query). */
 .nav-burger { display: none; }
 
+/* The nav checkbox is visually hidden, not `hidden`: the attribute removes it
+   from the tab order, which makes the burger unreachable by keyboard. */
+.nav-toggle {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: -1px;
+  padding: 0;
+  border: 0;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+#nav-toggle:focus-visible ~ .bar .nav-burger {
+  outline: 2px solid var(--ink);
+  outline-offset: 3px;
+}
+
 /* ── Docs prose, atop the theme's type ── */
 .page h2 {
   margin-top: 2.5rem;
