@@ -1,18 +1,32 @@
 # Production compose for farfield apps. Built from source on the host —
 # `gnar-deploy farfield` runs `docker compose up -d --build` here.
 #
-# Every app shares a bind-mounted ./data directory (gitignored, host-side, so
-# it survives rebuilds). Each app owns its own <app>.sqlite within it; the
-# backup app reads them all. Secrets like ${PASSWORD} come from a .env beside
-# this file.
+# Every app builds from the single root Dockerfile (APP build arg) and shares
+# a bind-mounted ./data directory (gitignored, host-side, so it survives
+# rebuilds). Each app owns its own <app>.sqlite within it; the backup app
+# reads them all. Secrets like ${PASSWORD} come from a .env beside this file.
+
+x-defaults: &defaults
+  restart: unless-stopped
+  logging:
+    driver: json-file
+    options:
+      max-size: "10m"
+      max-file: "3"
+  healthcheck:
+    test: ["CMD", "/app", "health"]
+    interval: 30s
+    timeout: 5s
+    retries: 3
+    start_period: 15s
 
 services:
   blobs:
+    <<: *defaults
     build:
       context: .
-      dockerfile: apps/blobs/Dockerfile
+      args: { APP: blobs }
     image: farfield-blobs
-    restart: unless-stopped
     ports:
       - "${BLOBS_PORT:-8789}:8789"
     environment:
@@ -32,11 +46,11 @@ services:
       - ./data:/data
 
   library:
+    <<: *defaults
     build:
       context: .
-      dockerfile: apps/library/Dockerfile
+      args: { APP: library }
     image: farfield-library
-    restart: unless-stopped
     ports:
       - "${LIBRARY_PORT:-8797}:8797"
     environment:
@@ -56,11 +70,14 @@ services:
       - ./data:/data
 
   content:
+    <<: *defaults
     build:
       context: .
-      dockerfile: apps/content/Dockerfile
+      args: { APP: content }
     image: farfield-content
-    restart: unless-stopped
+    depends_on:
+      blobs:
+        condition: service_healthy
     ports:
       - "${CONTENT_PORT:-8787}:8787"
     environment:
@@ -78,11 +95,14 @@ services:
       - ./data:/data
 
   feed:
+    <<: *defaults
     build:
       context: .
-      dockerfile: apps/feed/Dockerfile
+      args: { APP: feed }
     image: farfield-feed
-    restart: unless-stopped
+    depends_on:
+      blobs:
+        condition: service_healthy
     ports:
       - "${FEED_PORT:-8788}:8788"
     environment:
@@ -102,11 +122,11 @@ services:
       - ./data:/data
 
   apex:
+    <<: *defaults
     build:
       context: .
-      dockerfile: apps/apex/Dockerfile
+      args: { APP: apex }
     image: farfield-apex
-    restart: unless-stopped
     ports:
       - "${APEX_PORT:-8790}:8790"
     environment:
@@ -114,11 +134,11 @@ services:
       - APEX_PORT=8790
 
   bard:
+    <<: *defaults
     build:
       context: .
-      dockerfile: apps/bard/Dockerfile
+      args: { APP: bard }
     image: farfield-bard
-    restart: unless-stopped
     ports:
       - "${BARD_PORT:-8795}:8795"
     environment:
@@ -126,11 +146,11 @@ services:
       - BARD_PORT=8795
 
   dead-presidents:
+    <<: *defaults
     build:
       context: .
-      dockerfile: apps/dead-presidents/Dockerfile
+      args: { APP: dead-presidents }
     image: farfield-dead-presidents
-    restart: unless-stopped
     ports:
       - "${DEAD_PRESIDENTS_PORT:-8796}:8796"
     environment:
@@ -138,11 +158,11 @@ services:
       - DEAD_PRESIDENTS_PORT=8796
 
   calendar:
+    <<: *defaults
     build:
       context: .
-      dockerfile: apps/calendar/Dockerfile
+      args: { APP: calendar }
     image: farfield-calendar
-    restart: unless-stopped
     ports:
       - "${CALENDAR_PORT:-8792}:8792"
     environment:
@@ -154,11 +174,11 @@ services:
       - ./data:/data
 
   bookmarks:
+    <<: *defaults
     build:
       context: .
-      dockerfile: apps/bookmarks/Dockerfile
+      args: { APP: bookmarks }
     image: farfield-bookmarks
-    restart: unless-stopped
     ports:
       - "${BOOKMARKS_PORT:-8793}:8793"
     environment:
@@ -172,11 +192,11 @@ services:
       - ./data:/data
 
   qr:
+    <<: *defaults
     build:
       context: .
-      dockerfile: apps/qr/Dockerfile
+      args: { APP: qr }
     image: farfield-qr
-    restart: unless-stopped
     ports:
       - "${QR_PORT:-8794}:8794"
     environment:
@@ -191,17 +211,21 @@ services:
       - ./data:/data
 
   backup:
+    <<: *defaults
     build:
       context: .
-      dockerfile: apps/backup/Dockerfile
+      args: { APP: backup }
     image: farfield-backup
-    restart: unless-stopped
+    depends_on:
+      blobs:
+        condition: service_healthy
     ports:
       - "${BACKUP_PORT:-8791}:8791"
     environment:
       - HOST=0.0.0.0
       - BACKUP_PORT=8791
       - BACKUP_DB_PATH=/data/backup.sqlite
+      - BACKUP_INTERVAL=${BACKUP_INTERVAL:-6h}
       - CONTENT_DB_PATH=/data/content.sqlite
       - FEED_DB_PATH=/data/feed.sqlite
       - BLOBS_DB_PATH=/data/blobs.sqlite
