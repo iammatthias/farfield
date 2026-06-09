@@ -6,6 +6,7 @@
 // Usage:
 //
 //	blobs                          serve the HTTP service (default)
+//	blobs health                   probe /status — backs the Docker healthcheck
 //	blobs import-sidecars          copy R2 <cid>.json sidecars into SQLite
 //	blobs prune-sidecars           dry-run: report sidecars to delete from R2
 //	blobs prune-sidecars --confirm delete the <cid>.json sidecars from R2
@@ -17,6 +18,7 @@ import (
 	"os"
 
 	"github.com/iammatthias/farfield/lib/store"
+	"github.com/iammatthias/farfield/lib/web"
 )
 
 func main() {
@@ -36,6 +38,9 @@ func main() {
 			slog.Error("fatal", "err", err)
 			os.Exit(1)
 		}
+	case "health":
+		// Probes /status — backs the Docker healthcheck (distroless: no curl).
+		os.Exit(web.Health(store.Env("BLOBS_PORT", "8789")))
 	case "import-sidecars":
 		if err := runMigration(false, false); err != nil {
 			slog.Error("import-sidecars failed", "err", err)
@@ -49,7 +54,7 @@ func main() {
 		}
 	default:
 		fmt.Fprintln(os.Stderr,
-			"usage: blobs [serve | import-sidecars | prune-sidecars [--confirm]]")
+			"usage: blobs [serve | health | import-sidecars | prune-sidecars [--confirm]]")
 		os.Exit(2)
 	}
 }

@@ -1,31 +1,21 @@
 package main
 
 import (
-	"bytes"
-	"context"
 	"database/sql"
 	"embed"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"html/template"
 	"io"
-	"io/fs"
 	"log/slog"
-	"net"
 	"net/http"
 	"net/url"
 	"os"
-	"os/signal"
-	"path"
 	"strconv"
-	"syscall"
-	"time"
 
-	"github.com/iammatthias/farfield/lib/auth"
-	"github.com/iammatthias/farfield/lib/cid"
 	"github.com/iammatthias/farfield/lib/store"
 	"github.com/iammatthias/farfield/lib/theme"
+	"github.com/iammatthias/farfield/lib/web"
 )
 
 //go:embed templates
@@ -38,14 +28,11 @@ const (
 
 // Server holds the running blob service.
 type Server struct {
-	db           *sql.DB
-	store        ByteStore
-	templates    map[string]*template.Template
-	password     string
-	apiKey       string
-	cookieSecure bool
-	maxUpload    int64
-	assetVer     string // content hash of the stylesheet — cache-busts the URL
+	db        *sql.DB
+	store     ByteStore
+	auth      *web.Auth
+	rd        *web.Renderer
+	maxUpload int64
 }
 
 // openStore selects the byte-store backend from the environment.
@@ -76,6 +63,9 @@ func run(host, port string) error {
 		return err
 	}
 	defer db.Close()
+	if err := store.PruneSessions(db); err != nil {
+		slog.Warn("could not prune sessions", "err", err)
+	}
 
 	bs, desc, err := openStore()
 	if err != nil {
@@ -83,55 +73,40 @@ func run(host, port string) error {
 	}
 	slog.Info("blob store", "backend", desc)
 
-	tmpl, err := parseTemplates()
+	tmpl, err := web.ParseTemplates(assets, tmplFuncs)
 	if err != nil {
 		return err
 	}
 
 	s := &Server{
-		db:           db,
-		store:        bs,
-		templates:    tmpl,
-		password:     store.Env("PASSWORD", ""),
-		apiKey:       store.Env("BLOBS_API_KEY", ""),
-		cookieSecure: store.Env("COOKIE_SECURE", "false") == "true",
-		maxUpload:    defaultMaxUpload,
-		assetVer:     cid.Of([]byte(theme.CSS))[:16],
+		db:    db,
+		store: bs,
+		auth: &web.Auth{
+			DB:           db,
+			Password:     store.Env("PASSWORD", ""),
+			APIKey:       store.Env("BLOBS_API_KEY", ""),
+			CookieSecure: store.Env("COOKIE_SECURE", "false") == "true",
+		},
+		rd:        &web.Renderer{Templates: tmpl, AssetVer: theme.Version},
+		maxUpload: defaultMaxUpload,
 	}
 
-	srv := &http.Server{Addr: net.JoinHostPort(host, port), Handler: s.routes()}
-
-	go func() {
-		slog.Info("listening", "addr", srv.Addr)
-		if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
-			slog.Error("server failed", "err", err)
-			os.Exit(1)
-		}
-	}()
-
-	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
-	defer stop()
-	<-ctx.Done()
-
-	slog.Info("shutting down")
-	shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-	defer cancel()
-	return srv.Shutdown(shutdownCtx)
+	return web.Serve(host, port, s.routes())
 }
 
 func (s *Server) routes() http.Handler {
 	mux := http.NewServeMux()
 
 	// HTML admin UI — session-gated.
-	mux.HandleFunc("GET /{$}", s.requireSession(s.handleIndex))
-	mux.HandleFunc("GET /upload", s.requireSession(s.handleUploadForm))
-	mux.HandleFunc("POST /upload", s.requireSession(s.handleAdminUpload))
-	mux.HandleFunc("POST /blobs/{cid}/delete", s.requireSession(s.handleAdminDelete))
+	mux.HandleFunc("GET /{$}", s.auth.RequireSession(s.handleIndex))
+	mux.HandleFunc("GET /upload", s.auth.RequireSession(s.handleUploadForm))
+	mux.HandleFunc("POST /upload", s.auth.RequireSession(s.handleAdminUpload))
+	mux.HandleFunc("POST /blobs/{cid}/delete", s.auth.RequireSession(s.handleAdminDelete))
 
 	// Login — public HTML.
 	mux.HandleFunc("GET /login", s.handleLoginForm)
-	mux.HandleFunc("POST /login", s.handleLogin)
-	mux.HandleFunc("GET /logout", s.handleLogout)
+	mux.HandleFunc("POST /login", s.auth.HandleLogin)
+	mux.HandleFunc("GET /logout", s.auth.HandleLogout)
 
 	// Public JSON / bytes API.
 	mux.HandleFunc("GET /status", s.handleStatus)
@@ -140,18 +115,20 @@ func (s *Server) routes() http.Handler {
 	mux.HandleFunc("GET /blobs/{cid}/meta", s.handleAPIGetMeta)
 
 	// JSON write API — API-key-gated.
-	mux.HandleFunc("POST /blobs", s.requireAPIKey(s.handleAPIUpload))
-	mux.HandleFunc("DELETE /blobs/{cid}", s.requireAPIKey(s.handleAPIDelete))
+	mux.HandleFunc("POST /blobs", s.auth.RequireAPIKey(s.handleAPIUpload))
+	mux.HandleFunc("DELETE /blobs/{cid}", s.auth.RequireAPIKey(s.handleAPIDelete))
 
 	// Backup storage — API-key-gated opaque snapshots, kept out of the media index.
-	mux.HandleFunc("POST /backups", s.requireAPIKey(s.handleBackupPut))
-	mux.HandleFunc("GET /backups/{cid}", s.requireAPIKey(s.handleBackupGet))
-	mux.HandleFunc("DELETE /backups/{cid}", s.requireAPIKey(s.handleBackupDelete))
+	mux.HandleFunc("POST /backups", s.auth.RequireAPIKey(s.handleBackupPut))
+	mux.HandleFunc("GET /backups/{cid}", s.auth.RequireAPIKey(s.handleBackupGet))
+	mux.HandleFunc("DELETE /backups/{cid}", s.auth.RequireAPIKey(s.handleBackupDelete))
 
 	// Shared theme stylesheet.
-	mux.HandleFunc("GET /static/styles.css", handleCSS)
+	mux.HandleFunc("GET /static/styles.css", theme.CSSHandler())
 
-	return cors(logRequests(mux))
+	// No Gzip here: blobs serves raw, often already-compressed bytes (images),
+	// and the immutable blob responses are better left untouched.
+	return web.CORS(web.LogRequests(mux), "GET", "POST", "PUT", "DELETE", "OPTIONS")
 }
 
 // storeUpload derives metadata, writes the bytes to the store, and records
@@ -165,7 +142,7 @@ func (s *Server) storeUpload(data []byte) (*Meta, error) {
 		return nil, err
 	}
 	if m.CreatedAt == "" {
-		m.CreatedAt = time.Now().UTC().Format(time.RFC3339)
+		m.CreatedAt = store.NowRFC3339()
 	}
 	if err := s.store.Put(m.CID, data, m.Mime); err != nil {
 		return nil, err
@@ -196,7 +173,7 @@ func (s *Server) handleIndex(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	pages := (total + pageSize - 1) / pageSize
-	s.render(w, "index.html", map[string]any{
+	s.rd.Render(w, "index.html", map[string]any{
 		"Blobs":   blobs,
 		"Total":   total,
 		"Page":    page,
@@ -209,7 +186,7 @@ func (s *Server) handleIndex(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleUploadForm(w http.ResponseWriter, r *http.Request) {
-	s.render(w, "upload.html", map[string]any{"Error": r.URL.Query().Get("error")})
+	s.rd.Render(w, "upload.html", map[string]any{"Error": r.URL.Query().Get("error")})
 }
 
 func (s *Server) handleAdminUpload(w http.ResponseWriter, r *http.Request) {
@@ -262,34 +239,7 @@ func (s *Server) handleAdminDelete(w http.ResponseWriter, r *http.Request) {
 // ── login handlers ─────────────────────────────────────────────────────────
 
 func (s *Server) handleLoginForm(w http.ResponseWriter, r *http.Request) {
-	s.render(w, "login.html", map[string]any{"Error": r.URL.Query().Get("error")})
-}
-
-func (s *Server) handleLogin(w http.ResponseWriter, r *http.Request) {
-	if err := r.ParseForm(); err != nil {
-		http.Error(w, "bad form", http.StatusBadRequest)
-		return
-	}
-	if s.password == "" || !auth.VerifyPassword(r.FormValue("password"), s.password) {
-		http.Redirect(w, r, "/login?error=Invalid+password", http.StatusSeeOther)
-		return
-	}
-	token := auth.NewSessionToken()
-	if err := store.InsertSession(s.db, token, time.Now().Add(7*24*time.Hour)); err != nil {
-		slog.Error("create session", "err", err)
-		http.Error(w, "internal error", http.StatusInternalServerError)
-		return
-	}
-	http.SetCookie(w, auth.SessionCookie(token, s.cookieSecure))
-	http.Redirect(w, r, "/", http.StatusSeeOther)
-}
-
-func (s *Server) handleLogout(w http.ResponseWriter, r *http.Request) {
-	if token, ok := auth.Session(r); ok {
-		_ = store.DeleteSession(s.db, token)
-	}
-	http.SetCookie(w, auth.ClearCookie(s.cookieSecure))
-	http.Redirect(w, r, "/login", http.StatusSeeOther)
+	s.rd.Render(w, "login.html", map[string]any{"Error": r.URL.Query().Get("error")})
 }
 
 // ── public JSON / bytes API ────────────────────────────────────────────────
@@ -297,10 +247,10 @@ func (s *Server) handleLogout(w http.ResponseWriter, r *http.Request) {
 func (s *Server) handleStatus(w http.ResponseWriter, r *http.Request) {
 	total, err := countMeta(s.db)
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, "could not read index")
+		web.WriteError(w, http.StatusInternalServerError, "could not read index")
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{
+	web.WriteJSON(w, http.StatusOK, map[string]any{
 		"service": "blobs", "ok": true, "blobs": total,
 	})
 }
@@ -312,18 +262,18 @@ func (s *Server) handleAPIList(w http.ResponseWriter, r *http.Request) {
 	}
 	total, err := countMeta(s.db)
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, "could not read index")
+		web.WriteError(w, http.StatusInternalServerError, "could not read index")
 		return
 	}
 	blobs, err := listMeta(s.db, pageSize, (page-1)*pageSize)
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, "could not list blobs")
+		web.WriteError(w, http.StatusInternalServerError, "could not list blobs")
 		return
 	}
 	if blobs == nil {
 		blobs = []Meta{}
 	}
-	writeJSON(w, http.StatusOK, map[string]any{
+	web.WriteJSON(w, http.StatusOK, map[string]any{
 		"blobs": blobs,
 		"total": total,
 		"page":  page,
@@ -334,7 +284,7 @@ func (s *Server) handleAPIList(w http.ResponseWriter, r *http.Request) {
 func (s *Server) handleAPIGetBytes(w http.ResponseWriter, r *http.Request) {
 	cid := r.PathValue("cid")
 	if !validCID(cid) {
-		writeError(w, http.StatusBadRequest, "malformed cid")
+		web.WriteError(w, http.StatusBadRequest, "malformed cid")
 		return
 	}
 	etag := `"` + cid + `"`
@@ -346,21 +296,21 @@ func (s *Server) handleAPIGetBytes(w http.ResponseWriter, r *http.Request) {
 	// snapshots (stored in R2 but not indexed) off the public endpoint.
 	meta, err := getMeta(s.db, cid)
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, "could not read blob")
+		web.WriteError(w, http.StatusInternalServerError, "could not read blob")
 		return
 	}
 	if meta == nil {
-		writeError(w, http.StatusNotFound, "blob not found")
+		web.WriteError(w, http.StatusNotFound, "blob not found")
 		return
 	}
 	data, err := s.store.Get(cid)
 	if err != nil {
 		slog.Error("get bytes", "cid", cid, "err", err)
-		writeError(w, http.StatusInternalServerError, "could not read blob")
+		web.WriteError(w, http.StatusInternalServerError, "could not read blob")
 		return
 	}
 	if data == nil {
-		writeError(w, http.StatusNotFound, "blob not found")
+		web.WriteError(w, http.StatusNotFound, "blob not found")
 		return
 	}
 	mime := meta.Mime
@@ -377,19 +327,19 @@ func (s *Server) handleAPIGetBytes(w http.ResponseWriter, r *http.Request) {
 func (s *Server) handleAPIGetMeta(w http.ResponseWriter, r *http.Request) {
 	cid := r.PathValue("cid")
 	if !validCID(cid) {
-		writeError(w, http.StatusBadRequest, "malformed cid")
+		web.WriteError(w, http.StatusBadRequest, "malformed cid")
 		return
 	}
 	m, err := getMeta(s.db, cid)
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, "could not read metadata")
+		web.WriteError(w, http.StatusInternalServerError, "could not read metadata")
 		return
 	}
 	if m == nil {
-		writeError(w, http.StatusNotFound, "blob not found")
+		web.WriteError(w, http.StatusNotFound, "blob not found")
 		return
 	}
-	writeJSON(w, http.StatusOK, m)
+	web.WriteJSON(w, http.StatusOK, m)
 }
 
 // ── API-key-gated write API ────────────────────────────────────────────────
@@ -398,73 +348,46 @@ func (s *Server) handleAPIUpload(w http.ResponseWriter, r *http.Request) {
 	r.Body = http.MaxBytesReader(w, r.Body, s.maxUpload)
 	data, err := io.ReadAll(r.Body)
 	if err != nil {
-		writeError(w, http.StatusRequestEntityTooLarge, "upload too large")
+		web.WriteError(w, http.StatusRequestEntityTooLarge, "upload too large")
 		return
 	}
 	m, err := s.storeUpload(data)
 	if err != nil {
-		writeError(w, http.StatusBadRequest, err.Error())
+		web.WriteError(w, http.StatusBadRequest, err.Error())
 		return
 	}
-	writeJSON(w, http.StatusCreated, m)
+	web.WriteJSON(w, http.StatusCreated, m)
 }
 
 func (s *Server) handleAPIDelete(w http.ResponseWriter, r *http.Request) {
 	cid := r.PathValue("cid")
 	if !validCID(cid) {
-		writeError(w, http.StatusBadRequest, "malformed cid")
+		web.WriteError(w, http.StatusBadRequest, "malformed cid")
 		return
 	}
 	existed, err := deleteMeta(s.db, cid)
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, "could not delete blob")
+		web.WriteError(w, http.StatusInternalServerError, "could not delete blob")
 		return
 	}
 	if !existed {
 		// No meta row means this CID was never a media blob — it may be a
 		// backup snapshot sharing the bucket, so leave the bytes alone.
-		writeError(w, http.StatusNotFound, "blob not found")
+		web.WriteError(w, http.StatusNotFound, "blob not found")
 		return
 	}
 	if err := s.store.Delete(cid); err != nil {
 		slog.Error("delete bytes", "cid", cid, "err", err)
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"deleted": cid})
+	web.WriteJSON(w, http.StatusOK, map[string]any{"deleted": cid})
 }
 
 // ── helpers ────────────────────────────────────────────────────────────────
-
-func handleCSS(w http.ResponseWriter, r *http.Request) {
-	w.Header().Set("Content-Type", "text/css; charset=utf-8")
-	w.Header().Set("Cache-Control", "public, max-age=3600")
-	_, _ = io.WriteString(w, theme.CSS)
-}
 
 // tmplFuncs are helpers available to every template.
 var tmplFuncs = template.FuncMap{
 	"humanSize": humanSize,
 	"shortDate": shortDate,
-}
-
-func parseTemplates() (map[string]*template.Template, error) {
-	pages, err := fs.Glob(assets, "templates/*.html")
-	if err != nil {
-		return nil, err
-	}
-	out := make(map[string]*template.Template)
-	for _, page := range pages {
-		name := path.Base(page)
-		if name == "base.html" {
-			continue
-		}
-		t, err := template.New("base.html").Funcs(tmplFuncs).
-			ParseFS(assets, "templates/base.html", page)
-		if err != nil {
-			return nil, err
-		}
-		out[name] = t
-	}
-	return out, nil
 }
 
 // humanSize formats a byte count as B / KB / MB.
@@ -485,60 +408,4 @@ func shortDate(s string) string {
 		return s[:10]
 	}
 	return s
-}
-
-// render writes a page through base.html, buffering first so a template
-// error never produces a half-written response.
-func (s *Server) render(w http.ResponseWriter, page string, data any) {
-	t, ok := s.templates[page]
-	if !ok {
-		slog.Error("unknown template", "page", page)
-		http.Error(w, "internal error", http.StatusInternalServerError)
-		return
-	}
-	if m, ok := data.(map[string]any); ok {
-		m["AssetVer"] = s.assetVer
-	}
-	var buf bytes.Buffer
-	if err := t.ExecuteTemplate(&buf, "base", data); err != nil {
-		slog.Error("render failed", "page", page, "err", err)
-		http.Error(w, "internal error", http.StatusInternalServerError)
-		return
-	}
-	w.Header().Set("Content-Type", "text/html; charset=utf-8")
-	_, _ = buf.WriteTo(w)
-}
-
-func writeJSON(w http.ResponseWriter, status int, v any) {
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(status)
-	_ = json.NewEncoder(w).Encode(v)
-}
-
-func writeError(w http.ResponseWriter, status int, msg string) {
-	writeJSON(w, status, map[string]string{"error": msg})
-}
-
-// cors adds permissive CORS headers so a browser on another origin (the
-// website) can read the public API, and answers preflight requests.
-func cors(next http.Handler) http.Handler {
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Access-Control-Allow-Origin", "*")
-		w.Header().Set("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS")
-		w.Header().Set("Access-Control-Allow-Headers", "Content-Type, X-API-Key, Authorization")
-		if r.Method == http.MethodOptions {
-			w.WriteHeader(http.StatusNoContent)
-			return
-		}
-		next.ServeHTTP(w, r)
-	})
-}
-
-func logRequests(next http.Handler) http.Handler {
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		start := time.Now()
-		next.ServeHTTP(w, r)
-		slog.Info("request",
-			"method", r.Method, "path", r.URL.Path, "dur", time.Since(start))
-	})
 }

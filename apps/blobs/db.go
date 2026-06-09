@@ -3,7 +3,6 @@ package main
 import (
 	"database/sql"
 	"errors"
-	"fmt"
 
 	"github.com/iammatthias/farfield/lib/store"
 	_ "modernc.org/sqlite" // registers the "sqlite" driver
@@ -31,13 +30,8 @@ const blobCols = `cid, size, mime, width, height, blurhash, dominant_color, crea
 // the blob metadata index and admin login sessions; blob bytes live in the
 // ByteStore.
 func openDB(path string) (*sql.DB, error) {
-	dsn := fmt.Sprintf(
-		"file:%s?_pragma=busy_timeout(5000)&_pragma=journal_mode(WAL)", path)
-	db, err := sql.Open("sqlite", dsn)
+	db, err := store.OpenDB(path)
 	if err != nil {
-		return nil, err
-	}
-	if err := db.Ping(); err != nil {
 		return nil, err
 	}
 	if _, err := db.Exec(schema); err != nil {
