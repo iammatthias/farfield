@@ -3,9 +3,7 @@ package main
 import (
 	"database/sql"
 	"errors"
-	"fmt"
 	"strings"
-	"time"
 
 	"github.com/iammatthias/farfield/lib/cid"
 	"github.com/iammatthias/farfield/lib/store"
@@ -70,13 +68,8 @@ const bookmarkCols = `id, url, title, description, category, public, admin_notes
 // old, to the current schema on every startup. See the self-migrating-sqlite
 // skill.
 func openDB(path string) (*sql.DB, error) {
-	dsn := fmt.Sprintf(
-		"file:%s?_pragma=busy_timeout(5000)&_pragma=journal_mode(WAL)", path)
-	db, err := sql.Open("sqlite", dsn)
+	db, err := store.OpenDB(path)
 	if err != nil {
-		return nil, err
-	}
-	if err := db.Ping(); err != nil {
 		return nil, err
 	}
 	if _, err := db.Exec(schema); err != nil {
@@ -98,7 +91,7 @@ func openDB(path string) (*sql.DB, error) {
 		{"cid", "TEXT NOT NULL DEFAULT ''"},
 		{"admin_notes", "TEXT NOT NULL DEFAULT ''"},
 	} {
-		if err := ensureColumn(db, "bookmarks", c.col, c.decl); err != nil {
+		if err := store.EnsureColumn(db, "bookmarks", c.col, c.decl); err != nil {
 			return nil, err
 		}
 	}
@@ -107,23 +100,6 @@ func openDB(path string) (*sql.DB, error) {
 	}
 	return db, nil
 }
-
-// ensureColumn adds a column to a table if it is not already present.
-func ensureColumn(db *sql.DB, table, column, decl string) error {
-	var n int
-	if err := db.QueryRow(
-		`SELECT COUNT(*) FROM pragma_table_info(?) WHERE name = ?`,
-		table, column).Scan(&n); err != nil {
-		return err
-	}
-	if n > 0 {
-		return nil
-	}
-	_, err := db.Exec("ALTER TABLE " + table + " ADD COLUMN " + column + " " + decl)
-	return err
-}
-
-func nowRFC3339() string { return time.Now().UTC().Format(time.RFC3339) }
 
 // bookmarkCID is the content identifier of a bookmark — a CIDv1 over its
 // public-facing content. The id, admin notes, and timestamps are excluded so
@@ -264,7 +240,7 @@ func insertBookmark(db *sql.DB, b *Bookmark) error {
 		b.ID = store.ShortID()
 	}
 	b.URL = strings.TrimSpace(b.URL)
-	b.CreatedAt = nowRFC3339()
+	b.CreatedAt = store.NowRFC3339()
 	b.UpdatedAt = b.CreatedAt
 	b.CID = bookmarkCID(b)
 	pub := 0
@@ -283,7 +259,7 @@ func insertBookmark(db *sql.DB, b *Bookmark) error {
 // updated_at. The id, created_at, and existing CID are not read from b.
 func updateBookmark(db *sql.DB, id string, b *Bookmark) (bool, error) {
 	b.URL = strings.TrimSpace(b.URL)
-	b.UpdatedAt = nowRFC3339()
+	b.UpdatedAt = store.NowRFC3339()
 	b.CID = bookmarkCID(b)
 	pub := 0
 	if b.Public {

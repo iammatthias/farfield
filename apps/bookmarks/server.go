@@ -1,29 +1,20 @@
 package main
 
 import (
-	"bytes"
 	"context"
 	"database/sql"
 	"embed"
 	"encoding/json"
-	"html/template"
-	"io"
-	"io/fs"
 	"log/slog"
-	"net"
 	"net/http"
 	"net/url"
-	"os"
-	"os/signal"
-	"path"
 	"strings"
-	"syscall"
 	"time"
 
-	"github.com/iammatthias/farfield/lib/auth"
 	"github.com/iammatthias/farfield/lib/cid"
 	"github.com/iammatthias/farfield/lib/store"
 	"github.com/iammatthias/farfield/lib/theme"
+	"github.com/iammatthias/farfield/lib/web"
 )
 
 //go:embed templates
@@ -31,13 +22,10 @@ var assets embed.FS
 
 // Server holds the running bookmarks service.
 type Server struct {
-	db           *sql.DB
-	templates    map[string]*template.Template
-	password     string
-	apiKey       string
-	cookieSecure bool
-	http         *http.Client
-	assetVer     string
+	db   *sql.DB
+	auth *web.Auth
+	rd   *web.Renderer
+	http *http.Client
 }
 
 // run wires up the service and serves until interrupted.
@@ -47,58 +35,46 @@ func run(host, port string) error {
 		return err
 	}
 	defer db.Close()
+	if err := store.PruneSessions(db); err != nil {
+		slog.Warn("could not prune sessions", "err", err)
+	}
 
-	tmpl, err := parseTemplates()
+	tmpl, err := web.ParseTemplates(assets, nil)
 	if err != nil {
 		return err
 	}
 
 	s := &Server{
-		db:           db,
-		templates:    tmpl,
-		password:     store.Env("PASSWORD", ""),
-		apiKey:       store.Env("BOOKMARKS_API_KEY", ""),
-		cookieSecure: store.Env("COOKIE_SECURE", "false") == "true",
-		http:         &http.Client{Timeout: fetchTimeout + 5*time.Second},
-		assetVer:     cid.Of([]byte(theme.CSS))[:16],
+		db: db,
+		auth: &web.Auth{
+			DB:           db,
+			Password:     store.Env("PASSWORD", ""),
+			APIKey:       store.Env("BOOKMARKS_API_KEY", ""),
+			CookieSecure: store.Env("COOKIE_SECURE", "false") == "true",
+		},
+		rd:   &web.Renderer{Templates: tmpl, AssetVer: theme.Version},
+		http: &http.Client{Timeout: fetchTimeout + 5*time.Second},
 	}
 
-	srv := &http.Server{Addr: net.JoinHostPort(host, port), Handler: s.routes()}
-
-	go func() {
-		slog.Info("listening", "addr", srv.Addr)
-		if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
-			slog.Error("server failed", "err", err)
-			os.Exit(1)
-		}
-	}()
-
-	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
-	defer stop()
-	<-ctx.Done()
-
-	slog.Info("shutting down")
-	shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-	defer cancel()
-	return srv.Shutdown(shutdownCtx)
+	return web.Serve(host, port, s.routes())
 }
 
 func (s *Server) routes() http.Handler {
 	mux := http.NewServeMux()
 
 	// HTML admin UI — session-gated.
-	mux.HandleFunc("GET /{$}", s.requireSession(s.handleIndex))
-	mux.HandleFunc("GET /new", s.requireSession(s.handleNewForm))
-	mux.HandleFunc("POST /bookmarks", s.requireSession(s.handleCreate))
-	mux.HandleFunc("GET /bookmarks/{id}/edit", s.requireSession(s.handleEditForm))
-	mux.HandleFunc("POST /bookmarks/{id}", s.requireSession(s.handleUpdate))
-	mux.HandleFunc("POST /bookmarks/{id}/delete", s.requireSession(s.handleDelete))
-	mux.HandleFunc("POST /bookmarks/{id}/refetch", s.requireSession(s.handleRefetch))
+	mux.HandleFunc("GET /{$}", s.auth.RequireSession(s.handleIndex))
+	mux.HandleFunc("GET /new", s.auth.RequireSession(s.handleNewForm))
+	mux.HandleFunc("POST /bookmarks", s.auth.RequireSession(s.handleCreate))
+	mux.HandleFunc("GET /bookmarks/{id}/edit", s.auth.RequireSession(s.handleEditForm))
+	mux.HandleFunc("POST /bookmarks/{id}", s.auth.RequireSession(s.handleUpdate))
+	mux.HandleFunc("POST /bookmarks/{id}/delete", s.auth.RequireSession(s.handleDelete))
+	mux.HandleFunc("POST /bookmarks/{id}/refetch", s.auth.RequireSession(s.handleRefetch))
 
 	// Login — public HTML.
 	mux.HandleFunc("GET /login", s.handleLoginForm)
-	mux.HandleFunc("POST /login", s.handleLogin)
-	mux.HandleFunc("GET /logout", s.handleLogout)
+	mux.HandleFunc("POST /login", s.auth.HandleLogin)
+	mux.HandleFunc("GET /logout", s.auth.HandleLogout)
 
 	// Public JSON read API — public bookmarks only.
 	mux.HandleFunc("GET /status", s.handleStatus)
@@ -107,14 +83,17 @@ func (s *Server) routes() http.Handler {
 	mux.HandleFunc("GET /api/categories", s.handleAPICategories)
 
 	// API-key-gated write API.
-	mux.HandleFunc("POST /api/bookmarks", s.requireAPIKey(s.handleAPICreate))
-	mux.HandleFunc("PUT /api/bookmarks/{id}", s.requireAPIKey(s.handleAPIUpdate))
-	mux.HandleFunc("DELETE /api/bookmarks/{id}", s.requireAPIKey(s.handleAPIDelete))
+	mux.HandleFunc("POST /api/bookmarks", s.auth.RequireAPIKey(s.handleAPICreate))
+	mux.HandleFunc("PUT /api/bookmarks/{id}", s.auth.RequireAPIKey(s.handleAPIUpdate))
+	mux.HandleFunc("DELETE /api/bookmarks/{id}", s.auth.RequireAPIKey(s.handleAPIDelete))
 
 	// Shared theme stylesheet.
-	mux.HandleFunc("GET /static/styles.css", handleCSS)
+	mux.HandleFunc("GET /static/styles.css", theme.CSSHandler())
 
-	return cors(logRequests(mux))
+	// Everything bookmarks serves is text — HTML, JSON — so Gzip wraps the
+	// whole mux. Logging sits outside so the recorded status is the final one.
+	return web.CORS(web.LogRequests(web.Gzip(mux)),
+		"GET", "POST", "PUT", "DELETE", "OPTIONS")
 }
 
 // ── HTML admin handlers ────────────────────────────────────────────────────
@@ -131,7 +110,7 @@ func (s *Server) handleIndex(w http.ResponseWriter, r *http.Request) {
 			publicN++
 		}
 	}
-	s.render(w, "index.html", map[string]any{
+	s.rd.Render(w, "index.html", map[string]any{
 		"Bookmarks": bs,
 		"Total":     len(bs),
 		"Public":    publicN,
@@ -273,33 +252,7 @@ func bookmarkFromForm(r *http.Request) *Bookmark {
 // ── login ──────────────────────────────────────────────────────────────────
 
 func (s *Server) handleLoginForm(w http.ResponseWriter, r *http.Request) {
-	s.render(w, "login.html", map[string]any{"Error": r.URL.Query().Get("error")})
-}
-
-func (s *Server) handleLogin(w http.ResponseWriter, r *http.Request) {
-	if err := r.ParseForm(); err != nil {
-		http.Error(w, "bad form", http.StatusBadRequest)
-		return
-	}
-	if s.password == "" || !auth.VerifyPassword(r.FormValue("password"), s.password) {
-		http.Redirect(w, r, "/login?error=Invalid+password", http.StatusSeeOther)
-		return
-	}
-	token := auth.NewSessionToken()
-	if err := store.InsertSession(s.db, token, time.Now().Add(7*24*time.Hour)); err != nil {
-		s.fail(w, "create session", err)
-		return
-	}
-	http.SetCookie(w, auth.SessionCookie(token, s.cookieSecure))
-	http.Redirect(w, r, "/", http.StatusSeeOther)
-}
-
-func (s *Server) handleLogout(w http.ResponseWriter, r *http.Request) {
-	if token, ok := auth.Session(r); ok {
-		_ = store.DeleteSession(s.db, token)
-	}
-	http.SetCookie(w, auth.ClearCookie(s.cookieSecure))
-	http.Redirect(w, r, "/login", http.StatusSeeOther)
+	s.rd.Render(w, "login.html", map[string]any{"Error": r.URL.Query().Get("error")})
 }
 
 // ── public JSON read API ───────────────────────────────────────────────────
@@ -307,10 +260,10 @@ func (s *Server) handleLogout(w http.ResponseWriter, r *http.Request) {
 func (s *Server) handleStatus(w http.ResponseWriter, r *http.Request) {
 	bs, err := listPublicBookmarks(s.db)
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, "could not read database")
+		web.WriteError(w, http.StatusInternalServerError, "could not read database")
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{
+	web.WriteJSON(w, http.StatusOK, map[string]any{
 		"service":   "bookmarks",
 		"ok":        true,
 		"bookmarks": len(bs),
@@ -320,7 +273,7 @@ func (s *Server) handleStatus(w http.ResponseWriter, r *http.Request) {
 func (s *Server) handleAPIList(w http.ResponseWriter, r *http.Request) {
 	bs, err := listPublicBookmarks(s.db)
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, "could not list bookmarks")
+		web.WriteError(w, http.StatusInternalServerError, "could not list bookmarks")
 		return
 	}
 	public := publicList(bs)
@@ -330,20 +283,20 @@ func (s *Server) handleAPIList(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusNotModified)
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"bookmarks": public})
+	web.WriteJSON(w, http.StatusOK, map[string]any{"bookmarks": public})
 }
 
 func (s *Server) handleAPIGet(w http.ResponseWriter, r *http.Request) {
 	b, err := getBookmark(s.db, r.PathValue("id"))
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, "could not read bookmark")
+		web.WriteError(w, http.StatusInternalServerError, "could not read bookmark")
 		return
 	}
 	if b == nil || !b.Public {
-		writeError(w, http.StatusNotFound, "bookmark not found")
+		web.WriteError(w, http.StatusNotFound, "bookmark not found")
 		return
 	}
-	writeRecord(w, r, b.CID, publicView(b))
+	web.WriteRecord(w, r, b.CID, publicView(b))
 }
 
 // handleAPICategories returns the public bookmarks grouped by category, in the
@@ -353,7 +306,7 @@ func (s *Server) handleAPIGet(w http.ResponseWriter, r *http.Request) {
 func (s *Server) handleAPICategories(w http.ResponseWriter, r *http.Request) {
 	bs, err := listPublicBookmarks(s.db)
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, "could not list bookmarks")
+		web.WriteError(w, http.StatusInternalServerError, "could not list bookmarks")
 		return
 	}
 	groups := groupByCategory(publicList(bs))
@@ -371,7 +324,7 @@ func (s *Server) handleAPICategories(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusNotModified)
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"categories": out})
+	web.WriteJSON(w, http.StatusOK, map[string]any{"categories": out})
 }
 
 // ── API-key-gated write API ────────────────────────────────────────────────
@@ -379,31 +332,31 @@ func (s *Server) handleAPICategories(w http.ResponseWriter, r *http.Request) {
 func (s *Server) handleAPICreate(w http.ResponseWriter, r *http.Request) {
 	var b Bookmark
 	if err := json.NewDecoder(r.Body).Decode(&b); err != nil {
-		writeError(w, http.StatusBadRequest, "invalid JSON")
+		web.WriteError(w, http.StatusBadRequest, "invalid JSON")
 		return
 	}
 	if strings.TrimSpace(b.URL) == "" {
-		writeError(w, http.StatusBadRequest, "url is required")
+		web.WriteError(w, http.StatusBadRequest, "url is required")
 		return
 	}
 	b.ID = "" // server-assigned
 	s.fetchAndApply(r.Context(), &b)
 	if err := insertBookmark(s.db, &b); err != nil {
-		writeError(w, http.StatusInternalServerError, "could not create bookmark")
+		web.WriteError(w, http.StatusInternalServerError, "could not create bookmark")
 		return
 	}
-	writeJSON(w, http.StatusCreated, &b)
+	web.WriteJSON(w, http.StatusCreated, &b)
 }
 
 func (s *Server) handleAPIUpdate(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")
 	existing, err := getBookmark(s.db, id)
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, "could not read bookmark")
+		web.WriteError(w, http.StatusInternalServerError, "could not read bookmark")
 		return
 	}
 	if existing == nil {
-		writeError(w, http.StatusNotFound, "bookmark not found")
+		web.WriteError(w, http.StatusNotFound, "bookmark not found")
 		return
 	}
 	// Decode over a copy of the existing record so a partial body updates
@@ -411,7 +364,7 @@ func (s *Server) handleAPIUpdate(w http.ResponseWriter, r *http.Request) {
 	// and flags survive instead of being zeroed.
 	b := *existing
 	if err := json.NewDecoder(r.Body).Decode(&b); err != nil {
-		writeError(w, http.StatusBadRequest, "invalid JSON")
+		web.WriteError(w, http.StatusBadRequest, "invalid JSON")
 		return
 	}
 	if strings.TrimSpace(b.URL) == "" {
@@ -421,133 +374,38 @@ func (s *Server) handleAPIUpdate(w http.ResponseWriter, r *http.Request) {
 	b.CreatedAt = existing.CreatedAt
 	ok, err := updateBookmark(s.db, id, &b)
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, "could not update bookmark")
+		web.WriteError(w, http.StatusInternalServerError, "could not update bookmark")
 		return
 	}
 	if !ok {
-		writeError(w, http.StatusNotFound, "bookmark not found")
+		web.WriteError(w, http.StatusNotFound, "bookmark not found")
 		return
 	}
-	writeJSON(w, http.StatusOK, &b)
+	web.WriteJSON(w, http.StatusOK, &b)
 }
 
 func (s *Server) handleAPIDelete(w http.ResponseWriter, r *http.Request) {
 	existed, err := deleteBookmark(s.db, r.PathValue("id"))
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, "could not delete bookmark")
+		web.WriteError(w, http.StatusInternalServerError, "could not delete bookmark")
 		return
 	}
 	if !existed {
-		writeError(w, http.StatusNotFound, "bookmark not found")
+		web.WriteError(w, http.StatusNotFound, "bookmark not found")
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"deleted": r.PathValue("id")})
+	web.WriteJSON(w, http.StatusOK, map[string]any{"deleted": r.PathValue("id")})
 }
 
 // ── render helpers ─────────────────────────────────────────────────────────
 
 func (s *Server) renderForm(w http.ResponseWriter, b *Bookmark, isNew bool, action, errMsg string) {
-	s.render(w, "bookmark_form.html", map[string]any{
+	s.rd.Render(w, "bookmark_form.html", map[string]any{
 		"Bookmark": b, "IsNew": isNew, "Action": action, "Error": errMsg,
 	})
-}
-
-func parseTemplates() (map[string]*template.Template, error) {
-	pages, err := fs.Glob(assets, "templates/*.html")
-	if err != nil {
-		return nil, err
-	}
-	out := make(map[string]*template.Template)
-	for _, page := range pages {
-		name := path.Base(page)
-		if name == "base.html" {
-			continue
-		}
-		t, err := template.ParseFS(assets, "templates/base.html", page)
-		if err != nil {
-			return nil, err
-		}
-		out[name] = t
-	}
-	return out, nil
-}
-
-// render writes a page through base.html, buffering first so a template error
-// never produces a half-written response.
-func (s *Server) render(w http.ResponseWriter, page string, data any) {
-	t, ok := s.templates[page]
-	if !ok {
-		slog.Error("unknown template", "page", page)
-		http.Error(w, "internal error", http.StatusInternalServerError)
-		return
-	}
-	if m, ok := data.(map[string]any); ok {
-		m["AssetVer"] = s.assetVer
-	}
-	var buf bytes.Buffer
-	if err := t.ExecuteTemplate(&buf, "base", data); err != nil {
-		slog.Error("render failed", "page", page, "err", err)
-		http.Error(w, "internal error", http.StatusInternalServerError)
-		return
-	}
-	w.Header().Set("Content-Type", "text/html; charset=utf-8")
-	_, _ = buf.WriteTo(w)
 }
 
 func (s *Server) fail(w http.ResponseWriter, what string, err error) {
 	slog.Error(what, "err", err)
 	http.Error(w, "internal error", http.StatusInternalServerError)
-}
-
-// writeRecord writes v as JSON with its content CID as the ETag, and
-// short-circuits to 304 Not Modified when the client already holds that
-// version (If-None-Match).
-func writeRecord(w http.ResponseWriter, r *http.Request, recCID string, v any) {
-	etag := `"` + recCID + `"`
-	w.Header().Set("ETag", etag)
-	if r.Header.Get("If-None-Match") == etag {
-		w.WriteHeader(http.StatusNotModified)
-		return
-	}
-	writeJSON(w, http.StatusOK, v)
-}
-
-func writeJSON(w http.ResponseWriter, status int, v any) {
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(status)
-	_ = json.NewEncoder(w).Encode(v)
-}
-
-func writeError(w http.ResponseWriter, status int, msg string) {
-	writeJSON(w, status, map[string]string{"error": msg})
-}
-
-func handleCSS(w http.ResponseWriter, r *http.Request) {
-	w.Header().Set("Content-Type", "text/css; charset=utf-8")
-	w.Header().Set("Cache-Control", "public, max-age=3600")
-	_, _ = io.WriteString(w, theme.CSS)
-}
-
-// cors adds permissive CORS headers so a browser on another origin (the
-// website) can read the public API, and answers preflight requests.
-func cors(next http.Handler) http.Handler {
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Access-Control-Allow-Origin", "*")
-		w.Header().Set("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS")
-		w.Header().Set("Access-Control-Allow-Headers", "Content-Type, X-API-Key, Authorization")
-		if r.Method == http.MethodOptions {
-			w.WriteHeader(http.StatusNoContent)
-			return
-		}
-		next.ServeHTTP(w, r)
-	})
-}
-
-func logRequests(next http.Handler) http.Handler {
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		start := time.Now()
-		next.ServeHTTP(w, r)
-		slog.Info("request",
-			"method", r.Method, "path", r.URL.Path, "dur", time.Since(start))
-	})
 }

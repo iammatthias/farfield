@@ -11,6 +11,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/iammatthias/farfield/lib/web"
 )
 
 // newTestDB opens a fresh database in t.TempDir, runs migrations, and returns it.
@@ -32,18 +34,20 @@ func newTestDB(t *testing.T) *sql.DB {
 func newTestServer(t *testing.T) *Server {
 	t.Helper()
 	db := newTestDB(t)
-	tmpl, err := parseTemplates()
+	tmpl, err := web.ParseTemplates(assets, nil)
 	if err != nil {
-		t.Fatalf("parseTemplates: %v", err)
+		t.Fatalf("web.ParseTemplates: %v", err)
 	}
 	return &Server{
-		db:           db,
-		templates:    tmpl,
-		password:     "secret",
-		apiKey:       "k1",
-		cookieSecure: false,
-		http:         &http.Client{},
-		assetVer:     "test",
+		db: db,
+		auth: &web.Auth{
+			DB:           db,
+			Password:     "secret",
+			APIKey:       "k1",
+			CookieSecure: false,
+		},
+		rd:   &web.Renderer{Templates: tmpl, AssetVer: "test"},
+		http: &http.Client{},
 	}
 }
 
