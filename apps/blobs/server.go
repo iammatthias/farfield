@@ -12,6 +12,7 @@ import (
 	"net/url"
 	"os"
 	"strconv"
+	"time"
 
 	"github.com/iammatthias/farfield/lib/store"
 	"github.com/iammatthias/farfield/lib/theme"
@@ -131,13 +132,20 @@ func (s *Server) routes() http.Handler {
 	return web.CORS(web.LogRequests(mux), "GET", "POST", "PUT", "DELETE", "OPTIONS")
 }
 
-// storeUpload derives metadata, writes the bytes to the store, and records
-// the metadata row.
+// storeUpload derives metadata, writes the bytes to the store, generates a
+// thumbnail for large images, and records the metadata row.
 func (s *Server) storeUpload(data []byte) (*Meta, error) {
 	if len(data) == 0 {
 		return nil, errors.New("empty upload")
 	}
-	m, err := DeriveMetadata(data)
+	// Content-addressed: re-uploading known bytes is a no-op. Short-circuit
+	// before the image decode and the backend PUT.
+	if existing, err := getMeta(s.db, BlobCID(data)); err != nil {
+		return nil, err
+	} else if existing != nil {
+		return existing, nil
+	}
+	m, img, err := deriveMetadata(data)
 	if err != nil {
 		return nil, err
 	}
@@ -146,6 +154,19 @@ func (s *Server) storeUpload(data []byte) (*Meta, error) {
 	}
 	if err := s.store.Put(m.CID, data, m.Mime); err != nil {
 		return nil, err
+	}
+	// Thumbnail large images at upload time so the admin grid never pulls
+	// full-size originals. Failure is non-fatal: an empty thumb_cid falls
+	// back to the full blob.
+	if img != nil {
+		if thumb := thumbJPEG(img); thumb != nil {
+			tcid := BlobCID(thumb)
+			if err := s.store.Put(tcid, thumb, "image/jpeg"); err != nil {
+				slog.Error("store thumbnail", "cid", m.CID, "thumb", tcid, "err", err)
+			} else {
+				m.ThumbCID = tcid
+			}
+		}
 	}
 	if err := upsertMeta(s.db, &m); err != nil {
 		return nil, err
@@ -224,16 +245,37 @@ func (s *Server) handleAdminDelete(w http.ResponseWriter, r *http.Request) {
 		// Only drop the stored bytes when a metadata row actually existed:
 		// backup snapshots share the bucket but have no meta row, and must
 		// not be deletable through the media routes.
-		existed, err := deleteMeta(s.db, cid)
+		existed, thumb, err := deleteMeta(s.db, cid)
 		if err != nil {
 			slog.Error("delete metadata", "cid", cid, "err", err)
 		} else if existed {
 			if err := s.store.Delete(cid); err != nil {
 				slog.Error("delete bytes", "cid", cid, "err", err)
 			}
+			s.deleteThumbBytes(thumb)
 		}
 	}
 	http.Redirect(w, r, "/", http.StatusSeeOther)
+}
+
+// deleteThumbBytes drops a thumbnail's stored bytes once no remaining row
+// references them — identical images dedupe to a shared thumb CID, so the
+// bytes may still be live after one referencing blob is deleted.
+func (s *Server) deleteThumbBytes(thumb string) {
+	if thumb == "" {
+		return
+	}
+	refs, err := thumbRefCount(s.db, thumb)
+	if err != nil {
+		slog.Error("count thumb refs", "thumb", thumb, "err", err)
+		return
+	}
+	if refs > 0 {
+		return
+	}
+	if err := s.store.Delete(thumb); err != nil {
+		slog.Error("delete thumb bytes", "thumb", thumb, "err", err)
+	}
 }
 
 // ── login handlers ─────────────────────────────────────────────────────────
@@ -288,40 +330,60 @@ func (s *Server) handleAPIGetBytes(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	etag := `"` + cid + `"`
-	if r.Header.Get("If-None-Match") == etag {
+	if web.ETagMatch(r, cid) {
+		w.Header().Set("ETag", etag)
 		w.WriteHeader(http.StatusNotModified)
 		return
 	}
-	// Only blobs in the media index are publicly served — this keeps backup
-	// snapshots (stored in R2 but not indexed) off the public endpoint.
+	// Only blobs in the media index — or their generated thumbnails — are
+	// publicly served. This keeps backup snapshots (stored in R2 but not
+	// indexed) off the public endpoint.
 	meta, err := getMeta(s.db, cid)
 	if err != nil {
 		web.WriteError(w, http.StatusInternalServerError, "could not read blob")
 		return
 	}
-	if meta == nil {
-		web.WriteError(w, http.StatusNotFound, "blob not found")
-		return
+	mime := "image/jpeg" // thumbnails are always JPEG
+	if meta != nil {
+		if mime = meta.Mime; mime == "" {
+			mime = "application/octet-stream"
+		}
+	} else {
+		refs, err := thumbRefCount(s.db, cid)
+		if err != nil {
+			web.WriteError(w, http.StatusInternalServerError, "could not read blob")
+			return
+		}
+		if refs == 0 {
+			web.WriteError(w, http.StatusNotFound, "blob not found")
+			return
+		}
 	}
-	data, err := s.store.Get(cid)
+	body, size, err := s.store.GetStream(cid)
 	if err != nil {
 		slog.Error("get bytes", "cid", cid, "err", err)
 		web.WriteError(w, http.StatusInternalServerError, "could not read blob")
 		return
 	}
-	if data == nil {
+	if body == nil {
 		web.WriteError(w, http.StatusNotFound, "blob not found")
 		return
 	}
-	mime := meta.Mime
-	if mime == "" {
-		mime = "application/octet-stream"
-	}
+	defer body.Close()
+
 	w.Header().Set("Content-Type", mime)
 	w.Header().Set("ETag", etag)
 	// Content-addressed: the bytes for a CID never change.
 	w.Header().Set("Cache-Control", "public, max-age=31536000, immutable")
-	_, _ = w.Write(data)
+	// The local backend hands back an *os.File — let ServeContent stream it
+	// with Range support and Content-Length. R2 bodies are not seekable, so
+	// send the known size and copy.
+	if rs, ok := body.(io.ReadSeeker); ok {
+		http.ServeContent(w, r, "", time.Time{}, rs)
+		return
+	}
+	w.Header().Set("Content-Length", strconv.FormatInt(size, 10))
+	_, _ = io.Copy(w, body)
 }
 
 func (s *Server) handleAPIGetMeta(w http.ResponseWriter, r *http.Request) {
@@ -365,7 +427,7 @@ func (s *Server) handleAPIDelete(w http.ResponseWriter, r *http.Request) {
 		web.WriteError(w, http.StatusBadRequest, "malformed cid")
 		return
 	}
-	existed, err := deleteMeta(s.db, cid)
+	existed, thumb, err := deleteMeta(s.db, cid)
 	if err != nil {
 		web.WriteError(w, http.StatusInternalServerError, "could not delete blob")
 		return
@@ -379,6 +441,7 @@ func (s *Server) handleAPIDelete(w http.ResponseWriter, r *http.Request) {
 	if err := s.store.Delete(cid); err != nil {
 		slog.Error("delete bytes", "cid", cid, "err", err)
 	}
+	s.deleteThumbBytes(thumb)
 	web.WriteJSON(w, http.StatusOK, map[string]any{"deleted": cid})
 }
 

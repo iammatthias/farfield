@@ -23,7 +23,8 @@
             <tr>
               <td class="shrink">
                 <a class="row" href="#m-{{.CID}}">
-                  <img class="thumb" src="/blobs/{{.CID}}" loading="lazy" alt=""
+                  {{/* generated thumbnail when one exists; older rows fall back to the full blob */}}
+                <img class="thumb" src="/blobs/{{if .ThumbCID}}{{.ThumbCID}}{{else}}{{.CID}}{{end}}" loading="lazy" alt=""
                        {{if .DominantColor}}style="background:{{.DominantColor}}"{{end}}>
                 </a>
               </td>
