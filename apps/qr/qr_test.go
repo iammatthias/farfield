@@ -11,6 +11,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/iammatthias/farfield/lib/web"
 )
 
 // ── helpers ────────────────────────────────────────────────────────────────
@@ -29,18 +31,19 @@ func newTestDB(t *testing.T) *sql.DB {
 func newTestServer(t *testing.T) *Server {
 	t.Helper()
 	db := newTestDB(t)
-	tmpl, err := parseTemplates()
+	tmpl, err := web.ParseTemplates(assets, templateFuncs())
 	if err != nil {
-		t.Fatalf("parseTemplates: %v", err)
+		t.Fatalf("ParseTemplates: %v", err)
 	}
 	return &Server{
-		db:           db,
-		templates:    tmpl,
-		password:     "secret",
-		apiKey:       "k1",
-		cookieSecure: false,
-		publicURL:    "https://qr.test",
-		assetVer:     "test",
+		db: db,
+		auth: &web.Auth{
+			DB:       db,
+			Password: "secret",
+			APIKey:   "k1",
+		},
+		rd:        &web.Renderer{Templates: tmpl, AssetVer: "test"},
+		publicURL: "https://qr.test",
 	}
 }
 
@@ -904,7 +907,7 @@ func TestAPIKeyWriteAuth(t *testing.T) {
 
 func TestAPIKeyDisabledWhenUnconfigured(t *testing.T) {
 	s := newTestServer(t)
-	s.apiKey = "" // simulate unset
+	s.auth.APIKey = "" // simulate unset
 	ts := httptest.NewServer(s.routes())
 	defer ts.Close()
 

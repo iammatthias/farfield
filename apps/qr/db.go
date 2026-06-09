@@ -3,9 +3,7 @@ package main
 import (
 	"database/sql"
 	"errors"
-	"fmt"
 	"strings"
-	"time"
 
 	"github.com/iammatthias/farfield/lib/cid"
 	"github.com/iammatthias/farfield/lib/store"
@@ -70,13 +68,8 @@ const codeCols = `id, label, mode, target, ec, public, enabled, admin_notes, ` +
 // performs idempotent column-add migrations. See the self-migrating-sqlite
 // skill — every step is safe to run on every startup.
 func openDB(path string) (*sql.DB, error) {
-	dsn := fmt.Sprintf(
-		"file:%s?_pragma=busy_timeout(5000)&_pragma=journal_mode(WAL)", path)
-	db, err := sql.Open("sqlite", dsn)
+	db, err := store.OpenDB(path)
 	if err != nil {
-		return nil, err
-	}
-	if err := db.Ping(); err != nil {
 		return nil, err
 	}
 	if _, err := db.Exec(schema); err != nil {
@@ -95,7 +88,7 @@ func openDB(path string) (*sql.DB, error) {
 		{"admin_notes", "TEXT NOT NULL DEFAULT ''"},
 		{"cid", "TEXT NOT NULL DEFAULT ''"},
 	} {
-		if err := ensureColumn(db, "codes", c.col, c.decl); err != nil {
+		if err := store.EnsureColumn(db, "codes", c.col, c.decl); err != nil {
 			return nil, err
 		}
 	}
@@ -104,22 +97,6 @@ func openDB(path string) (*sql.DB, error) {
 	}
 	return db, nil
 }
-
-func ensureColumn(db *sql.DB, table, column, decl string) error {
-	var n int
-	if err := db.QueryRow(
-		`SELECT COUNT(*) FROM pragma_table_info(?) WHERE name = ?`,
-		table, column).Scan(&n); err != nil {
-		return err
-	}
-	if n > 0 {
-		return nil
-	}
-	_, err := db.Exec("ALTER TABLE " + table + " ADD COLUMN " + column + " " + decl)
-	return err
-}
-
-func nowRFC3339() string { return time.Now().UTC().Format(time.RFC3339) }
 
 // codeCID hashes the public-facing configuration of a Code. The id, admin
 // notes, and timestamps are deliberately excluded so admin-only edits and
@@ -189,7 +166,7 @@ func insertCode(db *sql.DB, c *Code) error {
 		c.ID = store.ShortID()
 	}
 	normalize(c)
-	c.CreatedAt = nowRFC3339()
+	c.CreatedAt = store.NowRFC3339()
 	c.UpdatedAt = c.CreatedAt
 	c.CID = codeCID(c)
 	_, err := db.Exec(
@@ -204,7 +181,7 @@ func insertCode(db *sql.DB, c *Code) error {
 // and created_at are not read from c.
 func updateCode(db *sql.DB, id string, c *Code) (bool, error) {
 	normalize(c)
-	c.UpdatedAt = nowRFC3339()
+	c.UpdatedAt = store.NowRFC3339()
 	c.CID = codeCID(c)
 	res, err := db.Exec(
 		`UPDATE codes SET label = ?, mode = ?, target = ?, ec = ?,

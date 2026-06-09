@@ -1,29 +1,20 @@
 package main
 
 import (
-	"bytes"
-	"context"
 	"database/sql"
 	"embed"
 	"encoding/json"
-	"fmt"
 	"html/template"
 	"io"
-	"io/fs"
 	"log/slog"
 	"net"
 	"net/http"
-	"os"
-	"os/signal"
-	"path"
 	"strings"
-	"syscall"
-	"time"
 
-	"github.com/iammatthias/farfield/lib/auth"
 	"github.com/iammatthias/farfield/lib/cid"
 	"github.com/iammatthias/farfield/lib/store"
 	"github.com/iammatthias/farfield/lib/theme"
+	"github.com/iammatthias/farfield/lib/web"
 )
 
 //go:embed templates
@@ -31,13 +22,10 @@ var assets embed.FS
 
 // Server holds the running QR service.
 type Server struct {
-	db           *sql.DB
-	templates    map[string]*template.Template
-	password     string
-	apiKey       string
-	cookieSecure bool
-	publicURL    string // base URL for proxy QR targets, e.g. https://qr.farfield.systems
-	assetVer     string
+	db        *sql.DB
+	auth      *web.Auth
+	rd        *web.Renderer
+	publicURL string // base URL for proxy QR targets, e.g. https://qr.farfield.systems
 }
 
 // run wires up dependencies and serves until interrupted.
@@ -47,58 +35,46 @@ func run(host, port string) error {
 		return err
 	}
 	defer db.Close()
+	if err := store.PruneSessions(db); err != nil {
+		slog.Warn("could not prune sessions", "err", err)
+	}
 
-	tmpl, err := parseTemplates()
+	tmpl, err := web.ParseTemplates(assets, templateFuncs())
 	if err != nil {
 		return err
 	}
 
 	s := &Server{
-		db:           db,
-		templates:    tmpl,
-		password:     store.Env("PASSWORD", ""),
-		apiKey:       store.Env("QR_API_KEY", ""),
-		cookieSecure: store.Env("COOKIE_SECURE", "false") == "true",
-		publicURL:    strings.TrimRight(store.Env("QR_PUBLIC_URL", "http://"+net.JoinHostPort(host, port)), "/"),
-		assetVer:     cid.Of([]byte(theme.CSS))[:16],
+		db: db,
+		auth: &web.Auth{
+			DB:           db,
+			Password:     store.Env("PASSWORD", ""),
+			APIKey:       store.Env("QR_API_KEY", ""),
+			CookieSecure: store.Env("COOKIE_SECURE", "false") == "true",
+		},
+		rd:        &web.Renderer{Templates: tmpl, AssetVer: theme.Version},
+		publicURL: strings.TrimRight(store.Env("QR_PUBLIC_URL", "http://"+net.JoinHostPort(host, port)), "/"),
 	}
 
-	srv := &http.Server{Addr: net.JoinHostPort(host, port), Handler: s.routes()}
-
-	go func() {
-		slog.Info("listening", "addr", srv.Addr)
-		if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
-			slog.Error("server failed", "err", err)
-			os.Exit(1)
-		}
-	}()
-
-	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
-	defer stop()
-	<-ctx.Done()
-
-	slog.Info("shutting down")
-	shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-	defer cancel()
-	return srv.Shutdown(shutdownCtx)
+	return web.Serve(host, port, s.routes())
 }
 
 func (s *Server) routes() http.Handler {
 	mux := http.NewServeMux()
 
 	// HTML admin UI — session-gated.
-	mux.HandleFunc("GET /{$}", s.requireSession(s.handleIndex))
-	mux.HandleFunc("GET /new", s.requireSession(s.handleNewForm))
-	mux.HandleFunc("POST /codes", s.requireSession(s.handleCreate))
-	mux.HandleFunc("GET /codes/{id}/edit", s.requireSession(s.handleEditForm))
-	mux.HandleFunc("POST /codes/{id}", s.requireSession(s.handleUpdate))
-	mux.HandleFunc("POST /codes/{id}/delete", s.requireSession(s.handleDelete))
-	mux.HandleFunc("GET /codes/{id}/preview", s.requireSession(s.handlePreview))
+	mux.HandleFunc("GET /{$}", s.auth.RequireSession(s.handleIndex))
+	mux.HandleFunc("GET /new", s.auth.RequireSession(s.handleNewForm))
+	mux.HandleFunc("POST /codes", s.auth.RequireSession(s.handleCreate))
+	mux.HandleFunc("GET /codes/{id}/edit", s.auth.RequireSession(s.handleEditForm))
+	mux.HandleFunc("POST /codes/{id}", s.auth.RequireSession(s.handleUpdate))
+	mux.HandleFunc("POST /codes/{id}/delete", s.auth.RequireSession(s.handleDelete))
+	mux.HandleFunc("GET /codes/{id}/preview", s.auth.RequireSession(s.handlePreview))
 
 	// Login.
 	mux.HandleFunc("GET /login", s.handleLoginForm)
-	mux.HandleFunc("POST /login", s.handleLogin)
-	mux.HandleFunc("GET /logout", s.handleLogout)
+	mux.HandleFunc("POST /login", s.auth.HandleLogin)
+	mux.HandleFunc("GET /logout", s.auth.HandleLogout)
 
 	// Public QR rendering — only for codes marked public AND enabled. The
 	// .svg suffix is optional; {id} captures it and the handler trims it.
@@ -111,14 +87,17 @@ func (s *Server) routes() http.Handler {
 	mux.HandleFunc("GET /api/codes/{id}", s.handleAPIGet)
 
 	// API-key-gated write API.
-	mux.HandleFunc("POST /api/codes", s.requireAPIKey(s.handleAPICreate))
-	mux.HandleFunc("PUT /api/codes/{id}", s.requireAPIKey(s.handleAPIUpdate))
-	mux.HandleFunc("DELETE /api/codes/{id}", s.requireAPIKey(s.handleAPIDelete))
+	mux.HandleFunc("POST /api/codes", s.auth.RequireAPIKey(s.handleAPICreate))
+	mux.HandleFunc("PUT /api/codes/{id}", s.auth.RequireAPIKey(s.handleAPIUpdate))
+	mux.HandleFunc("DELETE /api/codes/{id}", s.auth.RequireAPIKey(s.handleAPIDelete))
 
 	// Shared theme stylesheet.
-	mux.HandleFunc("GET /static/styles.css", handleCSS)
+	mux.HandleFunc("GET /static/styles.css", theme.CSSHandler())
 
-	return cors(logRequests(mux))
+	// Everything qr serves is text — HTML, JSON, SVG — so Gzip wraps the
+	// whole mux. Logging sits outside so the recorded status is the final one.
+	return web.CORS(web.LogRequests(web.Gzip(mux)),
+		"GET", "POST", "PUT", "DELETE", "OPTIONS")
 }
 
 // ── HTML admin handlers ────────────────────────────────────────────────────
@@ -138,7 +117,7 @@ func (s *Server) handleIndex(w http.ResponseWriter, r *http.Request) {
 			enabledN++
 		}
 	}
-	s.render(w, "index.html", map[string]any{
+	s.rd.Render(w, "index.html", map[string]any{
 		"Codes":     cs,
 		"Total":     len(cs),
 		"Public":    publicN,
@@ -298,33 +277,7 @@ func (s *Server) encodeFor(c *Code) (string, int, error) {
 // ── login ──────────────────────────────────────────────────────────────────
 
 func (s *Server) handleLoginForm(w http.ResponseWriter, r *http.Request) {
-	s.render(w, "login.html", map[string]any{"Error": r.URL.Query().Get("error")})
-}
-
-func (s *Server) handleLogin(w http.ResponseWriter, r *http.Request) {
-	if err := r.ParseForm(); err != nil {
-		http.Error(w, "bad form", http.StatusBadRequest)
-		return
-	}
-	if s.password == "" || !auth.VerifyPassword(r.FormValue("password"), s.password) {
-		http.Redirect(w, r, "/login?error=Invalid+password", http.StatusSeeOther)
-		return
-	}
-	token := auth.NewSessionToken()
-	if err := store.InsertSession(s.db, token, time.Now().Add(7*24*time.Hour)); err != nil {
-		s.fail(w, "create session", err)
-		return
-	}
-	http.SetCookie(w, auth.SessionCookie(token, s.cookieSecure))
-	http.Redirect(w, r, "/", http.StatusSeeOther)
-}
-
-func (s *Server) handleLogout(w http.ResponseWriter, r *http.Request) {
-	if token, ok := auth.Session(r); ok {
-		_ = store.DeleteSession(s.db, token)
-	}
-	http.SetCookie(w, auth.ClearCookie(s.cookieSecure))
-	http.Redirect(w, r, "/login", http.StatusSeeOther)
+	s.rd.Render(w, "login.html", map[string]any{"Error": r.URL.Query().Get("error")})
 }
 
 // ── public QR rendering ────────────────────────────────────────────────────
@@ -352,9 +305,8 @@ func (s *Server) handleQRSVG(w http.ResponseWriter, r *http.Request) {
 	// long. For PROXY codes the SVG is also pinned to CID (the QR encodes the
 	// proxy URL, not the target), but we still revalidate so a flip to
 	// private/disabled propagates promptly.
-	etag := `"` + c.CID + `"`
-	w.Header().Set("ETag", etag)
-	if r.Header.Get("If-None-Match") == etag {
+	w.Header().Set("ETag", `"`+c.CID+`"`)
+	if web.ETagMatch(r, c.CID) {
 		w.WriteHeader(http.StatusNotModified)
 		return
 	}
@@ -390,10 +342,10 @@ func (s *Server) handleProxyRedirect(w http.ResponseWriter, r *http.Request) {
 func (s *Server) handleStatus(w http.ResponseWriter, r *http.Request) {
 	cs, err := listPublicCodes(s.db)
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, "could not read database")
+		web.WriteError(w, http.StatusInternalServerError, "could not read database")
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{
+	web.WriteJSON(w, http.StatusOK, map[string]any{
 		"service": "qr",
 		"ok":      true,
 		"codes":   len(cs),
@@ -403,30 +355,24 @@ func (s *Server) handleStatus(w http.ResponseWriter, r *http.Request) {
 func (s *Server) handleAPIList(w http.ResponseWriter, r *http.Request) {
 	cs, err := listPublicCodes(s.db)
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, "could not list codes")
+		web.WriteError(w, http.StatusInternalServerError, "could not list codes")
 		return
 	}
 	public := publicList(cs)
-	etag := `"` + cid.OfValue(public) + `"`
-	w.Header().Set("ETag", etag)
-	if r.Header.Get("If-None-Match") == etag {
-		w.WriteHeader(http.StatusNotModified)
-		return
-	}
-	writeJSON(w, http.StatusOK, map[string]any{"codes": public})
+	web.WriteRecord(w, r, cid.OfValue(public), map[string]any{"codes": public})
 }
 
 func (s *Server) handleAPIGet(w http.ResponseWriter, r *http.Request) {
 	c, err := getCode(s.db, r.PathValue("id"))
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, "could not read code")
+		web.WriteError(w, http.StatusInternalServerError, "could not read code")
 		return
 	}
 	if c == nil || !c.Public || !c.Enabled {
-		writeError(w, http.StatusNotFound, "code not found")
+		web.WriteError(w, http.StatusNotFound, "code not found")
 		return
 	}
-	writeRecord(w, r, c.CID, publicView(c))
+	web.WriteRecord(w, r, c.CID, publicView(c))
 }
 
 // ── API-key-gated write API ────────────────────────────────────────────────
@@ -434,7 +380,7 @@ func (s *Server) handleAPIGet(w http.ResponseWriter, r *http.Request) {
 func (s *Server) handleAPICreate(w http.ResponseWriter, r *http.Request) {
 	var c Code
 	if err := json.NewDecoder(r.Body).Decode(&c); err != nil {
-		writeError(w, http.StatusBadRequest, "invalid JSON")
+		web.WriteError(w, http.StatusBadRequest, "invalid JSON")
 		return
 	}
 	c.ID = "" // server-assigned
@@ -445,30 +391,30 @@ func (s *Server) handleAPICreate(w http.ResponseWriter, r *http.Request) {
 		c.EC = "M"
 	}
 	if msg := validateCode(&c); msg != "" {
-		writeError(w, http.StatusBadRequest, msg)
+		web.WriteError(w, http.StatusBadRequest, msg)
 		return
 	}
 	if err := insertCode(s.db, &c); err != nil {
-		writeError(w, http.StatusInternalServerError, "could not create code")
+		web.WriteError(w, http.StatusInternalServerError, "could not create code")
 		return
 	}
-	writeJSON(w, http.StatusCreated, &c)
+	web.WriteJSON(w, http.StatusCreated, &c)
 }
 
 func (s *Server) handleAPIUpdate(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")
 	existing, err := getCode(s.db, id)
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, "could not read code")
+		web.WriteError(w, http.StatusInternalServerError, "could not read code")
 		return
 	}
 	if existing == nil {
-		writeError(w, http.StatusNotFound, "code not found")
+		web.WriteError(w, http.StatusNotFound, "code not found")
 		return
 	}
 	var c Code
 	if err := json.NewDecoder(r.Body).Decode(&c); err != nil {
-		writeError(w, http.StatusBadRequest, "invalid JSON")
+		web.WriteError(w, http.StatusBadRequest, "invalid JSON")
 		return
 	}
 	// Fields not posted fall back to the existing record so partial updates
@@ -484,52 +430,40 @@ func (s *Server) handleAPIUpdate(w http.ResponseWriter, r *http.Request) {
 	}
 	c.CreatedAt = existing.CreatedAt
 	if msg := validateCode(&c); msg != "" {
-		writeError(w, http.StatusBadRequest, msg)
+		web.WriteError(w, http.StatusBadRequest, msg)
 		return
 	}
 	ok, err := updateCode(s.db, id, &c)
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, "could not update code")
+		web.WriteError(w, http.StatusInternalServerError, "could not update code")
 		return
 	}
 	if !ok {
-		writeError(w, http.StatusNotFound, "code not found")
+		web.WriteError(w, http.StatusNotFound, "code not found")
 		return
 	}
-	writeJSON(w, http.StatusOK, &c)
+	web.WriteJSON(w, http.StatusOK, &c)
 }
 
 func (s *Server) handleAPIDelete(w http.ResponseWriter, r *http.Request) {
 	existed, err := deleteCode(s.db, r.PathValue("id"))
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, "could not delete code")
+		web.WriteError(w, http.StatusInternalServerError, "could not delete code")
 		return
 	}
 	if !existed {
-		writeError(w, http.StatusNotFound, "code not found")
+		web.WriteError(w, http.StatusNotFound, "code not found")
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"deleted": r.PathValue("id")})
+	web.WriteJSON(w, http.StatusOK, map[string]any{"deleted": r.PathValue("id")})
 }
 
 // ── render helpers ─────────────────────────────────────────────────────────
 
-func (s *Server) renderForm(w http.ResponseWriter, c *Code, isNew bool, action, errMsg string) {
-	s.render(w, "code_form.html", map[string]any{
-		"Code":      c,
-		"IsNew":     isNew,
-		"Action":    action,
-		"Error":     errMsg,
-		"PublicURL": s.publicURL,
-	})
-}
-
-func parseTemplates() (map[string]*template.Template, error) {
-	pages, err := fs.Glob(assets, "templates/*.html")
-	if err != nil {
-		return nil, err
-	}
-	funcs := template.FuncMap{
+// templateFuncs returns the FuncMap the qr templates use — qrFor renders a
+// code's QR inline as SVG.
+func templateFuncs() template.FuncMap {
+	return template.FuncMap{
 		"qrFor": func(c *Code, publicURL string) template.HTML {
 			payload := c.Target
 			if c.Mode == ModeProxy {
@@ -545,92 +479,19 @@ func parseTemplates() (map[string]*template.Template, error) {
 			return template.HTML(svg)
 		},
 	}
-	out := make(map[string]*template.Template)
-	for _, page := range pages {
-		name := path.Base(page)
-		if name == "base.html" {
-			continue
-		}
-		t, err := template.New(name).Funcs(funcs).ParseFS(assets, "templates/base.html", page)
-		if err != nil {
-			return nil, fmt.Errorf("parse %s: %w", name, err)
-		}
-		out[name] = t
-	}
-	return out, nil
 }
 
-func (s *Server) render(w http.ResponseWriter, page string, data any) {
-	t, ok := s.templates[page]
-	if !ok {
-		slog.Error("unknown template", "page", page)
-		http.Error(w, "internal error", http.StatusInternalServerError)
-		return
-	}
-	if m, ok := data.(map[string]any); ok {
-		m["AssetVer"] = s.assetVer
-	}
-	var buf bytes.Buffer
-	if err := t.ExecuteTemplate(&buf, "base", data); err != nil {
-		slog.Error("render failed", "page", page, "err", err)
-		http.Error(w, "internal error", http.StatusInternalServerError)
-		return
-	}
-	w.Header().Set("Content-Type", "text/html; charset=utf-8")
-	_, _ = buf.WriteTo(w)
+func (s *Server) renderForm(w http.ResponseWriter, c *Code, isNew bool, action, errMsg string) {
+	s.rd.Render(w, "code_form.html", map[string]any{
+		"Code":      c,
+		"IsNew":     isNew,
+		"Action":    action,
+		"Error":     errMsg,
+		"PublicURL": s.publicURL,
+	})
 }
 
 func (s *Server) fail(w http.ResponseWriter, what string, err error) {
 	slog.Error(what, "err", err)
 	http.Error(w, "internal error", http.StatusInternalServerError)
-}
-
-// writeRecord writes v with its CID as the strong ETag, and short-circuits to
-// 304 when the client already holds that version.
-func writeRecord(w http.ResponseWriter, r *http.Request, recCID string, v any) {
-	etag := `"` + recCID + `"`
-	w.Header().Set("ETag", etag)
-	if r.Header.Get("If-None-Match") == etag {
-		w.WriteHeader(http.StatusNotModified)
-		return
-	}
-	writeJSON(w, http.StatusOK, v)
-}
-
-func writeJSON(w http.ResponseWriter, status int, v any) {
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(status)
-	_ = json.NewEncoder(w).Encode(v)
-}
-
-func writeError(w http.ResponseWriter, status int, msg string) {
-	writeJSON(w, status, map[string]string{"error": msg})
-}
-
-func handleCSS(w http.ResponseWriter, r *http.Request) {
-	w.Header().Set("Content-Type", "text/css; charset=utf-8")
-	w.Header().Set("Cache-Control", "public, max-age=3600")
-	_, _ = io.WriteString(w, theme.CSS)
-}
-
-func cors(next http.Handler) http.Handler {
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Access-Control-Allow-Origin", "*")
-		w.Header().Set("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS")
-		w.Header().Set("Access-Control-Allow-Headers", "Content-Type, X-API-Key, Authorization")
-		if r.Method == http.MethodOptions {
-			w.WriteHeader(http.StatusNoContent)
-			return
-		}
-		next.ServeHTTP(w, r)
-	})
-}
-
-func logRequests(next http.Handler) http.Handler {
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		start := time.Now()
-		next.ServeHTTP(w, r)
-		slog.Info("request",
-			"method", r.Method, "path", r.URL.Path, "dur", time.Since(start))
-	})
 }

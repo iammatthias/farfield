@@ -13,11 +13,17 @@ import (
 	"os"
 
 	"github.com/iammatthias/farfield/lib/store"
+	"github.com/iammatthias/farfield/lib/web"
 )
 
 func main() {
 	_ = store.LoadEnv() // finds the root .env, wherever the app is run from
 	slog.SetDefault(slog.New(slog.NewTextHandler(os.Stderr, nil)))
+
+	if len(os.Args) > 1 && os.Args[1] == "health" {
+		// Probes /status — backs the Docker healthcheck (distroless: no curl).
+		os.Exit(web.Health(store.Env("QR_PORT", "8794")))
+	}
 
 	host := store.Env("HOST", "127.0.0.1")
 	port := store.Env("QR_PORT", "8794")
