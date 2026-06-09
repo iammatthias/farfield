@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"html/template"
@@ -8,6 +9,7 @@ import (
 	"net/url"
 	"regexp"
 	"strings"
+	"sync"
 	"time"
 )
 
@@ -36,25 +38,32 @@ type blobMeta struct {
 	Mime string `json:"mime"`
 }
 
-// bodyRenderer resolves blob:// refs against the blobs service once per page
-// render and memoizes metadata lookups for the lifetime of the render.
+// bodyRenderer resolves blob:// refs against the blobs service. Successful
+// metadata lookups land in the shared server-lifetime cache — blob CIDs are
+// content-addressed and immutable, so a hit never goes stale. Failures are
+// memoized only for the lifetime of this renderer (one page render), so a
+// blip in the blobs service is retried on the next request.
 type bodyRenderer struct {
+	ctx        context.Context
 	client     *http.Client
 	metaBase   string
 	publicBase string
+	shared     *sync.Map // cid → blobLookup, successes only, server-lifetime
 	cache      map[string]blobLookup
 }
 
-func newBodyRenderer(metaBase, publicBase string) *bodyRenderer {
+func newBodyRenderer(ctx context.Context, metaBase, publicBase string, shared *sync.Map) *bodyRenderer {
 	metaBase = strings.TrimRight(metaBase, "/")
 	publicBase = strings.TrimRight(publicBase, "/")
 	if publicBase == "" {
 		publicBase = metaBase
 	}
 	return &bodyRenderer{
+		ctx:        ctx,
 		client:     blobMetaClient,
 		metaBase:   metaBase,
 		publicBase: publicBase,
+		shared:     shared,
 		cache:      make(map[string]blobLookup),
 	}
 }
@@ -134,22 +143,31 @@ func (r *bodyRenderer) renderEmbed(cid string, standalone bool) string {
 	src := template.HTMLEscapeString(href)
 	switch {
 	case strings.HasPrefix(meta.Mime, "image/"):
-		return `<img class="` + cls + `" src="` + src + `" alt="">`
+		return `<img class="` + cls + `" src="` + src + `" alt="" loading="lazy" decoding="async">`
 	case strings.HasPrefix(meta.Mime, "video/"):
-		return `<video class="` + cls + `" controls src="` + src + `"></video>`
+		return `<video class="` + cls + `" controls preload="metadata" src="` + src + `"></video>`
 	case strings.HasPrefix(meta.Mime, "audio/"):
-		return `<audio class="` + cls + `" controls src="` + src + `"></audio>`
+		return `<audio class="` + cls + `" controls preload="metadata" src="` + src + `"></audio>`
 	default:
 		return `<a class="blob-file" href="` + src + `">` + template.HTMLEscapeString("blob://"+cid) + `</a>`
 	}
 }
 
 func (r *bodyRenderer) meta(cid string) (*blobMeta, error) {
+	if r.shared != nil {
+		if cached, ok := r.shared.Load(cid); ok {
+			hit := cached.(blobLookup)
+			return hit.meta, hit.err
+		}
+	}
 	if cached, ok := r.cache[cid]; ok {
 		return cached.meta, cached.err
 	}
-	meta, err := fetchBlobMeta(r.client, r.metaBase, cid)
+	meta, err := fetchBlobMeta(r.ctx, r.client, r.metaBase, cid)
 	r.cache[cid] = blobLookup{meta: meta, err: err}
+	if err == nil && r.shared != nil {
+		r.shared.Store(cid, blobLookup{meta: meta})
+	}
 	return meta, err
 }
 
@@ -157,11 +175,18 @@ func (r *bodyRenderer) blobURL(cid string) string {
 	return joinURL(r.publicBase, "blobs", cid)
 }
 
-func fetchBlobMeta(client *http.Client, base, cid string) (*blobMeta, error) {
+func fetchBlobMeta(ctx context.Context, client *http.Client, base, cid string) (*blobMeta, error) {
 	if client == nil {
 		client = blobMetaClient
 	}
-	resp, err := client.Get(joinURL(base, "blobs", cid, "meta"))
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, joinURL(base, "blobs", cid, "meta"), nil)
+	if err != nil {
+		return nil, err
+	}
+	resp, err := client.Do(req)
 	if err != nil {
 		return nil, err
 	}

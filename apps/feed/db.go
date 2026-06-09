@@ -110,17 +110,32 @@ func backfillCIDs(db *sql.DB) error {
 		posts = append(posts, p)
 	}
 	rows.Close()
+	if len(posts) == 0 {
+		return nil
+	}
+	// One transaction for the whole backfill — per-row autocommit would
+	// fsync once per post.
+	tx, err := db.Begin()
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
 	for i := range posts {
-		if _, err := db.Exec(`UPDATE posts SET cid = ? WHERE slug = ?`,
+		if _, err := tx.Exec(`UPDATE posts SET cid = ? WHERE slug = ?`,
 			postCID(&posts[i]), posts[i].Slug); err != nil {
 			return err
 		}
 	}
-	return nil
+	return tx.Commit()
 }
 
 // scanner is satisfied by both *sql.Row and *sql.Rows.
 type scanner interface{ Scan(...any) error }
+
+// execer is satisfied by both *sql.DB and *sql.Tx.
+type execer interface {
+	Exec(query string, args ...any) (sql.Result, error)
+}
 
 func scanPost(row scanner) (*Post, error) {
 	var p Post
@@ -132,10 +147,23 @@ func scanPost(row scanner) (*Post, error) {
 	return &p, nil
 }
 
-// listPosts returns every post, newest first.
-func listPosts(db *sql.DB) ([]Post, error) {
-	rows, err := db.Query(
-		`SELECT ` + postCols + ` FROM posts ORDER BY created_at DESC`)
+// listPosts returns posts newest first, keyset-paginated on created_at.
+// before, when non-empty, restricts to posts created strictly earlier than
+// that timestamp (empty = start from the newest). limit caps the page size;
+// limit <= 0 means no cap.
+func listPosts(db *sql.DB, limit int, before string) ([]Post, error) {
+	query := `SELECT ` + postCols + ` FROM posts`
+	args := []any{}
+	if before != "" {
+		query += ` WHERE created_at < ?`
+		args = append(args, before)
+	}
+	query += ` ORDER BY created_at DESC`
+	if limit > 0 {
+		query += ` LIMIT ?`
+		args = append(args, limit)
+	}
+	rows, err := db.Query(query, args...)
 	if err != nil {
 		return nil, err
 	}
@@ -149,6 +177,23 @@ func listPosts(db *sql.DB) ([]Post, error) {
 		out = append(out, *p)
 	}
 	return out, rows.Err()
+}
+
+// countPosts returns the number of posts.
+func countPosts(db *sql.DB) (int, error) {
+	var n int
+	err := db.QueryRow(`SELECT COUNT(*) FROM posts`).Scan(&n)
+	return n, err
+}
+
+// listStamp returns a value that changes whenever the post list does —
+// the post count joined with the newest updated_at — for ETag computation.
+func listStamp(db *sql.DB) (string, error) {
+	var stamp string
+	err := db.QueryRow(
+		`SELECT COUNT(*) || '-' || COALESCE(MAX(updated_at), '') FROM posts`,
+	).Scan(&stamp)
+	return stamp, err
 }
 
 // getPost returns a post by slug, or (nil, nil) if absent.
@@ -203,8 +248,9 @@ func deletePost(db *sql.DB, slug string) (bool, error) {
 }
 
 // importPost inserts or replaces a post, keyed by slug, preserving the slug
-// and timestamps it carries — used by the vault importer.
-func importPost(db *sql.DB, p *Post) error {
+// and timestamps it carries — used by the vault importer, inside one
+// transaction for the whole import.
+func importPost(db execer, p *Post) error {
 	if p.Slug == "" {
 		p.Slug = store.ShortID()
 	}

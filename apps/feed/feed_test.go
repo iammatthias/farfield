@@ -1,10 +1,12 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync"
 	"testing"
 )
 
@@ -67,16 +69,16 @@ func TestRenderPostBodyResolvesBlobEmbeds(t *testing.T) {
 	}))
 	defer blobs.Close()
 
-	renderer := newBodyRenderer(blobs.URL, "https://public.example")
+	renderer := newBodyRenderer(context.Background(), blobs.URL, "https://public.example", &sync.Map{})
 	out := string(renderer.render("![](blob://bimg)\n\nHello <b>world</b> blob://bimg\n\nblob://bvid\n\nListen to blob://baud or grab blob://bfile."))
 	_ = renderer.render("blob://bimg")
 
 	for _, want := range []string{
-		`<img class="blob-media standalone" src="https://public.example/blobs/bimg" alt="">`,
+		`<img class="blob-media standalone" src="https://public.example/blobs/bimg" alt="" loading="lazy" decoding="async">`,
 		"Hello &lt;b&gt;world&lt;/b&gt; ",
-		`<img class="blob-media inline" src="https://public.example/blobs/bimg" alt="">`,
-		`<video class="blob-media standalone" controls src="https://public.example/blobs/bvid"></video>`,
-		`<audio class="blob-media inline" controls src="https://public.example/blobs/baud"></audio>`,
+		`<img class="blob-media inline" src="https://public.example/blobs/bimg" alt="" loading="lazy" decoding="async">`,
+		`<video class="blob-media standalone" controls preload="metadata" src="https://public.example/blobs/bvid"></video>`,
+		`<audio class="blob-media inline" controls preload="metadata" src="https://public.example/blobs/baud"></audio>`,
 		`<a class="blob-file" href="https://public.example/blobs/bfile">blob://bfile</a>`,
 	} {
 		if !strings.Contains(out, want) {

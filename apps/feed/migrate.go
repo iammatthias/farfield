@@ -28,6 +28,13 @@ func importVault(db *sql.DB, dir string) error {
 		return err
 	}
 	sort.Strings(files)
+	// One transaction for the whole import — per-file autocommit would fsync
+	// once per post.
+	tx, err := db.Begin()
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
 	var imported, failed int
 	for _, f := range files {
 		p, err := postFromFile(f)
@@ -36,12 +43,15 @@ func importVault(db *sql.DB, dir string) error {
 			failed++
 			continue
 		}
-		if err := importPost(db, p); err != nil {
+		if err := importPost(tx, p); err != nil {
 			slog.Error("import: upsert failed", "slug", p.Slug, "err", err)
 			failed++
 			continue
 		}
 		imported++
+	}
+	if err := tx.Commit(); err != nil {
+		return err
 	}
 	slog.Info("import-vault complete", "posts", imported, "failed", failed)
 	if failed > 0 {

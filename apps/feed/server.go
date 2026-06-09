@@ -6,8 +6,11 @@ import (
 	"encoding/json"
 	"log/slog"
 	"net/http"
+	"strconv"
 	"strings"
+	"sync"
 
+	"github.com/iammatthias/farfield/lib/cid"
 	"github.com/iammatthias/farfield/lib/store"
 	"github.com/iammatthias/farfield/lib/theme"
 	"github.com/iammatthias/farfield/lib/web"
@@ -27,7 +30,18 @@ type Server struct {
 	contentKey    string // content API key — kept server-side
 	blobsPublic   string // browser-facing blobs URL — injected into the editor
 	contentPublic string // browser-facing content URL — injected into the editor
+
+	// blobCache memoizes successful blob metadata lookups for the lifetime
+	// of the server. Blob CIDs are content-addressed and immutable, so a
+	// cached entry never goes stale.
+	blobCache sync.Map // cid → blobLookup
 }
+
+// pageSize is how many posts one admin index page or default API list holds.
+const pageSize = 50
+
+// apiMaxLimit caps the ?limit= an API client may request.
+const apiMaxLimit = 200
 
 // run wires up the service and serves until interrupted.
 func run(host, port string) error {
@@ -122,17 +136,24 @@ func postFromForm(r *http.Request) (*Post, error) {
 // ── HTML admin handlers ────────────────────────────────────────────────────
 
 func (s *Server) handleIndex(w http.ResponseWriter, r *http.Request) {
-	posts, err := listPosts(s.db)
+	before := r.URL.Query().Get("before")
+	// Fetch one past the page to learn whether an older page exists.
+	posts, err := listPosts(s.db, pageSize+1, before)
 	if err != nil {
 		s.fail(w, "list posts", err)
 		return
 	}
-	renderer := newBodyRenderer(s.blobsURL, s.blobsPublic)
+	older := ""
+	if len(posts) > pageSize {
+		posts = posts[:pageSize]
+		older = posts[len(posts)-1].CreatedAt
+	}
+	renderer := newBodyRenderer(r.Context(), s.blobsURL, s.blobsPublic, &s.blobCache)
 	views := make([]postView, 0, len(posts))
 	for _, p := range posts {
 		views = append(views, postView{Post: p, BodyHTML: renderer.render(p.Body)})
 	}
-	s.rd.Render(w, "index.html", map[string]any{"Posts": views})
+	s.rd.Render(w, "index.html", map[string]any{"Posts": views, "Older": older})
 }
 
 func (s *Server) handleNewPost(w http.ResponseWriter, r *http.Request) {
@@ -210,18 +231,42 @@ func (s *Server) handleLoginForm(w http.ResponseWriter, r *http.Request) {
 // ── public JSON read API ───────────────────────────────────────────────────
 
 func (s *Server) handleStatus(w http.ResponseWriter, r *http.Request) {
-	posts, err := listPosts(s.db)
+	n, err := countPosts(s.db)
 	if err != nil {
 		web.WriteError(w, http.StatusInternalServerError, "could not read database")
 		return
 	}
 	web.WriteJSON(w, http.StatusOK, map[string]any{
-		"service": "feed", "ok": true, "posts": len(posts),
+		"service": "feed", "ok": true, "posts": n,
 	})
 }
 
 func (s *Server) handleAPIList(w http.ResponseWriter, r *http.Request) {
-	posts, err := listPosts(s.db)
+	limit := pageSize
+	if raw := r.URL.Query().Get("limit"); raw != "" {
+		if n, err := strconv.Atoi(raw); err == nil && n > 0 {
+			limit = min(n, apiMaxLimit)
+		}
+	}
+	before := r.URL.Query().Get("before")
+
+	// One cheap aggregate stamps the whole list; clients holding the current
+	// version get a 304 before the list query runs. The page parameters are
+	// part of the tag — different pages are different representations.
+	stamp, err := listStamp(s.db)
+	if err != nil {
+		web.WriteError(w, http.StatusInternalServerError, "could not list posts")
+		return
+	}
+	etag := cid.Of([]byte(stamp + "|" + strconv.Itoa(limit) + "|" + before))
+	w.Header().Set("ETag", `"`+etag+`"`)
+	w.Header().Set("Cache-Control", "no-cache")
+	if web.ETagMatch(r, etag) {
+		w.WriteHeader(http.StatusNotModified)
+		return
+	}
+
+	posts, err := listPosts(s.db, limit, before)
 	if err != nil {
 		web.WriteError(w, http.StatusInternalServerError, "could not list posts")
 		return

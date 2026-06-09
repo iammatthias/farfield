@@ -18,6 +18,9 @@
         </div>
       </article>
     {{end}}
+    {{if .Older}}
+      <p class="muted"><a href="/?before={{.Older}}">Older posts →</a></p>
+    {{end}}
   {{else}}
     <p class="muted">No posts yet. <a href="/new">Write one.</a></p>
   {{end}}
