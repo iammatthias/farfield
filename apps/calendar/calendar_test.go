@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"path/filepath"
 	"testing"
 
@@ -84,7 +85,7 @@ func TestNASAArchivePaginatesCachedPhotosOnly(t *testing.T) {
 	s := &Server{db: db, fetcher: newFetcher("DEMO_KEY")}
 	s.fetcher.noteNASAError() // keep the test offline and cache-only
 
-	res, err := s.archive(1)
+	res, err := s.archive(context.Background(), 1)
 	if err != nil {
 		t.Fatalf("archive: %v", err)
 	}
@@ -204,8 +205,7 @@ func TestDBRoundTrip(t *testing.T) {
 		t.Errorf("next neighbor = %q, err %v, want 2024-01-03", next, err)
 	}
 
-	between, err := listPhotosBetween(db, sourceNASA, "2024-01-01", "2024-01-02")
-	if err != nil || len(between) != 2 {
-		t.Fatalf("listPhotosBetween = %d rows, err %v, want 2", len(between), err)
+	if n, err := countPhotosBetween(db, sourceNASA, "2024-01-01", "2024-01-02"); err != nil || n != 2 {
+		t.Fatalf("countPhotosBetween = %d, err %v, want 2", n, err)
 	}
 }

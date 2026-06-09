@@ -14,7 +14,7 @@
     <figure class="plate">
       {{if eq .MediaType "image"}}
         <a href="{{.ImageURL}}" target="_blank" rel="noopener">
-          <img src="{{if .ImageURL}}{{.ImageURL}}{{else}}{{.ThumbURL}}{{end}}"
+          <img src="{{if .ThumbURL}}{{.ThumbURL}}{{else}}{{.ImageURL}}{{end}}"
                alt="{{.Title}}">
         </a>
       {{else if eq .MediaType "video"}}

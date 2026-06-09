@@ -11,7 +11,9 @@
     .container { max-width: 60rem; }
 
     figure.plate { border: 1px solid var(--ink); background: var(--wash); }
-    figure.plate img { width: 100%; display: block; }
+    /* aspect-ratio reserves the plate's space before the image loads (no CLS);
+       contain letterboxes odd shapes inside the 3:2 plate, like archive's .frame */
+    figure.plate img { width: 100%; display: block; aspect-ratio: 3 / 2; object-fit: contain; }
     figure.plate video { width: 100%; display: block; background: #000; }
     figure.plate a { display: block; }
     figure.plate .placeholder {

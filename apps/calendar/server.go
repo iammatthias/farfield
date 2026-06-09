@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"database/sql"
 	"embed"
 	"fmt"
@@ -21,10 +22,15 @@ var assets embed.FS
 // pageSize is how many days one archive page shows.
 const pageSize = 14
 
-// publicMaxAge is the Cache-Control lifetime on the public read endpoints — a
-// calendar day. A past day's photo never changes; the current day settles
-// within the day, so a day of caching is safe and lets a CDN absorb load.
+// publicMaxAge is the Cache-Control lifetime on date-addressed reads — a
+// calendar day. A past day's photo never changes, so a day of caching is safe
+// and lets a CDN absorb load.
 const publicMaxAge = 86400
+
+// todayMaxAge is the Cache-Control lifetime on the rolling views — the index,
+// the undated /api/photo, and the archive. They change when a new day's photo
+// posts, so they get minutes of caching, not a day.
+const todayMaxAge = 600
 
 // Server holds the running calendar service.
 type Server struct {
@@ -55,7 +61,7 @@ func backfillCommand(start, end string) error {
 	}
 	defer db.Close()
 	s := &Server{db: db, fetcher: newFetcher(store.Env("NASA_API_KEY", "DEMO_KEY"))}
-	if err := s.nasaEnsureRange(start, end); err != nil {
+	if err := s.nasaEnsureRange(context.Background(), start, end); err != nil {
 		return err
 	}
 	slog.Info("backfill complete", "start", start, "end", end)
@@ -67,7 +73,7 @@ func backfillCommand(start, end string) error {
 // visitor. NASA needs a real NASA_API_KEY to fill; with DEMO_KEY the range call
 // rate-limits and the cache fills lazily as pages are viewed instead.
 func (s *Server) backfillOnStartup() {
-	if err := s.nasaEnsureRange(calendarStart, todayUTC()); err != nil {
+	if err := s.nasaEnsureRange(context.Background(), calendarStart, todayUTC()); err != nil {
 		slog.Warn("startup nasa backfill failed", "err", err)
 	}
 }
@@ -136,7 +142,7 @@ type archiveResult struct {
 // archive returns one page of photos, newest first. Page 1 ends today; each
 // older page steps back pageSize days. It warms the real calendar range for
 // the requested page in one upstream call, then paginates over the cache.
-func (s *Server) archive(page int) (archiveResult, error) {
+func (s *Server) archive(ctx context.Context, page int) (archiveResult, error) {
 	if page < 1 {
 		page = 1
 	}
@@ -152,7 +158,7 @@ func (s *Server) archive(page int) (archiveResult, error) {
 	// warm, the archive must not advertise empty pages for days we lack.
 	if !end.Before(epoch) {
 		startS, endS := start.Format(dateLayout), end.Format(dateLayout)
-		if err := s.nasaEnsureRange(startS, endS); err != nil {
+		if err := s.nasaEnsureRange(ctx, startS, endS); err != nil {
 			return archiveResult{}, err
 		}
 	}
@@ -183,12 +189,12 @@ func pageCount(total int) int {
 
 // handleIndex renders the current day's photo.
 func (s *Server) handleIndex(w http.ResponseWriter, r *http.Request) {
-	photo, date, err := s.todayPhoto()
+	photo, date, err := s.todayPhoto(r.Context())
 	if err != nil {
 		s.fail(w, "today photo", err)
 		return
 	}
-	s.renderPhoto(w, photo, date, true)
+	s.renderPhoto(w, r, photo, date, true)
 }
 
 // handleDay renders one specific day's photo.
@@ -198,17 +204,20 @@ func (s *Server) handleDay(w http.ResponseWriter, r *http.Request) {
 		http.NotFound(w, r)
 		return
 	}
-	photo, err := s.photoForDate(date)
+	photo, err := s.photoForDate(r.Context(), date)
 	if err != nil {
 		s.fail(w, "day photo", err)
 		return
 	}
-	s.renderPhoto(w, photo, date, false)
+	s.renderPhoto(w, r, photo, date, false)
 }
 
 // renderPhoto renders the photo page for one date. isToday suppresses the
-// "next" step, since nothing is newer than the current day.
-func (s *Server) renderPhoto(w http.ResponseWriter, photo *Photo, date string, isToday bool) {
+// "next" step, since nothing is newer than the current day. A past day's page
+// never changes, so it caches for a day with the photo CID as its ETag; the
+// rolling current day caches for minutes. Headers go on before the render
+// writes the body.
+func (s *Server) renderPhoto(w http.ResponseWriter, r *http.Request, photo *Photo, date string, isToday bool) {
 	prev, err := neighborDate(s.db, sourceNASA, date, true)
 	if err != nil {
 		s.fail(w, "prev date", err)
@@ -220,6 +229,18 @@ func (s *Server) renderPhoto(w http.ResponseWriter, photo *Photo, date string, i
 			s.fail(w, "next date", err)
 			return
 		}
+	}
+	if !isToday && date < todayUTC() {
+		cacheFor(w, publicMaxAge)
+		if photo != nil && photo.CID != "" {
+			w.Header().Set("ETag", `"`+photo.CID+`"`)
+			if web.ETagMatch(r, photo.CID) {
+				w.WriteHeader(http.StatusNotModified)
+				return
+			}
+		}
+	} else {
+		cacheFor(w, todayMaxAge)
 	}
 	jsonURL := "/api/photo"
 	if !isToday {
@@ -235,9 +256,10 @@ func (s *Server) renderPhoto(w http.ResponseWriter, photo *Photo, date string, i
 	})
 }
 
-// handleArchive renders a paginated grid of previous days.
+// handleArchive renders a paginated grid of previous days. Every page rolls
+// forward as new days post, so the archive caches for minutes, not a day.
 func (s *Server) handleArchive(w http.ResponseWriter, r *http.Request) {
-	res, err := s.archive(pageParam(r))
+	res, err := s.archive(r.Context(), pageParam(r))
 	if err != nil {
 		s.fail(w, "archive", err)
 		return
@@ -249,6 +271,7 @@ func (s *Server) handleArchive(w http.ResponseWriter, r *http.Request) {
 	if res.HasNext {
 		nextURL = archiveURL(res.Page + 1)
 	}
+	cacheFor(w, todayMaxAge)
 	s.rd.Render(w, "archive.html", map[string]any{
 		"Photos":  res.Photos,
 		"Page":    res.Page,
@@ -274,12 +297,13 @@ func (s *Server) handleStatus(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleAPIToday(w http.ResponseWriter, r *http.Request) {
-	photo, _, err := s.todayPhoto()
+	photo, _, err := s.todayPhoto(r.Context())
 	if err != nil {
 		web.WriteError(w, http.StatusInternalServerError, "could not load photo")
 		return
 	}
-	s.writePhoto(w, r, photo)
+	// The undated photo rolls forward when a new day posts — short cache only.
+	s.writePhoto(w, r, photo, todayMaxAge)
 }
 
 func (s *Server) handleAPIDay(w http.ResponseWriter, r *http.Request) {
@@ -288,21 +312,21 @@ func (s *Server) handleAPIDay(w http.ResponseWriter, r *http.Request) {
 		web.WriteError(w, http.StatusBadRequest, "malformed date — expected YYYY-MM-DD")
 		return
 	}
-	photo, err := s.photoForDate(date)
+	photo, err := s.photoForDate(r.Context(), date)
 	if err != nil {
 		web.WriteError(w, http.StatusInternalServerError, "could not load photo")
 		return
 	}
-	s.writePhoto(w, r, photo)
+	s.writePhoto(w, r, photo, publicMaxAge)
 }
 
 func (s *Server) handleAPIPhotos(w http.ResponseWriter, r *http.Request) {
-	res, err := s.archive(pageParam(r))
+	res, err := s.archive(r.Context(), pageParam(r))
 	if err != nil {
 		web.WriteError(w, http.StatusInternalServerError, "could not list photos")
 		return
 	}
-	cacheable(w)
+	cacheFor(w, publicMaxAge)
 	web.WriteJSON(w, http.StatusOK, map[string]any{
 		"source": sourceNASA,
 		"page":   res.Page,
@@ -312,15 +336,15 @@ func (s *Server) handleAPIPhotos(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-// writePhoto emits one photo as JSON, cacheable for a day. When the photo
-// exists its content CID is sent as a strong ETag, so a client holding the
-// current version gets a 304.
-func (s *Server) writePhoto(w http.ResponseWriter, r *http.Request, photo *Photo) {
-	cacheable(w)
+// writePhoto emits one photo as JSON, cacheable for maxAge seconds. When the
+// photo exists its content CID is sent as a strong ETag, so a client holding
+// the current version gets a 304.
+func (s *Server) writePhoto(w http.ResponseWriter, r *http.Request, photo *Photo, maxAge int) {
 	if photo == nil {
 		web.WriteError(w, http.StatusNotFound, "no photo for that date")
 		return
 	}
+	cacheFor(w, maxAge)
 	prev, _ := neighborDate(s.db, sourceNASA, photo.Date, true)
 	next, _ := neighborDate(s.db, sourceNASA, photo.Date, false)
 	w.Header().Set("ETag", `"`+photo.CID+`"`)
@@ -359,9 +383,9 @@ func archiveURL(page int) string {
 	return "/archive?page=" + strconv.Itoa(page)
 }
 
-// cacheable marks a response publicly cacheable for publicMaxAge seconds.
-func cacheable(w http.ResponseWriter) {
-	w.Header().Set("Cache-Control", fmt.Sprintf("public, max-age=%d", publicMaxAge))
+// cacheFor marks a response publicly cacheable for maxAge seconds.
+func cacheFor(w http.ResponseWriter, maxAge int) {
+	w.Header().Set("Cache-Control", fmt.Sprintf("public, max-age=%d", maxAge))
 }
 
 // calendarFuncs are the template helpers. mediaKind lets the photo template

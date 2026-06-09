@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"log/slog"
 	"net/http"
 	"sync"
@@ -27,6 +28,7 @@ const (
 type fetcher struct {
 	client  *http.Client
 	nasaKey string
+	flights flightGroup // dedups concurrent upstream calls for the same date/range
 
 	mu             sync.Mutex
 	nasaCooldownAt time.Time            // upstream NASA calls paused until here
@@ -40,6 +42,45 @@ func newFetcher(nasaKey string) *fetcher {
 		nasaKey:  nasaKey,
 		negative: map[string]time.Time{},
 	}
+}
+
+// flightGroup deduplicates concurrent in-flight calls by key: the first caller
+// performs the work, everyone else arriving before it finishes waits for and
+// shares the same result. A hand-rolled singleflight — stdlib only.
+type flightGroup struct {
+	mu sync.Mutex
+	m  map[string]*flight
+}
+
+type flight struct {
+	done    chan struct{}
+	records []apodResponse
+	err     error
+}
+
+// do runs fn once per key at a time. Concurrent callers with the same key
+// block until the in-flight call finishes and receive its result.
+func (g *flightGroup) do(key string, fn func() ([]apodResponse, error)) ([]apodResponse, error) {
+	g.mu.Lock()
+	if g.m == nil {
+		g.m = map[string]*flight{}
+	}
+	if c, ok := g.m[key]; ok {
+		g.mu.Unlock()
+		<-c.done
+		return c.records, c.err
+	}
+	c := &flight{done: make(chan struct{})}
+	g.m[key] = c
+	g.mu.Unlock()
+
+	c.records, c.err = fn()
+	close(c.done)
+
+	g.mu.Lock()
+	delete(g.m, key)
+	g.mu.Unlock()
+	return c.records, c.err
 }
 
 // nasaAllowed reports whether NASA upstream calls are permitted right now —
@@ -79,62 +120,66 @@ func (f *fetcher) negativeHit(date string) bool {
 // photoForDate returns the photo for a date, fetching it from APOD only on a
 // cache miss. A failed fetch returns (nil, nil) — the caller renders a
 // not-found rather than an error.
-func (s *Server) photoForDate(date string) (*Photo, error) {
+func (s *Server) photoForDate(ctx context.Context, date string) (*Photo, error) {
 	p, err := getPhoto(s.db, sourceNASA, date)
 	if err != nil || p != nil {
 		return p, err
 	}
-	return s.nasaEnsureDay(date)
+	return s.nasaEnsureDay(ctx, date)
 }
 
-// todayPhoto returns the most recent photo. It walks back a few days, since
-// the current day's APOD is sometimes posted late, then falls back to the
-// newest cached day.
-func (s *Server) todayPhoto() (*Photo, string, error) {
-	now := time.Now().UTC()
-	for back := 0; back < 4; back++ {
-		date := now.AddDate(0, 0, -back).Format(dateLayout)
-		p, err := s.photoForDate(date)
+// todayPhoto returns the most recent photo. The cache answers first; APOD is
+// asked for the current day only when the newest cached day is older — the
+// current day's photo is sometimes posted late, in which case the newest
+// cached day stands in.
+func (s *Server) todayPhoto(ctx context.Context) (*Photo, string, error) {
+	today := todayUTC()
+	latest, err := latestPhoto(s.db, sourceNASA)
+	if err != nil {
+		return nil, today, err
+	}
+	if latest == nil || latest.Date < today {
+		p, err := s.nasaEnsureDay(ctx, today)
 		if err != nil {
-			return nil, date, err
+			return nil, today, err
 		}
 		if p != nil {
-			return p, date, nil
+			return p, today, nil
 		}
 	}
-	// Nothing fresh upstream — fall back to the newest cached day.
-	p, err := latestPhoto(s.db, sourceNASA)
-	if err != nil || p == nil {
-		return nil, todayUTC(), err
+	if latest == nil {
+		return nil, today, nil
 	}
-	return p, p.Date, nil
+	return latest, latest.Date, nil
 }
 
 // nasaEnsureDay fetches and caches one APOD day, honouring the cooldown and
 // negative cache. A miss or a failure yields (nil, nil).
-func (s *Server) nasaEnsureDay(date string) (*Photo, error) {
+func (s *Server) nasaEnsureDay(ctx context.Context, date string) (*Photo, error) {
 	if !nasaDateInRange(date) || s.fetcher.negativeHit(date) {
 		return nil, nil
 	}
 	if !s.fetcher.nasaAllowed() {
 		return nil, nil // cooling down — serve cache only
 	}
-	p, err := s.fetcher.nasaDay(date)
+	p, err := s.fetcher.nasaDay(ctx, date)
 	if err != nil {
 		slog.Warn("nasa day fetch failed", "date", date, "err", err)
 		s.fetcher.markNegative(date)
 		s.fetcher.noteNASAError()
 		return nil, nil
 	}
+	// upsertPhoto stamps the CID and fetch time on p, so p is already the
+	// stored row — no re-read needed.
 	if err := upsertPhoto(s.db, p); err != nil {
 		return nil, err
 	}
-	return getPhoto(s.db, sourceNASA, date)
+	return p, nil
 }
 
 // nasaEnsureRange warms the cache for a date range in a single upstream call,
 // but only when the range is not already fully cached.
-func (s *Server) nasaEnsureRange(start, end string) error {
+func (s *Server) nasaEnsureRange(ctx context.Context, start, end string) error {
 	want := daysBetween(start, end)
 	have, err := countPhotosBetween(s.db, sourceNASA, start, end)
 	if err != nil {
@@ -146,18 +191,25 @@ func (s *Server) nasaEnsureRange(start, end string) error {
 	if !s.fetcher.nasaAllowed() {
 		return nil // cooling down — serve whatever is cached
 	}
-	photos, err := s.fetcher.nasaRange(start, end)
+	photos, err := s.fetcher.nasaRange(ctx, start, end)
 	if err != nil {
 		slog.Warn("nasa range fetch failed", "start", start, "end", end, "err", err)
 		s.fetcher.noteNASAError()
 		return nil
 	}
+	// One transaction for the whole page of days — a single fsync instead of
+	// one autocommit per row.
+	tx, err := s.db.Begin()
+	if err != nil {
+		return err
+	}
 	for i := range photos {
-		if err := upsertPhoto(s.db, &photos[i]); err != nil {
+		if err := upsertPhoto(tx, &photos[i]); err != nil {
+			_ = tx.Rollback()
 			return err
 		}
 	}
-	return nil
+	return tx.Commit()
 }
 
 // ── date helpers ────────────────────────────────────────────────────────────

@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -103,13 +104,16 @@ func parseAPOD(data []byte) ([]apodResponse, error) {
 	return []apodResponse{one}, nil
 }
 
-// nasaDay fetches a single day's APOD record.
-func (f *fetcher) nasaDay(date string) (*Photo, error) {
+// nasaDay fetches a single day's APOD record. Concurrent cache misses for the
+// same day are deduplicated into one upstream call.
+func (f *fetcher) nasaDay(ctx context.Context, date string) (*Photo, error) {
 	q := url.Values{}
 	q.Set("api_key", f.nasaKey)
 	q.Set("date", date)
 	q.Set("thumbs", "true")
-	records, err := f.nasaGet(q)
+	records, err := f.flights.do("day:"+date, func() ([]apodResponse, error) {
+		return f.nasaGet(ctx, q)
+	})
 	if err != nil {
 		return nil, err
 	}
@@ -122,14 +126,17 @@ func (f *fetcher) nasaDay(date string) (*Photo, error) {
 }
 
 // nasaRange fetches every APOD record in the inclusive [start, end] range in a
-// single request — the efficient way to warm an archive page.
-func (f *fetcher) nasaRange(start, end string) ([]Photo, error) {
+// single request — the efficient way to warm an archive page. Concurrent
+// misses for the same range are deduplicated into one upstream call.
+func (f *fetcher) nasaRange(ctx context.Context, start, end string) ([]Photo, error) {
 	q := url.Values{}
 	q.Set("api_key", f.nasaKey)
 	q.Set("start_date", start)
 	q.Set("end_date", end)
 	q.Set("thumbs", "true")
-	records, err := f.nasaGet(q)
+	records, err := f.flights.do("range:"+start+".."+end, func() ([]apodResponse, error) {
+		return f.nasaGet(ctx, q)
+	})
 	if err != nil {
 		return nil, err
 	}
@@ -144,8 +151,8 @@ func (f *fetcher) nasaRange(start, end string) ([]Photo, error) {
 }
 
 // nasaGet performs one APOD request and parses the body.
-func (f *fetcher) nasaGet(q url.Values) ([]apodResponse, error) {
-	req, err := http.NewRequest(http.MethodGet, apodBase+"?"+q.Encode(), nil)
+func (f *fetcher) nasaGet(ctx context.Context, q url.Values) ([]apodResponse, error) {
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, apodBase+"?"+q.Encode(), nil)
 	if err != nil {
 		return nil, err
 	}

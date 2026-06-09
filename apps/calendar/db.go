@@ -46,8 +46,7 @@ CREATE TABLE IF NOT EXISTS photos (
 	placeholder INTEGER NOT NULL DEFAULT 0,
 	fetched_at  TEXT NOT NULL,
 	PRIMARY KEY (source, date)
-);
-CREATE INDEX IF NOT EXISTS photos_by_date ON photos (source, date DESC);`
+);`
 
 // photoCols is the column list, in Photo-field order, shared by every query.
 const photoCols = `source, date, cid, title, explanation, image_url, thumb_url, ` +
@@ -79,11 +78,16 @@ func openDB(path string) (*sql.DB, error) {
 			return nil, err
 		}
 	}
-	// 3. Backfill content CIDs for any rows that predate the column.
+	// 3. Drop the redundant photos_by_date index — it duplicated the
+	//    (source, date) primary key, costing a second write per upsert.
+	if _, err := db.Exec(`DROP INDEX IF EXISTS photos_by_date`); err != nil {
+		return nil, err
+	}
+	// 4. Backfill content CIDs for any rows that predate the column.
 	if err := backfillCIDs(db); err != nil {
 		return nil, err
 	}
-	// 4. The public calendar starts on Jan 1 2026. If a development DB was warmed
+	// 5. The public calendar starts on Jan 1 2026. If a development DB was warmed
 	// from NASA's full APOD history, drop those old rows so navigation, counts,
 	// and archive pages only move forward from calendarStart.
 	if err := pruneBeforeCalendarStart(db); err != nil {
@@ -129,13 +133,23 @@ func backfillCIDs(db *sql.DB) error {
 		photos = append(photos, *p)
 	}
 	rows.Close()
+	if len(photos) == 0 {
+		return nil
+	}
+	// One transaction for the whole backfill — a single fsync instead of one
+	// autocommit per row.
+	tx, err := db.Begin()
+	if err != nil {
+		return err
+	}
 	for i := range photos {
-		if _, err := db.Exec(`UPDATE photos SET cid = ? WHERE source = ? AND date = ?`,
+		if _, err := tx.Exec(`UPDATE photos SET cid = ? WHERE source = ? AND date = ?`,
 			photoCID(&photos[i]), photos[i].Source, photos[i].Date); err != nil {
+			_ = tx.Rollback()
 			return err
 		}
 	}
-	return nil
+	return tx.Commit()
 }
 
 // scanner is satisfied by both *sql.Row and *sql.Rows.
@@ -167,9 +181,15 @@ func getPhoto(db *sql.DB, source, date string) (*Photo, error) {
 	return p, nil
 }
 
+// execer is the write surface shared by *sql.DB and *sql.Tx, so upsertPhoto
+// works standalone or inside a transaction.
+type execer interface {
+	Exec(query string, args ...any) (sql.Result, error)
+}
+
 // upsertPhoto inserts or replaces a photo, keyed by (source, date). It stamps
 // the content CID and a fetch time, so every write keeps both current.
-func upsertPhoto(db *sql.DB, p *Photo) error {
+func upsertPhoto(db execer, p *Photo) error {
 	if p.MediaType == "" {
 		p.MediaType = "image"
 	}
@@ -200,20 +220,6 @@ func listPhotos(db *sql.DB, source string, limit, offset int) ([]Photo, error) {
 	rows, err := db.Query(
 		`SELECT `+photoCols+` FROM photos WHERE source = ?
 		 ORDER BY date DESC LIMIT ? OFFSET ?`, source, limit, offset)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	return collectPhotos(rows)
-}
-
-// listPhotosBetween returns every cached photo for a source within the
-// inclusive [start, end] date range, newest day first.
-func listPhotosBetween(db *sql.DB, source, start, end string) ([]Photo, error) {
-	rows, err := db.Query(
-		`SELECT `+photoCols+` FROM photos
-		 WHERE source = ? AND date BETWEEN ? AND ?
-		 ORDER BY date DESC`, source, start, end)
 	if err != nil {
 		return nil, err
 	}
