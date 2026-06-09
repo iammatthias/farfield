@@ -33,8 +33,8 @@ func TestIndexUsesDeadPresidentsBranding(t *testing.T) {
 	index := readAsset(t, "index.html")
 	for _, want := range []string{
 		"<title>farfield · dead presidents</title>",
-		"farfield · dead presidents",                          // masthead brand
-		"https://farfield.systems/docs/dead-presidents.html",  // app's own docs page
+		"farfield · dead presidents",                         // masthead brand
+		"https://farfield.systems/docs/dead-presidents.html", // app's own docs page
 	} {
 		if !strings.Contains(index, want) {
 			t.Fatalf("index.html missing branding %q", want)
@@ -54,8 +54,8 @@ func TestUsesSharedFarfieldTheme(t *testing.T) {
 	if !strings.Contains(readAsset(t, "index.html"), `href="/static/styles.css?v=`) {
 		t.Fatal("index.html should link the shared /static/styles.css")
 	}
-	if !strings.Contains(readAsset(t, "../main.go"), "io.WriteString(w, theme.CSS)") {
-		t.Fatal("main.go should serve the shared theme.CSS at /static/styles.css")
+	if !strings.Contains(readAsset(t, "../main.go"), "theme.CSSHandler()") {
+		t.Fatal("main.go should serve the shared theme via theme.CSSHandler at /static/styles.css")
 	}
 }
 
