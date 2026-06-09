@@ -323,9 +323,14 @@ func (s *Server) storeMultipartFile(fh *multipart.FileHeader, collection string)
 		return err
 	}
 	defer f.Close()
-	data, err := io.ReadAll(io.LimitReader(f, s.maxUpload))
+	// Read one byte past the limit so an oversize file is detected and
+	// rejected rather than silently truncated into a corrupt EPUB.
+	data, err := io.ReadAll(io.LimitReader(f, s.maxUpload+1))
 	if err != nil {
 		return err
+	}
+	if int64(len(data)) > s.maxUpload {
+		return fmt.Errorf("%s: file too large", fh.Filename)
 	}
 	_, err = s.storeUpload(data, fh.Filename, collection)
 	return err

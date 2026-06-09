@@ -118,16 +118,17 @@ func scanBook(row scanner) (*Book, error) {
 }
 
 // upsertBook inserts a book's metadata, replacing any existing row for the same
-// CID (re-uploading identical bytes is idempotent).
+// CID (re-uploading identical bytes is idempotent). Identity fields —
+// created_at and collection — persist across re-uploads so a book keeps its
+// place in "newest first" feeds and its folder.
 func upsertBook(db *sql.DB, b *Book) error {
 	_, err := db.Exec(
 		`INSERT INTO books (`+bookCols+`) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 		 ON CONFLICT(cid) DO UPDATE SET
 		   title=excluded.title, author=excluded.author, language=excluded.language,
 		   identifier=excluded.identifier, description=excluded.description,
-		   collection=excluded.collection, filename=excluded.filename, size=excluded.size,
-		   cover_cid=excluded.cover_cid, cover_mime=excluded.cover_mime,
-		   created_at=excluded.created_at`,
+		   filename=excluded.filename, size=excluded.size,
+		   cover_cid=excluded.cover_cid, cover_mime=excluded.cover_mime`,
 		b.CID, b.Title, b.Author, b.Language, b.Identifier, b.Description,
 		b.Collection, b.Filename, b.Size, b.CoverCID, b.CoverMime, b.CreatedAt)
 	return err
