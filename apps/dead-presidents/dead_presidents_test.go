@@ -72,8 +72,13 @@ func TestVendoredInferenceStackPresent(t *testing.T) {
 	if !strings.Contains(worker, `importScripts("./engine.js")`) {
 		t.Fatal("worker.js must importScripts the engine")
 	}
-	if !strings.Contains(worker, `fetch("./model.json")`) || !strings.Contains(worker, `fetch("./model.bin")`) {
-		t.Fatal("worker.js must fetch the float32 weights (model.json + model.bin)")
+	// The fetches carry the worker's own ?v= query (self.location.search) so the
+	// server can serve the 1.86MB of weights with an immutable cache lifetime.
+	if !strings.Contains(worker, `fetch("./model.json" + V)`) || !strings.Contains(worker, `fetch("./model.bin" + V)`) {
+		t.Fatal("worker.js must fetch the versioned float32 weights (model.json + model.bin)")
+	}
+	if !strings.Contains(worker, "self.location.search") {
+		t.Fatal("worker.js must derive the model version from its own ?v= query")
 	}
 	if !strings.Contains(readAsset(t, "openai.js"), "root.DeadPresidents = { createClient: createClient }") {
 		t.Fatal("openai.js must expose DeadPresidents.createClient")

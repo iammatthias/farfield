@@ -19,6 +19,26 @@ import (
 //go:embed web
 var webFS embed.FS
 
+// cacheControl sets Cache-Control for the embedded assets. Requests carrying
+// the ?v= cache-busting version (scripts from index.html, and the model files
+// the worker fetches with its own version — see web/worker.js) are immutable:
+// a content change always ships under a new version, so browsers may cache the
+// 1.86MB model forever. The HTML entry point revalidates on every visit so a
+// version bump is picked up immediately; anything unversioned gets a short TTL.
+func cacheControl(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.URL.Query().Get("v") != "":
+			w.Header().Set("Cache-Control", "public, max-age=31536000, immutable")
+		case r.URL.Path == "/" || r.URL.Path == "/index.html":
+			w.Header().Set("Cache-Control", "no-cache")
+		default:
+			w.Header().Set("Cache-Control", "public, max-age=3600")
+		}
+		next.ServeHTTP(w, r)
+	})
+}
+
 func main() {
 	_ = store.LoadEnv()
 	slog.SetDefault(slog.New(slog.NewTextHandler(os.Stderr, nil)))
@@ -44,7 +64,7 @@ func main() {
 	// dead-presidents inherits the canonical stylesheet instead of a local copy
 	// that drifts.
 	mux.HandleFunc("GET /static/styles.css", theme.CSSHandler())
-	mux.Handle("/", http.FileServerFS(site))
+	mux.Handle("/", cacheControl(http.FileServerFS(site)))
 
 	// Gzip helps the text assets and model.json; model.bin is served as
 	// application/octet-stream, which is not in the gzip allowlist and passes

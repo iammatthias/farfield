@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
 <meta name="theme-color" content="#fafaf7">
 <title>farfield · dead presidents</title>
-<link rel="stylesheet" href="/static/styles.css?v=20260602-dp-1">
+<link rel="stylesheet" href="/static/styles.css?v=20260609-dp-1">
 <style>
   /* dead-presidents-only: the inference controls the shared theme has no reason to carry. */
   .sliders { display: grid; gap: 1rem 1.5rem; margin: 1.25rem 0;
@@ -36,7 +36,7 @@
 
     <div class="section-head">
       <h2>Model</h2>
-      <span id="m-status" class="badge draft">loading</span>
+      <span id="m-status" class="badge draft" role="status">loading</span>
     </div>
     <div class="table-wrap">
       <table>
@@ -67,12 +67,16 @@
     <div class="section-head">
       <h2>Continuation</h2>
     </div>
-    <pre id="output" aria-live="polite">The model loads on open. Your seed and its continuation appear here.</pre>
+    <!-- No aria-live on #output: it streams per character, which would make
+         screen readers re-announce the whole passage on every token. The
+         live regions are #m-status (state changes) and #gen-stat (set once,
+         on completion). -->
+    <pre id="output">The model loads on open. Your seed and its continuation appear here.</pre>
     <div class="readout">
-      <p class="mono muted"><span class="label">Generated</span> <span id="gen-stat">—</span></p>
+      <p class="mono muted"><span class="label">Generated</span> <span id="gen-stat" aria-live="polite">—</span></p>
     </div>
   </main>
-  <script src="./openai.js?v=20260602-dp-1"></script>
-  <script src="./app.js?v=20260602-dp-1"></script>
+  <script src="./openai.js?v=20260609-dp-1"></script>
+  <script src="./app.js?v=20260609-dp-1"></script>
 </body>
 </html>

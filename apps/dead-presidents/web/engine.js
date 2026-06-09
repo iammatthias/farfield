@@ -7,9 +7,10 @@
 // classic Worker's importScripts() in the browser and via require() in Node.
 // Inference only -- no autograd.
 //
-// v1 recomputes the full context each step (simple + obviously correct). The
-// model is tiny (~260k params), so a sentence streams in ~2s; a KV-cache would
-// make it sub-second and is the natural next optimization.
+// Generation is KV-cached: _step computes a single token per call, appending
+// its k/v to a per-layer cache (see generate), so each new character costs
+// O(context) work instead of a full-context recompute and a sentence streams
+// in well under a second.
 
 (function (root) {
   "use strict";
@@ -67,91 +68,6 @@
     return out;
   };
 
-  // Full forward over `tokens` (<= block_size). Returns logits for the LAST
-  // position as a Float32Array of length vocab.
-  GPT.prototype.forwardLast = function (tokens) {
-    var C = this.C,
-      L = this.L,
-      H = this.H,
-      hs = this.hs,
-      vocab = this.vocab,
-      t = this.t;
-    var T = tokens.length;
-    var wte = t.wte,
-      wpe = t.wpe;
-
-    var x = new Float32Array(T * C);
-    for (var p = 0; p < T; p++) {
-      var tok = tokens[p];
-      for (var c = 0; c < C; c++)
-        x[p * C + c] = wte[tok * C + c] + wpe[p * C + c];
-    }
-
-    var scale = 1 / Math.sqrt(hs);
-    for (var l = 0; l < L; l++) {
-      var wq = t["wq_" + l],
-        wk = t["wk_" + l],
-        wv = t["wv_" + l],
-        wo = t["wo_" + l];
-      var fc = t["fc_" + l],
-        proj = t["proj_" + l];
-
-      var n1 = this._rmsnorm(x, t["ln1_" + l], T, C);
-      var q = this._matmul(n1, wq, T, C, C);
-      var k = this._matmul(n1, wk, T, C, C);
-      var v = this._matmul(n1, wv, T, C, C);
-
-      var ctx = new Float32Array(T * C);
-      for (var h = 0; h < H; h++) {
-        var lo = h * hs;
-        for (var ti = 0; ti < T; ti++) {
-          var scores = new Float32Array(ti + 1),
-            mx = -Infinity,
-            s,
-            d;
-          for (s = 0; s <= ti; s++) {
-            var dot = 0;
-            for (d = 0; d < hs; d++)
-              dot += q[ti * C + lo + d] * k[s * C + lo + d];
-            dot *= scale;
-            scores[s] = dot;
-            if (dot > mx) mx = dot;
-          }
-          var sum = 0;
-          for (s = 0; s <= ti; s++) {
-            scores[s] = Math.exp(scores[s] - mx);
-            sum += scores[s];
-          }
-          for (d = 0; d < hs; d++) {
-            var acc = 0;
-            for (s = 0; s <= ti; s++)
-              acc += (scores[s] / sum) * v[s * C + lo + d];
-            ctx[ti * C + lo + d] = acc;
-          }
-        }
-      }
-      var attnOut = this._matmul(ctx, wo, T, C, C);
-      for (var ai = 0; ai < T * C; ai++) x[ai] += attnOut[ai];
-
-      var n2 = this._rmsnorm(x, t["ln2_" + l], T, C);
-      var h1 = this._matmul(n2, fc, T, C, 4 * C);
-      for (var hi = 0; hi < h1.length; hi++) if (h1[hi] < 0) h1[hi] = 0;
-      var mlpOut = this._matmul(h1, proj, T, 4 * C, C);
-      for (var mi = 0; mi < T * C; mi++) x[mi] += mlpOut[mi];
-    }
-
-    var lastRow = x.subarray((T - 1) * C, T * C);
-    var xf = this._rmsnorm(lastRow, t.lnf, 1, C);
-    var logits = new Float32Array(vocab);
-    for (var vi = 0; vi < vocab; vi++) {
-      var wrow = vi * C,
-        sl = 0;
-      for (var cc = 0; cc < C; cc++) sl += wte[wrow + cc] * xf[cc];
-      logits[vi] = sl;
-    }
-    return logits;
-  };
-
   GPT.prototype._sample = function (logits, temperature, rng) {
     var i;
     if (temperature <= 0) {
@@ -196,7 +112,8 @@
   // absolute position `pos`, appending its k/v to the per-layer cache and
   // attending over all cached positions 0..pos. O(context) per token instead of
   // the O(context^2) full recompute, so generation stays sub-second even at
-  // block_size 256 and many layers. Mathematically identical to forwardLast.
+  // block_size 256 and many layers. Mathematically identical to running the
+  // full forward pass over the whole context and taking the last position.
   GPT.prototype._step = function (token, pos, cache) {
     var C = this.C,
       L = this.L,

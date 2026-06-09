@@ -13,8 +13,13 @@ function cid() {
   return "chatcmpl-" + Date.now().toString(36) + (COUNT++).toString(36);
 }
 
+// The worker is loaded as worker.js?v=<ASSET_VERSION>; carry the same version
+// onto the model fetches so the server can mark them immutable and repeat
+// visits never re-download the 1.86MB weights.
+var V = self.location.search || "";
+
 function load() {
-  return Promise.all([fetch("./model.json"), fetch("./model.bin")])
+  return Promise.all([fetch("./model.json" + V), fetch("./model.bin" + V)])
     .then(function (r) {
       if (!r[0].ok || !r[1].ok) throw new Error("failed to fetch model files");
       return Promise.all([r[0].json(), r[1].arrayBuffer()]);

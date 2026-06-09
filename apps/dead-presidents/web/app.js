@@ -1,7 +1,7 @@
 // app.js -- the farfield UI glue over the OpenAI-shaped DeadPresidents client.
 // The client (openai.js) runs the char-level GPT in a Web Worker; this file only
 // wires the controls to it and streams the continuation into the page.
-const ASSET_VERSION = '20260602-dp-1';
+const ASSET_VERSION = '20260609-dp-1';
 const client = DeadPresidents.createClient({ workerUrl: `./worker.js?v=${ASSET_VERSION}` });
 
 const $ = (id) => document.getElementById(id);
@@ -38,6 +38,8 @@ function setStatus(text, live) {
 
 // The model is char-level and lowercases its input, so render the seed lowercased
 // (dimmed) followed by the continuation — it reads as one continuous passage.
+// Built once per generation; streaming appends to the returned Text node via
+// appendData so each token is O(1) instead of rebuilding the whole DOM.
 function render(seedText, continuation) {
   els.output.textContent = '';
   if (seedText) {
@@ -46,7 +48,9 @@ function render(seedText, continuation) {
     s.textContent = seedText.toLowerCase();
     els.output.appendChild(s);
   }
-  els.output.appendChild(document.createTextNode(continuation));
+  const text = document.createTextNode(continuation);
+  els.output.appendChild(text);
+  return text;
 }
 
 client.ready.then((meta) => {
@@ -71,8 +75,8 @@ async function generate() {
   setStatus('generating', true);
   const seedText = els.seed.value;
   let continuation = '';
-  render(seedText, '');
-  els.genStat.textContent = '—';
+  const textNode = render(seedText, '');
+  els.genStat.textContent = '';
   const t0 = performance.now();
   try {
     const stream = await client.chat.completions.create({
@@ -83,8 +87,10 @@ async function generate() {
     });
     let usage = null;
     for await (const chunk of stream) {
+      // worker.js streams true per-character deltas (delta.content is only the
+      // new text), so appending it verbatim keeps each token O(1).
       const delta = chunk.choices[0].delta.content || '';
-      if (delta) { continuation += delta; render(seedText, continuation); }
+      if (delta) { continuation += delta; textNode.appendData(delta); }
       if (chunk.usage) usage = chunk.usage;
     }
     const ms = Math.round(performance.now() - t0);
