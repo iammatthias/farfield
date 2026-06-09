@@ -17,4 +17,5 @@ use (
 	./lib/cid
 	./lib/store
 	./lib/theme
+	./lib/web
 )
