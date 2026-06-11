@@ -1,13 +1,14 @@
-// terrain.js — the shared terraced-terrain language of the art pages.
+// terrain.js — the shared fabric language of the art pages.
 //
-// Both /art and /art/structure draw exactly one geometry: a quantized
-// heightfield rendered as terraced steps — a flat top per cell at its
-// elevation band, sheer walls where bands change — sitting on a thin slab.
-// The band→ink mapping is the SVG glyph ramp's own (palette[⌊lv·3/bands⌋]);
-// age fades every ink toward the page surface, like the SVG's opacity
-// bands. One lighting rig, one camera feel, one background. The plate page
-// is this tile at full sample density; the structure is a lattice of the
-// same tile, smaller — the same instrument at two zooms.
+// Both /art and /art/structure draw exactly one material: a glyph-printed
+// fabric sheet. The day's quantized heightfield is draped smoothly
+// (smoothstep-bilinear between samples — cloth flexing and folding, never
+// stairs) and the surface carries the day's actual ramp glyphs as printed
+// ink, the same chars, the same band→ink mapping the SVG plate uses
+// (palette[⌊lv·3/bands⌋]). Age fades every ink toward the page surface,
+// like the SVG's opacity bands. The plate page is one sheet up close; the
+// structure is the archive of all of them, stacked into the curve — the
+// same cloth at two zooms.
 
 import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
@@ -26,24 +27,244 @@ export function readTheme() {
 export const reduceMotion = () =>
   matchMedia('(prefers-reduced-motion: reduce)').matches;
 
-// Ink weights, straight from the SVG's language: on the plate, low
-// elevations are sparse light glyphs and peaks are dense dark ones, so
-// terrace tops deepen with band — washed near the surface in the basins,
-// close to full ink at the peaks — while every step wall carries its band
-// ink near full strength (the SVG's stratified sides). The result is a
-// survey plate that shades darker as it climbs, not a solid mass.
-const topWashLo = 0.38;
-const topWashHi = 0.88;
-const wallInkStrength = 0.95;
+// ── glyph ramps ────────────────────────────────────────────────────────────
+// Mirrors biomes[] in biome.go, keyed by biome name — the approved API
+// shapes carry each biome's inks but not its glyph vocabulary, so the ramps
+// live here. Low elevation → high, exactly the SVG plate's characters.
+export const RAMPS = {
+  basin: '·:░▒▓█',
+  dune: '˙‥∴∷▒▓',
+  ridge: '·▁▂▄▆█',
+  mire: '·⠂⠆⠖⠶⠿',
+  shoal: '·~≈≋▒▓',
+  steppe: '·∙▪▮▓█',
+  karst: '·○◍◉●█',
+  caldera: '·∘≡▒▓█',
+};
 
-// ── terraced tile geometry ─────────────────────────────────────────────────
+// The SVG plates' monospace stack — the printed glyphs must match the page.
+const MONO = `ui-monospace, 'SF Mono', Menlo, Consolas, monospace`;
 
-// TileBuilder accumulates terraced tiles into one merged, non-indexed
-// triangle soup with per-vertex colors — build once, draw as one mesh.
-// Flat shading falls out of the soup: computeVertexNormals on non-indexed
-// triangles yields face normals, so every terrace top and wall is a crisp
-// plane, like the plate's discrete elevation bands.
-export class TileBuilder {
+// css renders a (linear, working-space) THREE.Color back to the sRGB hex the
+// 2-D canvas wants, so canvas inks and lit vertex inks agree on screen.
+export const css = (c) => '#' + c.getHexString(THREE.SRGBColorSpace);
+
+// ── smooth drape sampling ──────────────────────────────────────────────────
+
+const smooth01 = (t) => t * t * (3 - 2 * t);
+
+// levelSampler interpolates a flat row-major g×g band field continuously:
+// smoothstep-bilinear between cell-center samples, clamped at the rim. This
+// is the fold of the fabric — the quantized survey data read as a flexing
+// surface instead of stairs.
+export function levelSampler(levels) {
+  const g = Math.round(Math.sqrt(levels.length));
+  const at = (i, j) =>
+    levels[Math.min(g - 1, Math.max(0, j)) * g + Math.min(g - 1, Math.max(0, i))];
+  return (u, v) => {
+    const gx = u * g - 0.5;
+    const gy = v * g - 0.5;
+    const i = Math.floor(gx);
+    const j = Math.floor(gy);
+    const fx = smooth01(gx - i);
+    const fy = smooth01(gy - j);
+    const a = at(i, j);
+    const b = at(i + 1, j);
+    const c = at(i, j + 1);
+    const d = at(i + 1, j + 1);
+    return a + (b - a) * fx + (c - a) * fy + (a - b + d - c) * fx * fy;
+  };
+}
+
+// drapeHeights samples the smooth drape at the (g+1)² cell corners of a
+// sheet — one shared height table, so the printed top and its side skirts
+// meet exactly. `lift` raises the drape's floor (0 = the full band span,
+// the plate's pure mapping; >0 compresses the folds onto a thicker body —
+// the structure's sheets, which must stay calm at six samples per cell).
+export function drapeHeights(levels, bands, relief, lift = 0) {
+  const g = Math.round(Math.sqrt(levels.length));
+  const sample = levelSampler(levels);
+  const H = new Float32Array((g + 1) * (g + 1));
+  for (let j = 0; j <= g; j++) {
+    for (let i = 0; i <= g; i++) {
+      const t = (sample(i / g, j / g) + 1) / bands;
+      H[j * (g + 1) + i] = (lift + (1 - lift) * t) * relief;
+    }
+  }
+  return { g, H };
+}
+
+// ── glyph textures ─────────────────────────────────────────────────────────
+
+function makeCanvas(w, h) {
+  const c = document.createElement('canvas');
+  c.width = w;
+  c.height = h;
+  return c;
+}
+
+// fabricTexture wraps a glyph canvas for the GPU: sRGB so the inks match
+// the page, max anisotropy so the print stays crisp across the drape.
+export function fabricTexture(renderer, canvas) {
+  const tex = new THREE.CanvasTexture(canvas);
+  tex.colorSpace = THREE.SRGBColorSpace;
+  tex.anisotropy = renderer.capabilities.getMaxAnisotropy();
+  return tex;
+}
+
+// plateCanvas prints one full day onto cloth: the 24×24 glyph field, one
+// ramp glyph per cell in its band ink on a faint band wash — the SVG plate's
+// exact language, rasterized as the fabric's print. 24 cells × 64 px =
+// a 1536² canvas.
+export function plateCanvas({ levels, bands, ramp, palette, surface, cellPx = 64 }) {
+  const g = Math.round(Math.sqrt(levels.length));
+  const canvas = makeCanvas(g * cellPx, g * cellPx);
+  const ctx = canvas.getContext('2d');
+  const glyphs = [...ramp];
+  ctx.font = Math.round(cellPx * 0.78) + 'px ' + MONO;
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+  const inks = [];
+  const washes = [];
+  for (let b = 0; b < bands; b++) {
+    const ink = palette[Math.floor((b * palette.length) / bands)];
+    inks.push(css(ink));
+    washes.push(css(surface.clone().lerp(ink, 0.05 + (0.08 * b) / Math.max(bands - 1, 1))));
+  }
+  for (let j = 0; j < g; j++) {
+    for (let i = 0; i < g; i++) {
+      const lv = levels[j * g + i];
+      ctx.fillStyle = washes[lv];
+      ctx.fillRect(i * cellPx, j * cellPx, cellPx, cellPx);
+      ctx.fillStyle = inks[lv];
+      ctx.fillText(glyphs[lv], (i + 0.5) * cellPx, (j + 0.5) * cellPx);
+    }
+  }
+  return canvas;
+}
+
+// glyphAtlas prints one biome's whole vocabulary: a bands × ageBands grid of
+// tiles, each tile one ramp glyph in its band ink at one age's fade. Every
+// structure sheet UV-maps its cells into this atlas — eight biomes, eight
+// textures, never one per day. uvFor insets the rect slightly so mip
+// filtering never bleeds a neighboring tile in.
+export function glyphAtlas({ ramp, palette, surface, bands, ages, fade, tilePx = 192 }) {
+  const canvas = makeCanvas(bands * tilePx, ages * tilePx);
+  const ctx = canvas.getContext('2d');
+  const glyphs = [...ramp];
+  ctx.font = Math.round(tilePx * 0.94) + 'px ' + MONO;
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+  for (let a = 0; a < ages; a++) {
+    const f = fade(a);
+    for (let b = 0; b < bands; b++) {
+      const ink = palette[Math.floor((b * palette.length) / bands)];
+      ctx.fillStyle = css(surface.clone().lerp(ink, (0.08 + (0.1 * b) / Math.max(bands - 1, 1)) * f));
+      ctx.fillRect(b * tilePx, a * tilePx, tilePx, tilePx);
+      ctx.fillStyle = css(surface.clone().lerp(ink, f));
+      ctx.fillText(glyphs[b], (b + 0.5) * tilePx, (a + 0.5) * tilePx);
+    }
+  }
+  const inset = 0.08;
+  const uvFor = (b, a) => ({
+    u0: (b + inset) / bands,
+    u1: (b + 1 - inset) / bands,
+    vLo: (ages - 1 - a + inset) / ages,
+    vHi: (ages - a - inset) / ages,
+  });
+  return { canvas, uvFor };
+}
+
+// ── fabric sheet geometry ──────────────────────────────────────────────────
+
+// FabricBuilder accumulates glyph-printed drape surfaces into one merged
+// non-indexed soup with positions, smooth normals (from the drape's own
+// gradient, so the cloth shades as folds, not facets), and per-cell UVs into
+// a glyph atlas. One builder per atlas texture — build once, draw as one
+// mesh.
+export class FabricBuilder {
+  constructor() {
+    this.pos = [];
+    this.nrm = [];
+    this.uv = [];
+  }
+
+  get vertexCount() {
+    return this.pos.length / 3;
+  }
+
+  vert(p, n, u, v) {
+    this.pos.push(p[0], p[1], p[2]);
+    this.nrm.push(n[0], n[1], n[2]);
+    this.uv.push(u, v);
+  }
+
+  // sheet drapes one glyph-printed square of fabric: the g×g band field
+  // smoothly draped over `relief` above the sheet floor y, each cell mapped
+  // to its band's atlas tile at the sheet's age.
+  //   levels  flat row-major band indices, side = √length
+  //   bands   quantization level count (the ramp's length)
+  //   uvFor   (band, age) → atlas rect, from glyphAtlas
+  sheet({ levels, bands, x, z, y, size, relief, lift = 0, uvFor, age = 0 }) {
+    const { g, H } = drapeHeights(levels, bands, relief, lift);
+    const cs = size / g;
+    const x0 = x - size / 2;
+    const z0 = z - size / 2;
+    const hAt = (i, j) => H[j * (g + 1) + i];
+    const nAt = (i, j) => {
+      const il = Math.max(i - 1, 0);
+      const ir = Math.min(i + 1, g);
+      const jl = Math.max(j - 1, 0);
+      const jr = Math.min(j + 1, g);
+      const dx = (hAt(ir, j) - hAt(il, j)) / ((ir - il) * cs);
+      const dz = (hAt(i, jr) - hAt(i, jl)) / ((jr - jl) * cs);
+      const inv = 1 / Math.hypot(dx, 1, dz);
+      return [-dx * inv, inv, -dz * inv];
+    };
+    for (let j = 0; j < g; j++) {
+      for (let i = 0; i < g; i++) {
+        const r = uvFor(levels[j * g + i], age);
+        const xa = x0 + i * cs;
+        const xb = xa + cs;
+        const za = z0 + j * cs;
+        const zb = za + cs;
+        const p00 = [xa, y + hAt(i, j), za];
+        const p01 = [xa, y + hAt(i, j + 1), zb];
+        const p11 = [xb, y + hAt(i + 1, j + 1), zb];
+        const p10 = [xb, y + hAt(i + 1, j), za];
+        const n00 = nAt(i, j);
+        const n01 = nAt(i, j + 1);
+        const n11 = nAt(i + 1, j + 1);
+        const n10 = nAt(i + 1, j);
+        this.vert(p00, n00, r.u0, r.vHi);
+        this.vert(p01, n01, r.u0, r.vLo);
+        this.vert(p11, n11, r.u1, r.vLo);
+        this.vert(p00, n00, r.u0, r.vHi);
+        this.vert(p11, n11, r.u1, r.vLo);
+        this.vert(p10, n10, r.u1, r.vHi);
+      }
+    }
+  }
+
+  geometry() {
+    const geo = new THREE.BufferGeometry();
+    geo.setAttribute('position', new THREE.Float32BufferAttribute(this.pos, 3));
+    geo.setAttribute('normal', new THREE.Float32BufferAttribute(this.nrm, 3));
+    geo.setAttribute('uv', new THREE.Float32BufferAttribute(this.uv, 2));
+    return geo;
+  }
+}
+
+// fabricMaterial draws the printed cloth — Lambert, no shine; the key light
+// and the drape normals give the folds.
+export function fabricMaterial(map) {
+  return new THREE.MeshLambertMaterial({ map });
+}
+
+// InkBuilder accumulates the unprinted parts of the sheets — side skirts and
+// dark undersides — as flat-inked soup with per-vertex colors, so a stack of
+// sheets reads as laminated strata.
+export class InkBuilder {
   constructor() {
     this.pos = [];
     this.col = [];
@@ -53,191 +274,43 @@ export class TileBuilder {
     return this.pos.length / 3;
   }
 
-  // quad pushes one face as two triangles, flat-colored. Callers wind
-  // a→b→c→d counter-clockwise as seen from outside.
+  // quad pushes one face as two flat-colored triangles, a→b→c→d CCW seen
+  // from outside.
   quad(a, b, c, d, color) {
     this.pos.push(...a, ...b, ...c, ...a, ...c, ...d);
     for (let i = 0; i < 6; i++) this.col.push(color.r, color.g, color.b);
   }
 
-  // box pushes a full axis-aligned box — the slab under a tile.
-  box(x0, y0, z0, x1, y1, z1, color) {
-    this.quad([x0, y1, z0], [x0, y1, z1], [x1, y1, z1], [x1, y1, z0], color); // top
-    this.quad([x0, y0, z0], [x1, y0, z0], [x1, y0, z1], [x0, y0, z1], color); // bottom
-    this.quad([x1, y0, z1], [x1, y0, z0], [x1, y1, z0], [x1, y1, z1], color); // +x
-    this.quad([x0, y0, z0], [x0, y0, z1], [x0, y1, z1], [x0, y1, z0], color); // -x
-    this.quad([x0, y0, z1], [x1, y0, z1], [x1, y1, z1], [x0, y1, z1], color); // +z
-    this.quad([x1, y0, z0], [x0, y0, z0], [x0, y1, z0], [x1, y1, z0], color); // -z
-  }
-
-  // tile pushes one terraced terrain tile on its slab.
-  //   levels   flat row-major band indices, side = √length
-  //   bands    quantization level count (the glyph ramp's length)
-  //   palette  the biome's three elevation inks as THREE.Color
-  //   surface  the page surface color (the fade target)
-  //   fade     1 = full ink (newest) … toward 0 = washed to the surface
-  //   x, z     tile center; y — slab bottom
-  //   size     terrain footprint; slabSize ≥ size adds the plinth apron
-  //   relief   height of the full band span above the slab
-  //   slabH    slab thickness
-  //   capH     optional build-animation clamp: terrace tops rise to at most
-  //            capH above the slab, so elevations settle low bands first
-  tile({ levels, bands, palette, surface, fade = 1, x, z, y, size, relief, slabSize = size, slabH, capH = Infinity }) {
-    const g = Math.round(Math.sqrt(levels.length));
-    const cs = size / g;
-    const x0 = x - size / 2;
-    const z0 = z - size / 2;
-    const yTop = y + slabH;
-    const stepH = relief / bands;
-
-    // band → ink: the glyph ramp's mapping; tops deepen with elevation,
-    // walls run near-full, everything fades toward the surface with age.
-    const inks = [];
-    const walls = [];
-    for (let b = 0; b < bands; b++) {
-      const ink = palette[Math.floor((b * palette.length) / bands)];
-      const wash = topWashLo + ((topWashHi - topWashLo) * b) / Math.max(bands - 1, 1);
-      inks.push(surface.clone().lerp(ink, wash * fade));
-      walls.push(surface.clone().lerp(ink, wallInkStrength * fade));
-    }
-
-    // Slab — the darkest ink washed well back toward the surface, so the
-    // plinth reads as mounting, not artwork.
-    const slabInk = surface.clone().lerp(palette[palette.length - 1], 0.4 * fade);
-    const sx0 = x - slabSize / 2;
-    const sz0 = z - slabSize / 2;
-    this.box(sx0, y, sz0, sx0 + slabSize, yTop, sz0 + slabSize, slabInk);
-
-    const hAt = (i, j) =>
-      i < 0 || j < 0 || i >= g || j >= g
-        ? 0
-        : Math.min((levels[j * g + i] + 1) * stepH, capH);
-
-    for (let j = 0; j < g; j++) {
-      for (let i = 0; i < g; i++) {
-        const lv = levels[j * g + i];
-        const h = hAt(i, j);
-        const t = yTop + h;
-        const cx0 = x0 + i * cs;
-        const cz0 = z0 + j * cs;
-        const cx1 = cx0 + cs;
-        const cz1 = cz0 + cs;
-        this.quad([cx0, t, cz0], [cx0, t, cz1], [cx1, t, cz1], [cx1, t, cz0], inks[lv]);
-        // Walls — drawn by the higher cell, down to the neighbor's top
-        // (or the slab at the tile rim).
-        const e = hAt(i + 1, j);
-        if (h > e) this.quad([cx1, yTop + e, cz1], [cx1, yTop + e, cz0], [cx1, t, cz0], [cx1, t, cz1], walls[lv]);
-        const w = hAt(i - 1, j);
-        if (h > w) this.quad([cx0, yTop + w, cz0], [cx0, yTop + w, cz1], [cx0, t, cz1], [cx0, t, cz0], walls[lv]);
-        const s = hAt(i, j + 1);
-        if (h > s) this.quad([cx0, yTop + s, cz1], [cx1, yTop + s, cz1], [cx1, t, cz1], [cx0, t, cz1], walls[lv]);
-        const n = hAt(i, j - 1);
-        if (h > n) this.quad([cx1, yTop + n, cz0], [cx0, yTop + n, cz0], [cx0, t, cz0], [cx1, t, cz0], walls[lv]);
-      }
-    }
-  }
-
-  // column pushes one full-height lattice cell of the structure: a solid
-  // unit block whose top is the terraced mini-terrain (carved into the
-  // cell's upper `relief`) and whose sides are cliffs in the band's wall
-  // ink, running from the terrain edge all the way down to the cell floor.
-  // `open` says which faces border empty space; faces against occupied
-  // neighbors are culled, so a contiguous occupied region reads as one
-  // solid mass — terrain on the exposed tops, stratified-ink cliffs on the
-  // exposed sides. A buried cell (occupied above) is a plain prism: walls
-  // run to the cell ceiling and no terrain is drawn.
-  //   levels   flat row-major band indices, side = √length
-  //   bands    quantization level count
-  //   palette  the biome's three elevation inks as THREE.Color
-  //   surface  the page surface color (the fade target)
-  //   fade     1 = full ink (newest) … toward 0 = washed to the surface
-  //   x, z     cell center; y — cell floor
-  //   size     cell footprint; height — cell floor → ceiling
-  //   relief   depth of the terraced top below the cell ceiling
-  //   open     { top, bottom, px, nx, pz, nz } — true = exposed, draw
-  column({ levels, bands, palette, surface, fade = 1, x, z, y, size = 1, height = 1, relief, open }) {
-    const g = Math.round(Math.sqrt(levels.length));
+  // sheetSides closes one fabric sheet into a laminate layer: a skirt on
+  // every side from the drape edge down to the sheet floor, in the rim
+  // cell's band ink (the stratified sides), and a darkened flat underside —
+  // the back of the cloth, seen in the shadow gaps between stacked days.
+  sheetSides({ levels, bands, palette, surface, fade = 1, x, z, y, size, relief, lift = 0 }) {
+    const { g, H } = drapeHeights(levels, bands, relief, lift);
     const cs = size / g;
     const x0 = x - size / 2;
     const z0 = z - size / 2;
     const x1 = x0 + size;
     const z1 = z0 + size;
-    const y1 = y + height;
-    const base = y1 - relief; // the terraced top lives in the cell's upper band
-    const stepH = relief / bands;
-
-    const inks = [];
+    const hAt = (i, j) => y + H[j * (g + 1) + i];
+    const lvAt = (i, j) => levels[j * g + i];
     const walls = [];
     for (let b = 0; b < bands; b++) {
       const ink = palette[Math.floor((b * palette.length) / bands)];
-      const wash = topWashLo + ((topWashHi - topWashLo) * b) / Math.max(bands - 1, 1);
-      inks.push(surface.clone().lerp(ink, wash * fade));
-      walls.push(surface.clone().lerp(ink, wallInkStrength * fade));
+      walls.push(surface.clone().lerp(ink, 0.9 * fade));
     }
-    const lvAt = (i, j) => levels[j * g + i];
-    // A buried top flattens to the cell ceiling — the cell above continues
-    // the column, so the seam must be flush.
-    const topAt = (i, j) => (open.top ? base + (lvAt(i, j) + 1) * stepH : y1);
-
-    // Exposed underside of a floating cell — the slab wash of the plate.
-    if (open.bottom) {
-      const under = surface.clone().lerp(palette[palette.length - 1], 0.4 * fade);
-      this.quad([x0, y, z0], [x1, y, z0], [x1, y, z1], [x0, y, z1], under);
-    }
-
-    // Side cliffs, one strip per rim terrain column, in that column's wall
-    // ink — the stratified sides. An exposed side runs the full height,
-    // cell floor → terrain edge, so stacked cells meet flush. Against an
-    // occupied neighbor everything below the terraced base is interior
-    // (the neighbor's block fills it), so the strip starts at the base —
-    // covering the sliver that shows wherever the neighbor's own terrain
-    // sits lower than ours.
+    const under = surface.clone().lerp(palette[palette.length - 1], 0.85 * fade);
+    // underside, facing down
+    this.quad([x0, y, z0], [x1, y, z0], [x1, y, z1], [x0, y, z1], under);
     for (let k = 0; k < g; k++) {
       const za = z0 + k * cs;
       const zb = za + cs;
       const xa = x0 + k * cs;
       const xb = xa + cs;
-      const bPX = open.px ? y : base;
-      const bNX = open.nx ? y : base;
-      const bPZ = open.pz ? y : base;
-      const bNZ = open.nz ? y : base;
-      this.quad([x1, bPX, zb], [x1, bPX, za], [x1, topAt(g - 1, k), za], [x1, topAt(g - 1, k), zb], walls[lvAt(g - 1, k)]);
-      this.quad([x0, bNX, za], [x0, bNX, zb], [x0, topAt(0, k), zb], [x0, topAt(0, k), za], walls[lvAt(0, k)]);
-      this.quad([xa, bPZ, z1], [xb, bPZ, z1], [xb, topAt(k, g - 1), z1], [xa, topAt(k, g - 1), z1], walls[lvAt(k, g - 1)]);
-      this.quad([xb, bNZ, z0], [xa, bNZ, z0], [xa, topAt(k, 0), z0], [xb, topAt(k, 0), z0], walls[lvAt(k, 0)]);
-    }
-
-    if (!open.top) return; // buried — the cell above draws the surface
-
-    // The terraced top: flat band tops, interior terrace walls drawn by
-    // the higher cell down to its neighbor's top (rim columns are the side
-    // strips above).
-    for (let j = 0; j < g; j++) {
-      for (let i = 0; i < g; i++) {
-        const lv = lvAt(i, j);
-        const t = topAt(i, j);
-        const cx0 = x0 + i * cs;
-        const cz0 = z0 + j * cs;
-        const cx1 = cx0 + cs;
-        const cz1 = cz0 + cs;
-        this.quad([cx0, t, cz0], [cx0, t, cz1], [cx1, t, cz1], [cx1, t, cz0], inks[lv]);
-        if (i + 1 < g) {
-          const e = topAt(i + 1, j);
-          if (t > e) this.quad([cx1, e, cz1], [cx1, e, cz0], [cx1, t, cz0], [cx1, t, cz1], walls[lv]);
-        }
-        if (i > 0) {
-          const w = topAt(i - 1, j);
-          if (t > w) this.quad([cx0, w, cz0], [cx0, w, cz1], [cx0, t, cz1], [cx0, t, cz0], walls[lv]);
-        }
-        if (j + 1 < g) {
-          const s = topAt(i, j + 1);
-          if (t > s) this.quad([cx0, s, cz1], [cx1, s, cz1], [cx1, t, cz1], [cx0, t, cz1], walls[lv]);
-        }
-        if (j > 0) {
-          const n = topAt(i, j - 1);
-          if (t > n) this.quad([cx1, n, cz0], [cx0, n, cz0], [cx0, t, cz0], [cx1, t, cz0], walls[lv]);
-        }
-      }
+      this.quad([x1, y, zb], [x1, y, za], [x1, hAt(g, k), za], [x1, hAt(g, k + 1), zb], walls[lvAt(g - 1, k)]);
+      this.quad([x0, y, za], [x0, y, zb], [x0, hAt(0, k + 1), zb], [x0, hAt(0, k), za], walls[lvAt(0, k)]);
+      this.quad([xa, y, z1], [xb, y, z1], [xb, hAt(k + 1, g), z1], [xa, hAt(k, g), z1], walls[lvAt(k, g - 1)]);
+      this.quad([xb, y, z0], [xa, y, z0], [xa, hAt(k, 0), z0], [xb, hAt(k + 1, 0), z0], walls[lvAt(k, 0)]);
     }
   }
 
@@ -250,46 +323,9 @@ export class TileBuilder {
   }
 }
 
-// terrainMaterial: the one material both pages draw tiles with — Lambert,
-// vertex-colored, no shine, no shadows. The merged soup's face normals
-// give the flat shading.
-export function terrainMaterial() {
+// inkMaterial draws the skirts and undersides — Lambert, vertex-colored.
+export function inkMaterial() {
   return new THREE.MeshLambertMaterial({ vertexColors: true });
-}
-
-// tileContours builds hairline contour segments along terrace steps — the
-// top edge wherever a cell stands above a neighbor or the tile rim. The
-// 3-D counterpart of the SVG's hairline strokes. Returns a LineSegments
-// ready to add, or null when the tile is a single flat band.
-export function tileContours({ levels, bands, x, z, y, size, relief, slabH, color, opacity = 0.3 }) {
-  const g = Math.round(Math.sqrt(levels.length));
-  const cs = size / g;
-  const x0 = x - size / 2;
-  const z0 = z - size / 2;
-  const stepH = relief / bands;
-  const lift = relief * 0.004; // float the line a hair above the crease
-  const yOf = (lv) => y + slabH + (lv + 1) * stepH + lift;
-  const lvAt = (i, j) => (i < 0 || j < 0 || i >= g || j >= g ? -1 : levels[j * g + i]);
-  const pos = [];
-  for (let j = 0; j < g; j++) {
-    for (let i = 0; i < g; i++) {
-      const lv = lvAt(i, j);
-      const t = yOf(lv);
-      const cx0 = x0 + i * cs;
-      const cz0 = z0 + j * cs;
-      if (lvAt(i + 1, j) < lv) pos.push(cx0 + cs, t, cz0, cx0 + cs, t, cz0 + cs);
-      if (lvAt(i - 1, j) < lv) pos.push(cx0, t, cz0, cx0, t, cz0 + cs);
-      if (lvAt(i, j + 1) < lv) pos.push(cx0, t, cz0 + cs, cx0 + cs, t, cz0 + cs);
-      if (lvAt(i, j - 1) < lv) pos.push(cx0, t, cz0, cx0 + cs, t, cz0);
-    }
-  }
-  if (!pos.length) return null;
-  const geo = new THREE.BufferGeometry();
-  geo.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
-  return new THREE.LineSegments(
-    geo,
-    new THREE.LineBasicMaterial({ color, transparent: true, opacity }),
-  );
 }
 
 // ── the shared rig: scene, lights, camera, orbit ───────────────────────────
@@ -315,16 +351,16 @@ export function createRig(plate, { theme, viewSize, aspect, camDist = 2.06 }) {
 
   // One viewing direction for every art scene — a survey elevation of
   // ~33°, close to the SVG plates' isometric pitch; pages only choose how
-  // far out they sit (the structure frames its whole 16³ volume, the
-  // plate fills its frame with one tile).
+  // far out they sit (the structure frames its whole row, the plate fills
+  // its frame with one sheet).
   const camera = new THREE.PerspectiveCamera(35, aspect, viewSize / 100, viewSize * 100);
   camera.position.set(0.593, 0.545, 0.593).multiplyScalar(viewSize * camDist);
   camera.lookAt(0, 0, 0);
 
-  // Flat survey light: mostly ambient, one soft key so terrace tops and
-  // walls read apart. Intensities carry the ×π of three's physical
-  // lighting mode (r155+); the total on an upward face stays at unity, so
-  // the biome inks render true — over- or under-lit rigs gray the palette.
+  // Flat survey light: mostly ambient, one soft key so the drape's folds
+  // read. Intensities carry the ×π of three's physical lighting mode
+  // (r155+); the total on an upward face stays at unity, so the biome inks
+  // render true — over- or under-lit rigs gray the palette.
   scene.add(new THREE.AmbientLight(0xffffff, 0.72 * Math.PI));
   const key = new THREE.DirectionalLight(0xffffff, 0.35 * Math.PI);
   key.position.set(viewSize, viewSize * 1.6, viewSize * 0.5);

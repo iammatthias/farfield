@@ -6,7 +6,7 @@
     .art-plate { border: 1px solid var(--ink); }
     .art-plate svg { width: 100%; height: auto; }
 
-    /* the plate is the SVG until art.js swaps in its live terraced tile;
+    /* the plate is the SVG until art.js swaps in its live fabric sheet;
        .live pins the SVG's proportions for the three.js viewport */
     #plate-canvas { position: relative; display: block; }
     #plate-canvas.live { aspect-ratio: 500 / 310; }
@@ -55,7 +55,7 @@
     <span>derived from the date · nothing stored</span>
   </footer>
 
-  {{/* live terraced plate — progressive enhancement; the SVG above is the
+  {{/* live fabric plate — progressive enhancement; the SVG above is the
        canonical artifact and the no-JS / no-WebGL fallback. The importmap
        resolves "three" (used by OrbitControls too) to the vendored module
        and "terrain" to the geometry language shared with /art/structure. */}}
