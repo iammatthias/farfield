@@ -1,0 +1,111 @@
+{{define "title"}}sudoku · {{.Date}} · farfield · daily{{end}}
+
+{{define "head"}}
+  <style>
+    /* sudoku — one deterministic puzzle a day, derived from the date alone */
+    .sudoku-wrap { max-width: 30rem; }
+    .sudoku-grid {
+      display: grid; grid-template-columns: repeat(9, 1fr);
+      aspect-ratio: 1; width: 100%;
+      border: 2px solid var(--ink); background: var(--surface);
+    }
+    .sudoku-grid .cell {
+      display: flex; align-items: center; justify-content: center;
+      border-right: 1px solid rgba(10, 10, 10, 0.15);
+      border-bottom: 1px solid rgba(10, 10, 10, 0.15);
+      font: 500 1.1rem var(--font-mono);
+      min-width: 0;
+    }
+    /* heavy rules double the hairline at every 3×3 box boundary */
+    .sudoku-grid .cell.br { border-right: 1px solid var(--ink); }
+    .sudoku-grid .cell.bb { border-bottom: 1px solid var(--ink); }
+    .sudoku-grid .cell:nth-child(9n) { border-right: 0; }
+    .sudoku-grid .cell:nth-child(n+73) { border-bottom: 0; }
+    .sudoku-grid .cell.given { background: var(--wash); }
+    .sudoku-grid .cell input {
+      width: 100%; height: 100%; padding: 0; border: 0; border-radius: 0;
+      background: transparent; text-align: center;
+      font: inherit; font-size: max(16px, 1.1rem); /* ≥16px: no iOS zoom */
+      caret-color: var(--ink);
+    }
+    .sudoku-grid .cell input:focus-visible { outline: 2px solid var(--ink); outline-offset: -2px; }
+    .sudoku-grid .cell.conflict { background: var(--accent); }
+    .sudoku-grid .cell.conflict input { color: var(--surface); }
+
+    .sudoku-controls {
+      display: flex; flex-wrap: wrap; gap: 0.75rem; align-items: center;
+      margin-top: 1rem;
+    }
+    .sudoku-status {
+      font: 500 0.7rem/1.4 var(--font-mono);
+      text-transform: uppercase; letter-spacing: 0.07em; opacity: 0.7;
+    }
+    .sudoku-status.alert { color: var(--accent); opacity: 1; }
+    .sudoku-hint { margin-top: 0.6rem; }
+
+    .sudoku-meta { margin-top: 1.5rem; border-top: 2px solid var(--ink); }
+    .sudoku-meta > div {
+      display: flex; gap: 1rem; padding: 0.45rem 0;
+      border-bottom: 1px solid rgba(10, 10, 10, 0.15);
+    }
+    .sudoku-meta dt {
+      flex: 0 0 6.5rem; font: 500 0.7rem/1.5 var(--font-mono);
+      text-transform: uppercase; letter-spacing: 0.08em; opacity: 0.5;
+    }
+    .sudoku-meta dd { margin: 0; font-family: var(--font-mono); font-size: 0.8rem; overflow-wrap: anywhere; }
+  </style>
+  <script src="/static/sudoku.js?v={{.JSVer}}" defer></script>
+{{end}}
+
+{{define "content"}}
+  <header class="bar">
+    <h1><a href="/sudoku">farfield · daily</a></h1>
+    <nav>
+      <a href="{{.JSONURL}}">JSON</a>
+      {{if .Authed}}<a href="/logout">Log out</a>{{else}}<a href="/login">Log in</a>{{end}}
+    </nav>
+  </header>
+
+  <p class="label source-eyebrow">SUDOKU · ONE PUZZLE PER DAY · DIFFICULTY {{.Difficulty}}</p>
+
+  <section class="sudoku-wrap">
+    <div class="sudoku-grid" id="sudoku-grid" data-date="{{.Date}}"
+         data-authed="{{if .Authed}}true{{else}}false{{end}}" data-solvems="{{.SolveMs}}">
+      {{range .Cells}}
+        {{if .Given}}<div class="cell given{{if .BR}} br{{end}}{{if .BB}} bb{{end}}">{{.Val}}</div>
+        {{else}}<div class="cell{{if .BR}} br{{end}}{{if .BB}} bb{{end}}"><input type="text" maxlength="1"
+          inputmode="numeric" pattern="[1-9]" autocomplete="off" value="{{.Entry}}"
+          aria-label="row {{.Row}} column {{.Col}}"></div>{{end}}
+      {{end}}
+    </div>
+
+    <div class="sudoku-controls">
+      <button type="button" id="sudoku-check">Check</button>
+      <button type="button" id="sudoku-clear">Clear</button>
+      <span class="sudoku-status" id="sudoku-status">{{.Status}}</span>
+    </div>
+    {{if not .Authed}}
+      <p class="hint sudoku-hint"><a href="/login">Log in</a> to save progress.</p>
+    {{end}}
+  </section>
+
+  <dl class="sudoku-meta">
+    <div><dt>Date</dt><dd>{{.Date}} · {{.Weekday}}</dd></div>
+    <div><dt>Difficulty</dt><dd>{{.Difficulty}} · {{.ClueCount}} clues</dd></div>
+    <div><dt>Streak</dt><dd>{{.Streak}} day{{if ne .Streak 1}}s{{end}}</dd></div>
+    <div><dt>CID</dt><dd>{{.CID}}</dd></div>
+  </dl>
+
+  <nav class="stepper">
+    {{if .PrevURL}}<a href="{{.PrevURL}}">← Previous</a>
+    {{else}}<span class="muted">← Previous</span>{{end}}
+    <span class="muted">{{.Date}}</span>
+    {{if .NextURL}}<a href="{{.NextURL}}">Next →</a>
+    {{else}}<span class="muted">Next →</span>{{end}}
+  </nav>
+
+  <footer class="cal-foot">
+    <span>farfield · daily · sudoku</span>
+    <span>derived from the date · solution never sent</span>
+  </footer>
+{{end}}

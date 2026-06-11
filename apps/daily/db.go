@@ -61,8 +61,12 @@ func openDB(path string) (*sql.DB, error) {
 		return nil, err
 	}
 	// 1. Current schema — builds fresh databases, no-ops on existing ones.
-	if _, err := db.Exec(schema); err != nil {
-		return nil, err
+	// Sessions back the solve-state login; solve_state holds per-day play
+	// progress for the interactive artifacts (sudoku, soon wordle).
+	for _, ddl := range []string{schema, store.SessionSchema, solveStateSchema} {
+		if _, err := db.Exec(ddl); err != nil {
+			return nil, err
+		}
 	}
 	// 2. Columns added after the first release — CREATE TABLE IF NOT EXISTS
 	//    will not add these to a table that already exists.

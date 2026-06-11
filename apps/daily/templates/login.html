@@ -1,0 +1,16 @@
+{{define "title"}}Log in · farfield · daily{{end}}
+
+{{define "content"}}
+  <section style="max-width:24rem;margin:2rem auto">
+    <h1 style="font-size:1.1rem">farfield · daily</h1>
+    <p class="hint">Logging in only saves puzzle progress — everything here is public to read.</p>
+    {{with .Error}}<p class="error">{{.}}</p>{{end}}
+    <form method="post" action="/login">
+      <div class="field">
+        <label for="password">Password</label>
+        <input type="password" id="password" name="password" required autofocus>
+      </div>
+      <div class="actions"><button type="submit">Log in</button></div>
+    </form>
+  </section>
+{{end}}

@@ -13,7 +13,8 @@ import (
 // Artifact seed domains. Each artifact hashes its own domain so sibling
 // artifacts never share a random stream on the same date.
 const (
-	domainArt = "art"
+	domainArt    = "art"
+	domainSudoku = "sudoku"
 )
 
 // artifactEpoch is day zero of the generative artifacts. Day indices count

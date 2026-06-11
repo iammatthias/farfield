@@ -11,6 +11,7 @@ import (
 	"strconv"
 	"time"
 
+	"github.com/iammatthias/farfield/lib/auth"
 	"github.com/iammatthias/farfield/lib/store"
 	"github.com/iammatthias/farfield/lib/theme"
 	"github.com/iammatthias/farfield/lib/web"
@@ -37,6 +38,7 @@ type Server struct {
 	db      *sql.DB
 	fetcher *fetcher
 	rd      *web.Renderer
+	auth    *web.Auth
 }
 
 // backfillCommand warms the NASA cache from the configured photo start
@@ -85,6 +87,9 @@ func run(host, port string) error {
 		return err
 	}
 	defer db.Close()
+	if err := store.PruneSessions(db); err != nil {
+		slog.Warn("could not prune sessions", "err", err)
+	}
 
 	tmpl, err := web.ParseTemplates(assets, templateFuncs)
 	if err != nil {
@@ -95,6 +100,13 @@ func run(host, port string) error {
 		db:      db,
 		fetcher: newFetcher(store.Env("NASA_API_KEY", "DEMO_KEY")),
 		rd:      &web.Renderer{Templates: tmpl, AssetVer: theme.Version},
+		// The whole site stays public-read; the session exists only so
+		// solve-state writes (sudoku, soon wordle) can persist.
+		auth: &web.Auth{
+			DB:           db,
+			Password:     store.Env("PASSWORD", ""),
+			CookieSecure: store.Env("COOKIE_SECURE", "false") == "true",
+		},
 	}
 
 	// Backfill the whole photo archive — Jan 1 through today — in the background so
@@ -130,6 +142,17 @@ func (s *Server) routes() http.Handler {
 	mux.HandleFunc("GET /art/structure", s.handleArtStructure)
 	mux.HandleFunc("GET /art/{date}", s.handleArtDay)
 
+	// The sudoku artifact — a deterministic daily puzzle derived from the
+	// date. Pages are public; only the solve-state write needs a session.
+	mux.HandleFunc("GET /sudoku", s.handleSudokuToday)
+	mux.HandleFunc("GET /sudoku/{date}", s.handleSudokuDay)
+	mux.HandleFunc("POST /sudoku/{date}/state", s.requireSessionJSON(s.handleSudokuState))
+
+	// Login — public HTML. Sessions exist only for solve-state persistence.
+	mux.HandleFunc("GET /login", s.handleLoginForm)
+	mux.HandleFunc("POST /login", s.auth.HandleLogin)
+	mux.HandleFunc("GET /logout", s.auth.HandleLogout)
+
 	// Public JSON API — the photo and photos reads are cacheable for a day.
 	mux.HandleFunc("GET /status", s.handleStatus)
 	mux.HandleFunc("GET /api/photo", s.handleAPIToday)
@@ -137,14 +160,48 @@ func (s *Server) routes() http.Handler {
 	mux.HandleFunc("GET /api/photos", s.handleAPIPhotos)
 	mux.HandleFunc("GET /api/art", s.handleAPIArtToday)
 	mux.HandleFunc("GET /api/art/{date}", s.handleAPIArtDay)
+	mux.HandleFunc("GET /api/sudoku", s.handleAPISudokuToday)
+	mux.HandleFunc("GET /api/sudoku/{date}", s.handleAPISudokuDay)
 
-	// Shared theme stylesheet.
+	// Shared theme stylesheet, plus the app-local sudoku grid script.
 	mux.HandleFunc("GET /static/styles.css", theme.CSSHandler())
+	mux.HandleFunc("GET /static/sudoku.js", sudokuJSHandler())
 
 	// Everything the service serves itself is text — HTML, JSON; the photos
 	// are hot-linked from NASA — so Gzip wraps the whole mux. The default CORS
 	// method list (GET, OPTIONS) matches this read-only API.
 	return web.CORS(web.LogRequests(web.Gzip(mux)))
+}
+
+// ── auth ───────────────────────────────────────────────────────────────────
+
+// authed reports whether the request carries a valid session cookie. daily
+// stays public-read everywhere; this only decides whether solve state
+// persists and is restored.
+func (s *Server) authed(r *http.Request) bool {
+	token, ok := auth.Session(r)
+	if !ok {
+		return false
+	}
+	valid, err := store.ValidSession(s.db, token)
+	return err == nil && valid
+}
+
+// requireSessionJSON gates a JSON write on a valid session, answering 401
+// JSON instead of the login redirect web.Auth.RequireSession uses for HTML.
+func (s *Server) requireSessionJSON(next http.HandlerFunc) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if !s.authed(r) {
+			web.WriteError(w, http.StatusUnauthorized, "login required")
+			return
+		}
+		next(w, r)
+	}
+}
+
+// handleLoginForm renders the login page.
+func (s *Server) handleLoginForm(w http.ResponseWriter, r *http.Request) {
+	s.rd.Render(w, "login.html", map[string]any{"Error": r.URL.Query().Get("error")})
 }
 
 // ── archive paging ─────────────────────────────────────────────────────────
