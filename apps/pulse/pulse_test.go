@@ -1,0 +1,340 @@
+package main
+
+import (
+	"database/sql"
+	"io"
+	"net/http"
+	"net/http/cookiejar"
+	"net/http/httptest"
+	"net/url"
+	"path/filepath"
+	"strings"
+	"sync/atomic"
+	"testing"
+	"time"
+
+	"github.com/iammatthias/farfield/lib/web"
+)
+
+// newTestDB opens a fresh pulse database in t.TempDir at the given filename
+// and runs the migrations.
+func newTestDB(t *testing.T, dir, name string) *sql.DB {
+	t.Helper()
+	db, err := openDB(filepath.Join(dir, name))
+	if err != nil {
+		t.Fatalf("openDB: %v", err)
+	}
+	t.Cleanup(func() { db.Close() })
+	return db
+}
+
+func newTestServer(t *testing.T) *Server {
+	t.Helper()
+	db := newTestDB(t, t.TempDir(), "pulse.sqlite")
+	tmpl, err := web.ParseTemplates(assets, nil)
+	if err != nil {
+		t.Fatalf("web.ParseTemplates: %v", err)
+	}
+	return &Server{
+		db:   db,
+		auth: &web.Auth{DB: db, Password: "secret"},
+		rd:   &web.Renderer{Templates: tmpl, AssetVer: "test"},
+	}
+}
+
+func countRows(t *testing.T, db *sql.DB, query string, args ...any) int {
+	t.Helper()
+	var n int
+	if err := db.QueryRow(query, args...).Scan(&n); err != nil {
+		t.Fatalf("count %q: %v", query, err)
+	}
+	return n
+}
+
+// TestSchemaSelfMigrates opens the same database file twice — every
+// migration step must be idempotent.
+func TestSchemaSelfMigrates(t *testing.T) {
+	dir := t.TempDir()
+	db1, err := openDB(filepath.Join(dir, "pulse.sqlite"))
+	if err != nil {
+		t.Fatalf("first open: %v", err)
+	}
+	db1.Close()
+	db2, err := openDB(filepath.Join(dir, "pulse.sqlite"))
+	if err != nil {
+		t.Fatalf("second open: %v", err)
+	}
+	db2.Close()
+}
+
+// TestCheckerIncidentTransitions drives ok→fail→fail→ok against a stub HTTP
+// server and asserts the incident state machine: exactly one incident opens
+// on the first failure, consecutive failures update its last_err, and
+// recovery closes it.
+func TestCheckerIncidentTransitions(t *testing.T) {
+	db := newTestDB(t, t.TempDir(), "pulse.sqlite")
+
+	var status atomic.Int64
+	status.Store(200)
+	stub := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(int(status.Load()))
+	}))
+	defer stub.Close()
+
+	target := &Target{Name: "stub", URL: stub.URL, Method: "GET",
+		ExpectedStatus: 200, IntervalS: 60, Enabled: true}
+	if err := insertTarget(db, target); err != nil {
+		t.Fatalf("insertTarget: %v", err)
+	}
+	client := &http.Client{Timeout: 2 * time.Second}
+	probe := func() {
+		t.Helper()
+		if err := recordCheck(db, target.ID, performCheck(client, *target)); err != nil {
+			t.Fatalf("recordCheck: %v", err)
+		}
+	}
+
+	probe() // ok
+	if n := countRows(t, db, `SELECT COUNT(*) FROM checks`); n != 1 {
+		t.Fatalf("checks = %d, want 1", n)
+	}
+	var latency int64
+	if err := db.QueryRow(`SELECT latency_ms FROM checks`).Scan(&latency); err != nil || latency < 0 {
+		t.Fatalf("latency_ms = %d, err %v", latency, err)
+	}
+	if n := countRows(t, db, `SELECT COUNT(*) FROM incidents`); n != 0 {
+		t.Fatalf("incidents after ok = %d, want 0", n)
+	}
+
+	status.Store(503)
+	probe() // ok → fail: opens exactly one incident
+	if n := countRows(t, db, `SELECT COUNT(*) FROM incidents WHERE closed_at = ''`); n != 1 {
+		t.Fatalf("open incidents after first fail = %d, want 1", n)
+	}
+
+	probe() // fail → fail: still one incident, last_err refreshed
+	if n := countRows(t, db, `SELECT COUNT(*) FROM incidents`); n != 1 {
+		t.Fatalf("incidents after second fail = %d, want 1", n)
+	}
+	inc, err := openIncident(db, target.ID)
+	if err != nil || inc == nil {
+		t.Fatalf("openIncident: %v, %v", inc, err)
+	}
+
+	status.Store(200)
+	probe() // fail → ok: closes it
+	if n := countRows(t, db, `SELECT COUNT(*) FROM incidents WHERE closed_at = ''`); n != 0 {
+		t.Fatalf("open incidents after recovery = %d, want 0", n)
+	}
+	if n := countRows(t, db, `SELECT COUNT(*) FROM incidents`); n != 1 {
+		t.Fatalf("total incidents = %d, want 1", n)
+	}
+
+	pct, ok, err := uptime(db, target.ID, 24*time.Hour)
+	if err != nil || !ok {
+		t.Fatalf("uptime: ok=%v err=%v", ok, err)
+	}
+	if pct != 50 { // 2 of 4 checks ok
+		t.Fatalf("uptime = %.2f, want 50.00", pct)
+	}
+}
+
+// seedSourceDB creates a sibling app database with lib/pulse-shaped request
+// rows and returns it for appending more.
+func seedSourceDB(t *testing.T, dir, app string) *sql.DB {
+	t.Helper()
+	src, err := sql.Open("sqlite",
+		"file:"+filepath.Join(dir, app+".sqlite")+
+			"?_pragma=busy_timeout(5000)&_pragma=journal_mode(WAL)")
+	if err != nil {
+		t.Fatalf("open source: %v", err)
+	}
+	t.Cleanup(func() { src.Close() })
+	if _, err := src.Exec(`CREATE TABLE requests (
+		id INTEGER PRIMARY KEY AUTOINCREMENT, ts TEXT NOT NULL,
+		path TEXT NOT NULL, method TEXT NOT NULL, status INTEGER NOT NULL,
+		latency_ms INTEGER NOT NULL, vkey TEXT NOT NULL,
+		ref_host TEXT NOT NULL DEFAULT '', country TEXT NOT NULL DEFAULT '')`); err != nil {
+		t.Fatalf("create requests: %v", err)
+	}
+	return src
+}
+
+func addRequest(t *testing.T, src *sql.DB, ts, path, vkey, refHost string) {
+	t.Helper()
+	if _, err := src.Exec(`INSERT INTO requests
+		(ts, path, method, status, latency_ms, vkey, ref_host, country)
+		VALUES (?, ?, 'GET', 200, 5, ?, ?, '')`, ts, path, vkey, refHost); err != nil {
+		t.Fatalf("insert request: %v", err)
+	}
+}
+
+// TestCollectorCursor runs the collector twice over the same source rows —
+// counts must not double — then appends new rows and checks they roll up.
+func TestCollectorCursor(t *testing.T) {
+	dir := t.TempDir()
+	dbPath := filepath.Join(dir, "pulse.sqlite")
+	db := newTestDB(t, dir, "pulse.sqlite")
+	src := seedSourceDB(t, dir, "blog")
+
+	ts := time.Now().UTC().Format(time.RFC3339)
+	addRequest(t, src, ts, "/a", "v1", "example.org")
+	addRequest(t, src, ts, "/a", "v2", "")
+	addRequest(t, src, ts, "/b", "v1", "example.org")
+
+	collectAll(db, dbPath)
+	collectAll(db, dbPath) // same rows again — the cursor must hold
+
+	if hits := countRows(t, db, `SELECT COALESCE(SUM(hits),0) FROM hits_daily`); hits != 3 {
+		t.Fatalf("hits after double run = %d, want 3", hits)
+	}
+	if u := countRows(t, db,
+		`SELECT COALESCE(SUM(uniques),0) FROM hits_daily WHERE path = '/a'`); u != 2 {
+		t.Fatalf("uniques for /a = %d, want 2", u)
+	}
+	if refHits := countRows(t, db,
+		`SELECT COALESCE(SUM(hits),0) FROM referrers_daily WHERE referrer_host = 'example.org'`); refHits != 2 {
+		t.Fatalf("referrer hits = %d, want 2", refHits)
+	}
+
+	// New rows after the cursor roll up; a repeated vkey is not re-counted.
+	addRequest(t, src, ts, "/a", "v1", "")
+	addRequest(t, src, ts, "/a", "v3", "")
+	collectAll(db, dbPath)
+
+	if hits := countRows(t, db, `SELECT COALESCE(SUM(hits),0) FROM hits_daily`); hits != 5 {
+		t.Fatalf("hits after new rows = %d, want 5", hits)
+	}
+	if u := countRows(t, db,
+		`SELECT COALESCE(SUM(uniques),0) FROM hits_daily WHERE path = '/a'`); u != 3 {
+		t.Fatalf("uniques for /a after new rows = %d, want 3 (v1 re-counted?)", u)
+	}
+
+	var cursor int64
+	if err := db.QueryRow(`SELECT last_event_id FROM collector_cursor
+		WHERE app = 'blog'`).Scan(&cursor); err != nil || cursor != 5 {
+		t.Fatalf("cursor = %d (err %v), want 5", cursor, err)
+	}
+
+	// Pulse's own database must never be collected as an app.
+	if n := countRows(t, db,
+		`SELECT COUNT(*) FROM collector_cursor WHERE app = 'pulse'`); n != 0 {
+		t.Fatal("collector swept pulse's own database")
+	}
+}
+
+// TestCollectorSkipsAppsWithoutRequests: a sibling db without the lib/pulse
+// table is skipped silently.
+func TestCollectorSkipsAppsWithoutRequests(t *testing.T) {
+	dir := t.TempDir()
+	db := newTestDB(t, dir, "pulse.sqlite")
+	plain, err := sql.Open("sqlite", "file:"+filepath.Join(dir, "plain.sqlite"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := plain.Exec(`CREATE TABLE notes (id INTEGER PRIMARY KEY)`); err != nil {
+		t.Fatal(err)
+	}
+	plain.Close()
+
+	collectAll(db, filepath.Join(dir, "pulse.sqlite"))
+	if n := countRows(t, db, `SELECT COUNT(*) FROM collector_cursor`); n != 0 {
+		t.Fatalf("cursor rows = %d, want 0", n)
+	}
+}
+
+// TestUnauthedRedirects: every console page bounces to /login without a
+// session; /status stays public.
+func TestUnauthedRedirects(t *testing.T) {
+	s := newTestServer(t)
+	srv := httptest.NewServer(s.routes())
+	defer srv.Close()
+	client := &http.Client{CheckRedirect: func(*http.Request, []*http.Request) error {
+		return http.ErrUseLastResponse
+	}}
+
+	for _, path := range []string{"/", "/targets", "/traffic", "/api/overview"} {
+		resp, err := client.Get(srv.URL + path)
+		if err != nil {
+			t.Fatalf("GET %s: %v", path, err)
+		}
+		resp.Body.Close()
+		if resp.StatusCode != http.StatusSeeOther {
+			t.Fatalf("GET %s = %d, want 303", path, resp.StatusCode)
+		}
+		if loc := resp.Header.Get("Location"); loc != "/login" {
+			t.Fatalf("GET %s redirects to %q, want /login", path, loc)
+		}
+	}
+
+	resp, err := client.Get(srv.URL + "/status")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("GET /status = %d, want 200", resp.StatusCode)
+	}
+}
+
+// TestTargetCRUDViaForms logs in and drives the target form end to end.
+func TestTargetCRUDViaForms(t *testing.T) {
+	s := newTestServer(t)
+	srv := httptest.NewServer(s.routes())
+	defer srv.Close()
+
+	jar := newCookieClient(t)
+	resp, err := jar.PostForm(srv.URL+"/login", url.Values{"password": {"secret"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	resp.Body.Close()
+
+	resp, err = jar.PostForm(srv.URL+"/targets", url.Values{
+		"name": {"apex"}, "url": {"https://apex.example/status"},
+		"method": {"get"}, "expected_status": {"200"},
+		"interval_s": {"30"}, "enabled": {"on"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	resp.Body.Close()
+
+	targets, err := listTargets(s.db)
+	if err != nil || len(targets) != 1 {
+		t.Fatalf("targets = %v (err %v), want 1", targets, err)
+	}
+	tg := targets[0]
+	if tg.Method != "GET" || tg.IntervalS != 30 || !tg.Enabled {
+		t.Fatalf("stored target = %+v", tg)
+	}
+
+	// The overview renders with the new target.
+	resp, err = jar.Get(srv.URL + "/")
+	if err != nil {
+		t.Fatal(err)
+	}
+	body := readBody(t, resp)
+	if resp.StatusCode != http.StatusOK || !strings.Contains(body, "apex") {
+		t.Fatalf("overview status %d, body misses target", resp.StatusCode)
+	}
+}
+
+func newCookieClient(t *testing.T) *http.Client {
+	t.Helper()
+	jar, err := cookiejar.New(nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return &http.Client{Jar: jar}
+}
+
+func readBody(t *testing.T, resp *http.Response) string {
+	t.Helper()
+	defer resp.Body.Close()
+	b, err := io.ReadAll(resp.Body)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return string(b)
+}

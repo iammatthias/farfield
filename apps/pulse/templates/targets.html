@@ -1,0 +1,48 @@
+{{define "title"}}Targets · farfield pulse{{end}}
+{{define "content"}}
+  {{template "topbar" .}}
+
+  <div class="section-head">
+    <h2>Targets</h2>
+    <a href="/targets/new">New target</a>
+  </div>
+
+  {{if .Targets}}
+    <div class="table-wrap">
+      <table class="telemetry">
+        <thead>
+          <tr>
+            <th>Name</th>
+            <th>URL</th>
+            <th>Method</th>
+            <th class="num">Expect</th>
+            <th class="num">Interval</th>
+            <th>Enabled</th>
+            <th>Actions</th>
+          </tr>
+        </thead>
+        <tbody>
+          {{range .Targets}}
+            <tr>
+              <td>{{.Name}}</td>
+              <td class="mono">{{.URL}}</td>
+              <td class="mono">{{.Method}}</td>
+              <td class="num">{{.ExpectedStatus}}</td>
+              <td class="num">{{.IntervalS}}s</td>
+              <td>{{if .Enabled}}<span class="badge draft">On</span>{{else}}<span class="muted">off</span>{{end}}</td>
+              <td class="actions">
+                <a href="/targets/{{.ID}}/edit">Edit</a>
+                <form method="post" action="/targets/{{.ID}}/delete"
+                      onsubmit="return confirm('Delete this target and its history?')">
+                  <button type="submit">Delete</button>
+                </form>
+              </td>
+            </tr>
+          {{end}}
+        </tbody>
+      </table>
+    </div>
+  {{else}}
+    <p class="muted">No targets yet. <a href="/targets/new">Add one.</a></p>
+  {{end}}
+{{end}}

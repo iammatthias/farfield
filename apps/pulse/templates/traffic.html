@@ -1,0 +1,96 @@
+{{define "title"}}Traffic · farfield pulse{{end}}
+{{define "content"}}
+  {{template "topbar" .}}
+
+  <div class="section-head">
+    <h2>Traffic</h2>
+    <span class="label">{{.D.From}} → {{.D.To}} · {{.TotalHits}} hits</span>
+  </div>
+
+  <form class="filters" method="get" action="/traffic">
+    <div class="field">
+      <label for="app">App</label>
+      <select id="app" name="app">
+        <option value="">all apps</option>
+        {{$sel := .D.App}}
+        {{range .D.Apps}}
+          <option value="{{.}}"{{if eq . $sel}} selected{{end}}>{{.}}</option>
+        {{end}}
+      </select>
+    </div>
+    <div class="field">
+      <label for="from">From</label>
+      <input type="date" id="from" name="from" value="{{.D.From}}">
+    </div>
+    <div class="field">
+      <label for="to">To</label>
+      <input type="date" id="to" name="to" value="{{.D.To}}">
+    </div>
+    <button type="submit">Apply</button>
+  </form>
+
+  <section>
+    <div class="section-head"><h2>Hits per day</h2></div>
+    {{.HitsChart}}
+  </section>
+
+  <section>
+    <div class="section-head"><h2>Uniques per day</h2></div>
+    {{.UniquesChart}}
+    <p class="hint">Uniques are exact per path per day; the daily figure sums
+      them, so a visitor who touched several paths counts once per path.</p>
+  </section>
+
+  <div class="grid" style="margin-top:2rem">
+    <section>
+      <div class="section-head"><h2>Top paths</h2></div>
+      {{if .D.Paths}}
+        <div class="table-wrap">
+          <table class="telemetry">
+            <thead><tr><th>App</th><th>Path</th><th class="num">Hits</th><th class="num">Uniques</th></tr></thead>
+            <tbody>
+              {{range .D.Paths}}
+                <tr>
+                  <td class="mono">{{.App}}</td>
+                  <td class="mono">{{.Path}}</td>
+                  <td class="num">{{.Hits}}</td>
+                  <td class="num">{{.Uniques}}</td>
+                </tr>
+              {{end}}
+            </tbody>
+          </table>
+        </div>
+      {{else}}<p class="muted">No traffic in range.</p>{{end}}
+    </section>
+
+    <section>
+      <div class="section-head"><h2>Status mix</h2></div>
+      {{if .D.Mix}}
+        <div class="table-wrap">
+          <table class="telemetry">
+            <thead><tr><th>Class</th><th class="num">Hits</th></tr></thead>
+            <tbody>
+              {{range .D.Mix}}
+                <tr><td class="mono">{{.Bucket}}</td><td class="num">{{.Hits}}</td></tr>
+              {{end}}
+            </tbody>
+          </table>
+        </div>
+      {{else}}<p class="muted">No traffic in range.</p>{{end}}
+
+      <div class="section-head"><h2>Top referrers</h2></div>
+      {{if .D.Refs}}
+        <div class="table-wrap">
+          <table class="telemetry">
+            <thead><tr><th>Host</th><th class="num">Hits</th></tr></thead>
+            <tbody>
+              {{range .D.Refs}}
+                <tr><td class="mono">{{.Host}}</td><td class="num">{{.Hits}}</td></tr>
+              {{end}}
+            </tbody>
+          </table>
+        </div>
+      {{else}}<p class="muted">No referrers in range.</p>{{end}}
+    </section>
+  </div>
+{{end}}

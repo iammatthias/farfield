@@ -1,0 +1,90 @@
+{{define "title"}}Overview · farfield pulse{{end}}
+{{define "content"}}
+  {{template "topbar" .}}
+
+  {{if .Rows}}
+    <div class="table-wrap">
+      <table class="telemetry">
+        <thead>
+          <tr>
+            <th>Target</th>
+            <th>State</th>
+            <th>Latency · last 50</th>
+            <th class="num">24h</th>
+            <th class="num">7d</th>
+            <th class="num">30d</th>
+            <th>Incident</th>
+          </tr>
+        </thead>
+        <tbody>
+          {{range .Rows}}
+            <tr>
+              <td>
+                <a href="/targets/{{.ID}}/edit">{{.Name}}</a>
+                {{if not .Enabled}} <span class="badge draft">Paused</span>{{end}}
+              </td>
+              <td>
+                {{if .Last}}
+                  {{if .Last.OK}}
+                    <span class="updown up">Up</span>
+                  {{else}}
+                    <span class="updown down">Down</span>
+                  {{end}}
+                  <span class="mono muted">{{if .Last.StatusCode}}{{.Last.StatusCode}}{{end}} {{.Last.LatencyMS}}ms</span>
+                {{else}}
+                  <span class="muted">no checks yet</span>
+                {{end}}
+              </td>
+              <td>{{.Sparkline}}</td>
+              <td class="num">{{.Up24}}</td>
+              <td class="num">{{.Up7}}</td>
+              <td class="num">{{.Up30}}</td>
+              <td>
+                {{if .Incident}}
+                  <span class="badge live">Open</span>
+                  <span class="err-text">{{.Incident.LastErr}}</span>
+                {{else}}
+                  <span class="muted">—</span>
+                {{end}}
+              </td>
+            </tr>
+          {{end}}
+        </tbody>
+      </table>
+    </div>
+  {{else}}
+    <p class="muted">No targets yet. <a href="/targets/new">Add one.</a></p>
+  {{end}}
+
+  <section>
+    <div class="section-head">
+      <h2>Recent incidents</h2>
+    </div>
+    {{if .Incidents}}
+      <div class="table-wrap">
+        <table class="telemetry">
+          <thead>
+            <tr>
+              <th>Target</th>
+              <th>Opened</th>
+              <th>Closed</th>
+              <th>Last error</th>
+            </tr>
+          </thead>
+          <tbody>
+            {{range .Incidents}}
+              <tr>
+                <td>{{.TargetName}}</td>
+                <td class="mono">{{.OpenedAt}}</td>
+                <td class="mono">{{if .ClosedAt}}{{.ClosedAt}}{{else}}<span class="badge live">Open</span>{{end}}</td>
+                <td class="err-text">{{.LastErr}}</td>
+              </tr>
+            {{end}}
+          </tbody>
+        </table>
+      </div>
+    {{else}}
+      <p class="muted">No incidents recorded.</p>
+    {{end}}
+  </section>
+{{end}}
