@@ -25,18 +25,16 @@
 {{end}}
 
 {{define "content"}}
-  <header class="bar">
-    <h1><a href="/art">farfield · daily</a></h1>
-    <nav>
+  {{template "masthead" .}}
+
+  <div class="label source-eyebrow">
+    <span>ART · 4D HYPERSTRUCTURE · ONE CELL PER DAY</span>
+    <nav class="actions">
       <a href="{{.StructureURL}}">Structure</a>
       <a href="{{.SVGURL}}">SVG</a>
       <a href="{{.JSONURL}}">JSON</a>
     </nav>
-  </header>
-
-  {{template "artifactnav" .}}
-
-  <p class="label source-eyebrow">ART · 4D HYPERSTRUCTURE · ONE CELL PER DAY</p>
+  </div>
 
   <figure class="art-plate">
     {{.SVG}}
@@ -57,7 +55,7 @@
   <nav class="stepper">
     {{if .PrevURL}}<a href="{{.PrevURL}}">← Previous</a>
     {{else}}<span class="muted">← Previous</span>{{end}}
-    <a href="{{.StructureURL}}">Structure</a>
+    <span class="muted">{{.Date}}</span>
     {{if .NextURL}}<a href="{{.NextURL}}">Next →</a>
     {{else}}<span class="muted">Next →</span>{{end}}
   </nav>

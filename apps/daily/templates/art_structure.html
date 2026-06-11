@@ -6,49 +6,62 @@
     .art-plate { border: 1px solid var(--ink); }
     .art-plate svg { width: 100%; height: auto; }
     .art-plate figcaption {
-      display: flex; justify-content: space-between; gap: 1rem;
+      display: flex; justify-content: space-between; flex-wrap: wrap; gap: 0.35rem 1rem;
       padding: 0.55rem 0.8rem; border-top: 1px solid var(--ink);
-      font: 500 0.7rem/1 var(--font-mono);
+      font: 500 0.7rem/1.4 var(--font-mono);
       text-transform: uppercase; letter-spacing: 0.07em;
     }
-    .scrub {
-      display: flex; flex-wrap: wrap; gap: 0.4rem; margin-top: 1.25rem;
-      font-family: var(--font-mono); font-size: 0.8rem;
+
+    /* fill-map — 16 bars, one per w-slice; bar height ∝ accreted cells.
+       The bars are the scrubber: each links to its slice, number beneath. */
+    .fillmap {
+      display: flex; flex-wrap: wrap; gap: 0.4rem; align-items: flex-end;
+      margin-top: 1rem;
     }
-    .scrub a, .scrub span.current {
-      display: block; min-width: 2.2rem; padding: 0.3rem 0; text-align: center;
-      border: 1px solid var(--ink); text-decoration: none;
+    .fillmap a {
+      display: flex; flex-direction: column; align-items: center; gap: 0.3rem;
+      width: 2.2rem; text-decoration: none;
     }
-    .scrub a:hover { background: var(--ink); color: var(--surface); }
-    .scrub span.current { background: var(--ink); color: var(--surface); }
-    .scrub-label { margin-top: 1.5rem; }
+    .fillmap .col {
+      display: flex; align-items: flex-end; width: 100%; height: 48px;
+      border-bottom: 1px solid var(--ink);
+    }
+    .fillmap .col span { width: 100%; background: var(--ink); opacity: 0.25; }
+    .fillmap a:hover .col span { opacity: 0.6; }
+    .fillmap a.on .col span { opacity: 1; }
+    .fillmap .w { font: 500 0.65rem/1 var(--font-mono); opacity: 0.55; }
+    .fillmap a.on .w { opacity: 1; }
+    .fillmap-label { margin-top: 1.5rem; }
   </style>
 {{end}}
 
 {{define "content"}}
-  <header class="bar">
-    <h1><a href="/art">farfield · daily</a></h1>
-    <nav>
+  {{template "masthead" .}}
+
+  <div class="label source-eyebrow">
+    <span>ART · STRUCTURE · W-SLICE {{.W}} OF 16</span>
+    <nav class="actions">
       <a href="/art">Today</a>
       <a href="/api/art">JSON</a>
     </nav>
-  </header>
-
-  <p class="label source-eyebrow">ART · STRUCTURE · W-SLICE {{.W}} OF 16</p>
+  </div>
 
   <figure class="art-plate">
     {{.SVG}}
     <figcaption>
-      <span>{{.Date}} · DAY {{.N}}</span>
+      <span>SLICE W={{.W}} · {{.Count}} / {{.SliceCells}} CELLS ACCRETED · INK = ELAPSED DAYS · OUTLINE = TODAY</span>
       <span class="muted">{{if .OnW}}TODAY'S CELL ON THIS SLICE{{else}}TODAY AT W={{.TodayW}}{{end}}</span>
     </figcaption>
   </figure>
 
-  <p class="label scrub-label">W-axis scrubber</p>
-  <nav class="scrub">
+  <p class="label fillmap-label">W-axis fill · bar = cells accreted per slice</p>
+  <nav class="fillmap" aria-label="w-axis slices">
     {{range .Slices}}
-      {{if .Current}}<span class="current">{{.W}}</span>
-      {{else}}<a href="{{.URL}}">{{.W}}</a>{{end}}
+      <a href="{{.URL}}"{{if .Current}} class="on" aria-current="page"{{end}}
+         title="w={{.W}} · {{.Count}} cells">
+        <span class="col"><span style="height:{{.BarPx}}px"></span></span>
+        <span class="w">{{.W}}</span>
+      </a>
     {{end}}
   </nav>
 

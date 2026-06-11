@@ -1,13 +1,15 @@
 package main
 
 import (
+	"log/slog"
 	"net/http"
 )
 
 // The hub — the daily index at / and /{date}. One page, four cards: the
 // day's photo, art plate, sudoku, and wordle, each linking into its
-// artifact. The hub reads only what already exists (the photos cache, the
-// solve-state table, pure derivations); it never triggers an upstream fetch.
+// artifact. Today's photo card goes through the same ensure-today path the
+// /photo page uses (cached and in-flight-deduped; a failed fetch degrades to
+// the placeholder); past dates stay cache-only reads.
 
 // hubDayValid reports whether a date has a hub page: well-formed, on or
 // after the artifact epoch, not in the future.
@@ -35,9 +37,8 @@ type hubGameStatus struct {
 	Streak int
 }
 
-// renderHubPage renders the hub for one date. Solve-state lines appear only
-// for authed visitors, so an authed page is never publicly cacheable; the
-// anonymous page caches like the photo index.
+// renderHubPage renders the hub for one date. The page embeds session state
+// (nav login/logout, solve status), so it is never shared-cacheable.
 func (s *Server) renderHubPage(w http.ResponseWriter, r *http.Request, date string) {
 	if !hubDayValid(date) {
 		http.NotFound(w, r)
@@ -47,9 +48,17 @@ func (s *Server) renderHubPage(w http.ResponseWriter, r *http.Request, date stri
 	today := todayUTC()
 	isToday := date == today
 
-	// Photo card — cache-only read; days the cache lacks render a placeholder.
-	photo, err := getPhoto(s.db, sourceNASA, date)
-	if err != nil {
+	// Photo card. Today goes through the same cached, in-flight-deduped
+	// ensure path as /photo — a failure just renders the placeholder. Past
+	// dates stay cache-only reads.
+	var photo *Photo
+	var err error
+	if isToday {
+		if photo, _, err = s.todayPhoto(r.Context()); err != nil {
+			slog.Warn("hub today photo", "err", err)
+			photo = nil
+		}
+	} else if photo, err = getPhoto(s.db, sourceNASA, date); err != nil {
 		s.fail(w, "hub photo", err)
 		return
 	}
@@ -86,11 +95,7 @@ func (s *Server) renderHubPage(w http.ResponseWriter, r *http.Request, date stri
 		}
 	}
 
-	if authed {
-		w.Header().Set("Cache-Control", "private, no-cache")
-	} else {
-		cacheFor(w, todayMaxAge)
-	}
+	noCacheHTML(w)
 	s.rd.Render(w, "hub.html", map[string]any{
 		"Date":       date,
 		"Weekday":    p.Weekday,
@@ -106,7 +111,7 @@ func (s *Server) renderHubPage(w http.ResponseWriter, r *http.Request, date stri
 		"Epoch":      artifactEpoch,
 		"PrevURL":    prevURL,
 		"NextURL":    nextURL,
-		"Nav":        navData(date),
+		"Nav":        navData(date, "", authed),
 	})
 }
 
@@ -140,24 +145,23 @@ func (s *Server) hubGameStatus(domain, date, today string, authed bool) (hubGame
 	return gs, nil
 }
 
-// navData builds the cross-artifact nav strip links for one date — today
-// uses the canonical undated routes, past days the date-addressed ones.
-func navData(date string) map[string]string {
+// navData builds the masthead nav for one date — today uses the canonical
+// undated routes, past days the date-addressed ones. section names the
+// artifact the current page belongs to ("" for the hub and login), and
+// authed picks the log in / log out link.
+func navData(date, section string, authed bool) map[string]any {
 	link := func(root string) string {
 		if date == todayUTC() {
 			return root
 		}
 		return root + "/" + date
 	}
-	hub := "/"
-	if date != todayUTC() {
-		hub = "/" + date
-	}
-	return map[string]string{
-		"Hub":    hub,
-		"Photo":  link("/photo"),
-		"Art":    link("/art"),
-		"Sudoku": link("/sudoku"),
-		"Wordle": link("/wordle"),
+	return map[string]any{
+		"Photo":   link("/photo"),
+		"Art":     link("/art"),
+		"Sudoku":  link("/sudoku"),
+		"Wordle":  link("/wordle"),
+		"Section": section,
+		"Authed":  authed,
 	}
 }

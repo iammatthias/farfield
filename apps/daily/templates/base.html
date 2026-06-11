@@ -10,17 +10,14 @@
     /* photo — a single-plate viewer, one image at a time */
     .container { max-width: 60rem; }
 
-    /* artifact-nav — the cross-artifact strip every page carries */
-    .artifact-nav {
-      display: flex; flex-wrap: wrap; gap: 0.35rem 1rem;
-      padding: 0.5rem 0; margin-bottom: 1.25rem;
-      border-bottom: 1px solid var(--hairline);
-      font: 500 0.68rem/1 var(--font-mono);
+    /* masthead nav — mono small caps; the current section reads full ink */
+    .bar nav {
+      font: 500 0.7rem/1.6 var(--font-mono);
       text-transform: uppercase; letter-spacing: 0.08em;
+      align-items: baseline;
     }
-    .artifact-nav a { text-decoration: none; opacity: 0.55; }
-    .artifact-nav a:first-child { opacity: 1; }
-    .artifact-nav a:hover { opacity: 1; color: var(--accent); }
+    .bar nav a { text-decoration: none; opacity: 0.55; }
+    .bar nav a.on, .bar nav a:hover { opacity: 1; }
 
     figure.plate { border: 1px solid var(--ink); background: var(--wash); }
     /* aspect-ratio reserves the plate's space before the image loads (no CLS);
@@ -41,7 +38,14 @@
       text-transform: uppercase; letter-spacing: 0.07em;
     }
 
-    .source-eyebrow { margin-bottom: 0.85rem; }
+    /* the page meta line — eyebrow text left, page actions right */
+    .source-eyebrow {
+      display: flex; justify-content: space-between; align-items: baseline;
+      gap: 0.35rem 1.5rem; flex-wrap: wrap; margin-bottom: 0.85rem;
+    }
+    .source-eyebrow .actions { display: flex; gap: 1rem; }
+    .source-eyebrow .actions a { text-decoration: none; }
+    .source-eyebrow .actions a:hover { color: var(--accent); }
 
     .cal-body { margin-top: 1.5rem; }
     .cal-body h2 { margin-bottom: 0.5rem; }
@@ -122,14 +126,17 @@
 </body>
 </html>{{end}}
 
-{{define "artifactnav"}}{{with .Nav}}
-  <nav class="artifact-nav" aria-label="daily artifacts">
-    <a href="{{.Hub}}">Daily</a>
-    <a href="{{.Photo}}">Photo</a>
-    <a href="{{.Art}}">Art</a>
-    <a href="{{.Sudoku}}">Sudoku</a>
-    <a href="{{.Wordle}}">Wordle</a>
-  </nav>
+{{define "masthead"}}{{with .Nav}}
+  <header class="bar">
+    <h1><a href="/">farfield · daily</a></h1>
+    <nav aria-label="daily artifacts">
+      <a href="{{.Photo}}"{{if eq .Section "photo"}} class="on" aria-current="page"{{end}}>Photo</a>
+      <a href="{{.Art}}"{{if eq .Section "art"}} class="on" aria-current="page"{{end}}>Art</a>
+      <a href="{{.Sudoku}}"{{if eq .Section "sudoku"}} class="on" aria-current="page"{{end}}>Sudoku</a>
+      <a href="{{.Wordle}}"{{if eq .Section "wordle"}} class="on" aria-current="page"{{end}}>Wordle</a>
+      {{if .Authed}}<a href="/logout">Log out</a>{{else}}<a href="/login">Log in</a>{{end}}
+    </nav>
+  </header>
 {{end}}{{end}}
 
 {{define "foot"}}

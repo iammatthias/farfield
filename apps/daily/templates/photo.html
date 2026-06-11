@@ -1,16 +1,11 @@
 {{define "title"}}{{with .Photo}}{{.Title}} · {{end}}farfield · daily{{end}}
 {{define "content"}}
-  <header class="bar">
-    <h1><a href="/photo">farfield · daily</a></h1>
-    <nav>
-      <a href="{{.ArchiveURL}}">Archive</a>
-      <a href="{{.JSONURL}}">JSON</a>
-    </nav>
-  </header>
+  {{template "masthead" .}}
 
-  {{template "artifactnav" .}}
-
-  <p class="label source-eyebrow">NASA · Astronomy Picture of the Day</p>
+  <div class="label source-eyebrow">
+    <span>NASA · Astronomy Picture of the Day</span>
+    <nav class="actions"><a href="{{.ArchiveURL}}">Archive</a></nav>
+  </div>
 
   {{with .Photo}}
     <figure class="plate">
@@ -60,7 +55,7 @@
   <nav class="stepper">
     {{if .PrevURL}}<a href="{{.PrevURL}}">← Previous</a>
     {{else}}<span class="muted">← Previous</span>{{end}}
-    <a href="{{.ArchiveURL}}">Archive</a>
+    <span class="muted">{{.Date}}</span>
     {{if .NextURL}}<a href="{{.NextURL}}">Next →</a>
     {{else}}<span class="muted">Next →</span>{{end}}
   </nav>

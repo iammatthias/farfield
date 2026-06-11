@@ -34,8 +34,13 @@ func TestHubToday(t *testing.T) {
 	if !strings.Contains(body, "/art/"+todayUTC()+".svg") {
 		t.Error("hub art card should embed the day's SVG plate")
 	}
-	if cc := rec.Header().Get("Cache-Control"); !strings.Contains(cc, "max-age=") {
-		t.Errorf("anonymous hub cache-control = %q, want a short public max-age", cc)
+	// Every HTML page embeds session state (nav login/logout, solve status),
+	// so even the anonymous hub must never be shared-cacheable.
+	if cc := rec.Header().Get("Cache-Control"); cc != "private, no-cache" {
+		t.Errorf("hub cache-control = %q, want private, no-cache", cc)
+	}
+	if rec.Header().Get("ETag") != "" {
+		t.Error("HTML pages must not carry an ETag")
 	}
 }
 

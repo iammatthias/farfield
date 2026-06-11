@@ -76,17 +76,12 @@
 {{end}}
 
 {{define "content"}}
-  <header class="bar">
-    <h1><a href="/wordle">farfield · daily</a></h1>
-    <nav>
-      <a href="{{.JSONURL}}">JSON</a>
-      {{if .Authed}}<a href="/logout">Log out</a>{{else}}<a href="/login">Log in</a>{{end}}
-    </nav>
-  </header>
+  {{template "masthead" .}}
 
-  {{template "artifactnav" .}}
-
-  <p class="label source-eyebrow">WORDLE · ONE WORD PER DAY · {{len .Rows}} GUESSES</p>
+  <div class="label source-eyebrow">
+    <span>WORDLE · ONE WORD PER DAY · {{len .Rows}} GUESSES</span>
+    <nav class="actions"><a href="{{.JSONURL}}">JSON</a></nav>
+  </div>
 
   <section class="wordle-wrap">
     <div class="wordle-grid" id="wordle-grid" data-date="{{.Date}}"

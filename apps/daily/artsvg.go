@@ -105,17 +105,30 @@ type structCell struct {
 // renderStructureSVG draws the w-slice: every cell the curve has visited as a
 // small filled isometric block in its biome's inks, today's cell stroked in
 // the accent. The 4,096 future cells are ghosted as one faint base lattice
-// (34 lines) rather than 4k individual outlines.
+// (34 lines) rather than 4k individual outlines. Three anchors keep the
+// floating clusters legible: the full 16³ bounding box in hairline (front
+// edges slightly stronger), a faint footprint square on the floor under every
+// occupied (x,y) column, and a dotted drop-line from each column's lowest
+// cell to its footprint.
 func renderStructureSVG(wSlice int, todayN uint64) []byte {
 	// Collect occupied cells, then sort back-to-front, bottom-to-top —
-	// painter's order for this projection, and a fixed byte order.
+	// painter's order for this projection, and a fixed byte order. The
+	// collection order (x, then y, then z ascending) means the first cell
+	// seen per (x,y) column is its lowest — the drop-line anchor.
+	type footprint struct{ x, y, zmin int }
 	var cells []structCell
+	var feet []footprint
 	for x := 0; x < artSide; x++ {
 		for y := 0; y < artSide; y++ {
+			colSeen := false
 			for z := 0; z < artSide; z++ {
 				st := statusAt(x, y, z, wSlice, todayN)
 				if st == cellFuture {
 					continue
+				}
+				if !colSeen {
+					feet = append(feet, footprint{x: x, y: y, zmin: z})
+					colSeen = true
 				}
 				cells = append(cells, structCell{
 					x: x, y: y, z: z,
@@ -136,6 +149,10 @@ func renderStructureSVG(wSlice int, todayN uint64) []byte {
 		return a.x < b.x
 	})
 
+	// Lattice corner (i,j) at height k, projected — cells span k ∈ [z, z+1].
+	vx := func(i, j int) int { return structOX + (i-j)*structDX }
+	vy := func(i, j, k int) int { return structOY + (i+j)*structDY + structDY - k*structDZ }
+
 	var buf bytes.Buffer
 	fmt.Fprintf(&buf, `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 400 290" role="img" aria-label="Hyperstructure w-slice %d">`+"\n", wSlice)
 
@@ -146,18 +163,55 @@ func renderStructureSVG(wSlice int, todayN uint64) []byte {
 		todayN, len(cells), artSide*artSide*artSide)
 	buf.WriteString("</g>\n")
 
+	// Bounding box — all 12 edges of the 16³ volume in hairline, so the
+	// slice reads as a volume. The three edges meeting at the front corner
+	// are restated stronger after the cells, below.
+	edge := func(x1, y1, x2, y2 int) {
+		fmt.Fprintf(&buf, `<line x1="%d" y1="%d" x2="%d" y2="%d"/>`+"\n", x1, y1, x2, y2)
+	}
+	const S = artSide
+	buf.WriteString(`<g stroke="#0a0a0a" stroke-opacity="0.15" stroke-width="1">` + "\n")
+	for _, k := range [2]int{0, S} { // floor and ceiling rims
+		edge(vx(0, 0), vy(0, 0, k), vx(S, 0), vy(S, 0, k))
+		edge(vx(S, 0), vy(S, 0, k), vx(S, S), vy(S, S, k))
+		edge(vx(S, S), vy(S, S, k), vx(0, S), vy(0, S, k))
+		edge(vx(0, S), vy(0, S, k), vx(0, 0), vy(0, 0, k))
+	}
+	for _, c := range [4][2]int{{0, 0}, {S, 0}, {S, S}, {0, S}} { // verticals
+		edge(vx(c[0], c[1]), vy(c[0], c[1], 0), vx(c[0], c[1]), vy(c[0], c[1], S))
+	}
+	buf.WriteString("</g>\n")
+
 	// Ghost lattice — the base plane the structure accretes onto.
 	buf.WriteString(`<g stroke="#0a0a0a" stroke-opacity="0.12" stroke-width="0.5">` + "\n")
-	corner := func(i, j int) (int, int) {
-		return structOX + (i-j)*structDX, structOY + (i+j)*structDY + structDY
-	}
 	for i := 0; i <= artSide; i++ {
-		x1, y1 := corner(i, 0)
-		x2, y2 := corner(i, artSide)
-		fmt.Fprintf(&buf, `<line x1="%d" y1="%d" x2="%d" y2="%d"/>`+"\n", x1, y1, x2, y2)
-		x1, y1 = corner(0, i)
-		x2, y2 = corner(artSide, i)
-		fmt.Fprintf(&buf, `<line x1="%d" y1="%d" x2="%d" y2="%d"/>`+"\n", x1, y1, x2, y2)
+		edge(vx(i, 0), vy(i, 0, 0), vx(i, artSide), vy(i, artSide, 0))
+		edge(vx(0, i), vy(0, i, 0), vx(artSide, i), vy(artSide, i, 0))
+	}
+	buf.WriteString("</g>\n")
+
+	// Footprints — a faint square on the floor under every occupied column,
+	// anchoring each cluster to its (x,y) position.
+	buf.WriteString(`<g fill="#0a0a0a" fill-opacity="0.1">` + "\n")
+	for _, f := range feet {
+		fmt.Fprintf(&buf, `<polygon points="%d,%d %d,%d %d,%d %d,%d"/>`+"\n",
+			vx(f.x, f.y), vy(f.x, f.y, 0),
+			vx(f.x+1, f.y), vy(f.x+1, f.y, 0),
+			vx(f.x+1, f.y+1), vy(f.x+1, f.y+1, 0),
+			vx(f.x, f.y+1), vy(f.x, f.y+1, 0))
+	}
+	buf.WriteString("</g>\n")
+
+	// Drop-lines — dotted plumb lines from each column's lowest cell down to
+	// its footprint, for columns that float above the floor.
+	buf.WriteString(`<g stroke="#0a0a0a" stroke-opacity="0.35" stroke-width="1" stroke-dasharray="1 3">` + "\n")
+	for _, f := range feet {
+		if f.zmin == 0 {
+			continue // resting on the floor — nothing to plumb
+		}
+		cx := structOX + (f.x-f.y)*structDX
+		floorY := structOY + (f.x+f.y)*structDY + structDZ // footprint center
+		edge(cx, floorY-f.zmin*structDZ, cx, floorY)
 	}
 	buf.WriteString("</g>\n")
 
@@ -181,6 +235,15 @@ func renderStructureSVG(wSlice int, todayN uint64) []byte {
 		fmt.Fprintf(&buf, `<polygon points="%d,%d %d,%d %d,%d %d,%d" fill="%s"%s/>`+"\n",
 			cx+structDX, cy, cx, cy+structDY, cx, cy+structDY+structDZ, cx+structDX, cy+structDZ, p[1], stroke)
 	}
+
+	// Front edges — the three meeting at the near floor corner, restated
+	// over the cells slightly stronger so the volume's front reads first.
+	buf.WriteString(`<g stroke="#0a0a0a" stroke-opacity="0.4" stroke-width="1">` + "\n")
+	edge(vx(S, 0), vy(S, 0, 0), vx(S, S), vy(S, S, 0))
+	edge(vx(0, S), vy(0, S, 0), vx(S, S), vy(S, S, 0))
+	edge(vx(S, S), vy(S, S, 0), vx(S, S), vy(S, S, S))
+	buf.WriteString("</g>\n")
+
 	buf.WriteString("</svg>\n")
 	return buf.Bytes()
 }

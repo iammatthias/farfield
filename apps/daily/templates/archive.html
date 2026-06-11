@@ -1,16 +1,13 @@
 {{define "title"}}Archive · farfield · daily{{end}}
 {{define "content"}}
-  <header class="bar">
-    <h1><a href="/photo">farfield · daily</a></h1>
-    <nav>
+  {{template "masthead" .}}
+
+  <div class="label source-eyebrow">
+    <span>PHOTO · ARCHIVE · PAGE {{.Page}} / {{.Pages}} · {{.Total}} DAYS</span>
+    <nav class="actions">
       <a href="/photo">Today</a>
       <a href="{{.JSONURL}}">JSON</a>
     </nav>
-  </header>
-
-  <div class="section-head">
-    <h2>NASA · Astronomy Picture of the Day</h2>
-    <span class="label">Page {{.Page}} / {{.Pages}} · {{.Total}} days</span>
   </div>
 
   {{if .Photos}}

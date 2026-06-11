@@ -82,9 +82,10 @@ func (s *Server) handleArtDay(w http.ResponseWriter, r *http.Request) {
 	s.renderArtPage(w, r, date)
 }
 
-// renderArtPage renders the plate page for one date. Mirroring the photo
-// pages: a past date's page can never change, so it caches for a day with the
-// plate CID as ETag; the rolling current day caches for minutes.
+// renderArtPage renders the plate page for one date. The plate itself is
+// immutable, but the page around it embeds session state (the masthead's
+// log in / log out), so the HTML is never shared-cacheable — the long-lived
+// caching lives on the .svg and /api/art routes instead.
 func (s *Server) renderArtPage(w http.ResponseWriter, r *http.Request, date string) {
 	n, ok := artDayIndex(date)
 	if !ok {
@@ -93,16 +94,6 @@ func (s *Server) renderArtPage(w http.ResponseWriter, r *http.Request, date stri
 	}
 	p := artPlotFor(date, n)
 	isToday := date == todayUTC()
-	if !isToday {
-		cacheFor(w, publicMaxAge)
-		w.Header().Set("ETag", `"`+p.CID+`"`)
-		if web.ETagMatch(r, p.CID) {
-			w.WriteHeader(http.StatusNotModified)
-			return
-		}
-	} else {
-		cacheFor(w, todayMaxAge)
-	}
 	prevURL, nextURL := "", ""
 	if date > artifactEpoch {
 		prevURL = "/art/" + addDays(date, -1)
@@ -114,6 +105,7 @@ func (s *Server) renderArtPage(w http.ResponseWriter, r *http.Request, date stri
 	if !isToday {
 		svgURL, jsonURL = "/art/"+date+".svg", "/api/art/"+date
 	}
+	noCacheHTML(w)
 	s.rd.Render(w, "art.html", map[string]any{
 		"Date":         p.Date,
 		"N":            p.N,
@@ -128,13 +120,14 @@ func (s *Server) renderArtPage(w http.ResponseWriter, r *http.Request, date stri
 		"PrevURL":      prevURL,
 		"NextURL":      nextURL,
 		"StructureURL": fmt.Sprintf("/art/structure?w=%d", p.Coord[3]),
-		"Nav":          navData(date),
+		"Nav":          navData(date, "art", s.authed(r)),
 	})
 }
 
 // handleArtStructure renders one w-slice of the hyperstructure cube with a
-// no-JS scrubber (16 plain links). Default slice: today's w. The view rolls
-// forward as cells accrete, so it caches for minutes.
+// no-JS fill-map scrubber: 16 bars, one per slice, height proportional to
+// the cells the curve has accreted there; each bar links to its slice.
+// Default slice: today's w.
 func (s *Server) handleArtStructure(w http.ResponseWriter, r *http.Request) {
 	today := todayUTC()
 	n, ok := artDayIndex(today)
@@ -152,25 +145,52 @@ func (s *Server) handleArtStructure(w http.ResponseWriter, r *http.Request) {
 		}
 		ws = v
 	}
+
+	// Occupied cells per w-slice — walk the curve once, day 0 through today.
+	counts := make([]int, artSide)
+	maxCount := 0
+	for i := uint64(0); i <= n; i++ {
+		_, _, _, cw := hilbert4d(i, artOrder)
+		counts[cw]++
+		if counts[cw] > maxCount {
+			maxCount = counts[cw]
+		}
+	}
+
+	// fillBarMax is the tallest bar of the fill-map, in CSS pixels; the rest
+	// scale proportionally, with a 2px floor so a non-empty slice stays visible.
+	const fillBarMax = 48
 	type slice struct {
 		W       int
 		URL     string
 		Current bool
+		Count   int
+		BarPx   int
 	}
 	slices := make([]slice, artSide)
 	for i := range slices {
-		slices[i] = slice{W: i, URL: fmt.Sprintf("/art/structure?w=%d", i), Current: i == ws}
+		px := counts[i] * fillBarMax / maxCount
+		if counts[i] > 0 && px < 2 {
+			px = 2
+		}
+		slices[i] = slice{
+			W: i, URL: fmt.Sprintf("/art/structure?w=%d", i),
+			Current: i == ws, Count: counts[i], BarPx: px,
+		}
 	}
-	cacheFor(w, todayMaxAge)
+	noCacheHTML(w)
 	s.rd.Render(w, "art_structure.html", map[string]any{
-		"W":      ws,
-		"N":      n,
-		"Date":   today,
-		"Coord":  [4]int{x, y, z, tw},
-		"TodayW": tw,
-		"OnW":    tw == ws,
-		"SVG":    template.HTML(renderStructureSVG(ws, n)),
-		"Slices": slices,
+		"W":          ws,
+		"N":          n,
+		"Date":       today,
+		"Coord":      [4]int{x, y, z, tw},
+		"TodayW":     tw,
+		"OnW":        tw == ws,
+		"Count":      counts[ws],
+		"SliceCells": artSide * artSide * artSide,
+		"SVG":        template.HTML(renderStructureSVG(ws, n)),
+		"Slices":     slices,
+		"Nav":        navData(today, "art", s.authed(r)),
 	})
 }
 

@@ -220,7 +220,11 @@ func (s *Server) requireSessionJSON(next http.HandlerFunc) http.HandlerFunc {
 
 // handleLoginForm renders the login page.
 func (s *Server) handleLoginForm(w http.ResponseWriter, r *http.Request) {
-	s.rd.Render(w, "login.html", map[string]any{"Error": r.URL.Query().Get("error")})
+	noCacheHTML(w)
+	s.rd.Render(w, "login.html", map[string]any{
+		"Error": r.URL.Query().Get("error"),
+		"Nav":   navData(todayUTC(), "", s.authed(r)),
+	})
 }
 
 // ── archive paging ─────────────────────────────────────────────────────────
@@ -309,10 +313,9 @@ func (s *Server) handleDay(w http.ResponseWriter, r *http.Request) {
 }
 
 // renderPhoto renders the photo page for one date. isToday suppresses the
-// "next" step, since nothing is newer than the current day. A past day's page
-// never changes, so it caches for a day with the photo CID as its ETag; the
-// rolling current day caches for minutes. Headers go on before the render
-// writes the body.
+// "next" step, since nothing is newer than the current day. The HTML embeds
+// session state (the masthead's log in / log out), so it is never shared-
+// cacheable — the long-lived caching lives on the /api/photo JSON instead.
 func (s *Server) renderPhoto(w http.ResponseWriter, r *http.Request, photo *Photo, date string, isToday bool) {
 	prev, err := neighborDate(s.db, sourceNASA, date, true)
 	if err != nil {
@@ -326,22 +329,11 @@ func (s *Server) renderPhoto(w http.ResponseWriter, r *http.Request, photo *Phot
 			return
 		}
 	}
-	if !isToday && date < todayUTC() {
-		cacheFor(w, publicMaxAge)
-		if photo != nil && photo.CID != "" {
-			w.Header().Set("ETag", `"`+photo.CID+`"`)
-			if web.ETagMatch(r, photo.CID) {
-				w.WriteHeader(http.StatusNotModified)
-				return
-			}
-		}
-	} else {
-		cacheFor(w, todayMaxAge)
-	}
 	jsonURL := "/api/photo"
 	if !isToday {
 		jsonURL = "/api/photo/" + date
 	}
+	noCacheHTML(w)
 	s.rd.Render(w, "photo.html", map[string]any{
 		"Photo":      photo,
 		"Date":       date,
@@ -349,12 +341,12 @@ func (s *Server) renderPhoto(w http.ResponseWriter, r *http.Request, photo *Phot
 		"JSONURL":    jsonURL,
 		"PrevURL":    dayURL(prev),
 		"NextURL":    dayURL(next),
-		"Nav":        navData(date),
+		"Nav":        navData(date, "photo", s.authed(r)),
 	})
 }
 
-// handleArchive renders a paginated grid of previous days. Every page rolls
-// forward as new days post, so the archive caches for minutes, not a day.
+// handleArchive renders a paginated grid of previous days. Like every HTML
+// page it embeds session state, so it is never shared-cacheable.
 func (s *Server) handleArchive(w http.ResponseWriter, r *http.Request) {
 	res, err := s.archive(r.Context(), pageParam(r))
 	if err != nil {
@@ -368,7 +360,7 @@ func (s *Server) handleArchive(w http.ResponseWriter, r *http.Request) {
 	if res.HasNext {
 		nextURL = archiveURL(res.Page + 1)
 	}
-	cacheFor(w, todayMaxAge)
+	noCacheHTML(w)
 	s.rd.Render(w, "archive.html", map[string]any{
 		"Photos":  res.Photos,
 		"Page":    res.Page,
@@ -377,6 +369,7 @@ func (s *Server) handleArchive(w http.ResponseWriter, r *http.Request) {
 		"JSONURL": "/api/photos",
 		"PrevURL": prevURL,
 		"NextURL": nextURL,
+		"Nav":     navData(todayUTC(), "photo", s.authed(r)),
 	})
 }
 
@@ -492,9 +485,19 @@ func redirect(target string) http.HandlerFunc {
 	}
 }
 
-// cacheFor marks a response publicly cacheable for maxAge seconds.
+// cacheFor marks a response publicly cacheable for maxAge seconds. It belongs
+// on session-independent payloads only — the SVG plates, the JSON API, the
+// static assets — never on an HTML page.
 func cacheFor(w http.ResponseWriter, maxAge int) {
 	w.Header().Set("Cache-Control", fmt.Sprintf("public, max-age=%d", maxAge))
+}
+
+// noCacheHTML marks an HTML page as revalidate-always and private. Every page
+// embeds session state — the masthead's log in / log out, solve status,
+// streaks — so a shared cache must never hold one, and a browser must
+// revalidate rather than reuse a stale copy.
+func noCacheHTML(w http.ResponseWriter) {
+	w.Header().Set("Cache-Control", "private, no-cache")
 }
 
 // templateFuncs are the template helpers. mediaKind lets the photo template

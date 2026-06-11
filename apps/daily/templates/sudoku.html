@@ -58,17 +58,12 @@
 {{end}}
 
 {{define "content"}}
-  <header class="bar">
-    <h1><a href="/sudoku">farfield · daily</a></h1>
-    <nav>
-      <a href="{{.JSONURL}}">JSON</a>
-      {{if .Authed}}<a href="/logout">Log out</a>{{else}}<a href="/login">Log in</a>{{end}}
-    </nav>
-  </header>
+  {{template "masthead" .}}
 
-  {{template "artifactnav" .}}
-
-  <p class="label source-eyebrow">SUDOKU · ONE PUZZLE PER DAY · DIFFICULTY {{.Difficulty}}</p>
+  <div class="label source-eyebrow">
+    <span>SUDOKU · ONE PUZZLE PER DAY · DIFFICULTY {{.Difficulty}}</span>
+    <nav class="actions"><a href="{{.JSONURL}}">JSON</a></nav>
+  </div>
 
   <section class="sudoku-wrap">
     <div class="sudoku-grid" id="sudoku-grid" data-date="{{.Date}}"

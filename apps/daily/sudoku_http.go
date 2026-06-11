@@ -134,7 +134,7 @@ func (s *Server) renderSudokuPage(w http.ResponseWriter, r *http.Request, date s
 	}
 
 	// The grid carries restored per-session state — never share a cached copy.
-	w.Header().Set("Cache-Control", "private, no-cache")
+	noCacheHTML(w)
 	s.rd.Render(w, "sudoku.html", map[string]any{
 		"Date":       p.Date,
 		"Clues":      p.Clues,
@@ -153,7 +153,7 @@ func (s *Server) renderSudokuPage(w http.ResponseWriter, r *http.Request, date s
 		"PrevURL":    prevURL,
 		"NextURL":    nextURL,
 		"JSVer":      sudokuJSVer,
-		"Nav":        navData(date),
+		"Nav":        navData(date, "sudoku", authed),
 	})
 }
 

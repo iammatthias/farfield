@@ -53,14 +53,7 @@
 {{end}}
 
 {{define "content"}}
-  <header class="bar">
-    <h1><a href="/">farfield · daily</a></h1>
-    <nav>
-      {{if .Authed}}<a href="/logout">Log out</a>{{else}}<a href="/login">Log in</a>{{end}}
-    </nav>
-  </header>
-
-  {{template "artifactnav" .}}
+  {{template "masthead" .}}
 
   <header class="hub-head">
     <h2>{{.Date}}</h2>
