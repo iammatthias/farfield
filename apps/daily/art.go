@@ -3,7 +3,6 @@ package main
 import (
 	_ "embed"
 	"encoding/json"
-	"fmt"
 	"html/template"
 	"net/http"
 	"strconv"
@@ -41,13 +40,15 @@ func artDayIndex(date string) (uint64, bool) {
 	return uint64(n), true
 }
 
-// artPlot is one fully derived day: cell, biome, rendered plate, identity.
+// artPlot is one fully derived day: cell, biome, heightfield, rendered
+// plate, identity.
 type artPlot struct {
 	Date     string
 	N        uint64
 	Coord    [4]int
 	BiomeIdx int
 	Biome    Biome
+	HF       [][]int
 	SVG      []byte
 	CID      string
 }
@@ -61,7 +62,7 @@ func artPlotFor(date string, n uint64) artPlot {
 	svg := renderPlotSVG(date, b, hf)
 	return artPlot{
 		Date: date, N: n, Coord: [4]int{x, y, z, w},
-		BiomeIdx: bi, Biome: b, SVG: svg, CID: cid.Of(svg),
+		BiomeIdx: bi, Biome: b, HF: hf, SVG: svg, CID: cid.Of(svg),
 	}
 }
 
@@ -102,9 +103,10 @@ func (s *Server) renderArtPage(w http.ResponseWriter, r *http.Request, date stri
 	if !isToday {
 		nextURL = "/art/" + addDays(date, 1)
 	}
-	svgURL, jsonURL := "/art.svg", "/api/art"
+	svgURL, jsonURL, terrainURL := "/art.svg", "/api/art", "/api/art/terrain"
 	if !isToday {
 		svgURL, jsonURL = "/art/"+date+".svg", "/api/art/"+date
+		terrainURL = "/api/art/terrain/" + date
 	}
 	maxAge := todayMaxAge
 	if !isToday {
@@ -112,27 +114,27 @@ func (s *Server) renderArtPage(w http.ResponseWriter, r *http.Request, date stri
 	}
 	cacheFor(w, maxAge)
 	s.rd.Render(w, "art.html", map[string]any{
-		"Date":         p.Date,
-		"N":            p.N,
-		"Coord":        p.Coord,
-		"Biome":        p.Biome.Name,
-		"BiomeIdx":     p.BiomeIdx,
-		"CID":          p.CID,
-		"Epoch":        artifactEpoch,
-		"SVG":          template.HTML(p.SVG),
-		"SVGURL":       svgURL,
-		"JSONURL":      jsonURL,
-		"PrevURL":      prevURL,
-		"NextURL":      nextURL,
-		"StructureURL": fmt.Sprintf("/art/structure?w=%d", p.Coord[3]),
-		"Nav":          navData(date, "art"),
+		"Date":       p.Date,
+		"N":          p.N,
+		"Biome":      p.Biome.Name,
+		"SVG":        template.HTML(p.SVG),
+		"SVGURL":     svgURL,
+		"JSONURL":    jsonURL,
+		"TerrainURL": terrainURL,
+		"PrevURL":    prevURL,
+		"NextURL":    nextURL,
+		"ArtJSVer":   artJSVer,
+		"TerrainVer": terrainJSVer,
+		"ThreeVer":   threeJSVer,
+		"OrbitVer":   orbitJSVer,
+		"Nav":        navData(date, "art"),
 	})
 }
 
-// handleArtStructure renders one w-slice of the hyperstructure cube with a
-// no-JS fill-map scrubber: 16 bars, one per slice, height proportional to
-// the cells the curve has accreted there; each bar links to its slice.
-// Default slice: today's w.
+// handleArtStructure renders the structure page: the whole accreted
+// hyperstructure as one scene, no apparatus. The server renders today's
+// slice as the SVG fallback; structure.js swaps in a three.js scene of
+// every occupied cell across all slices.
 func (s *Server) handleArtStructure(w http.ResponseWriter, r *http.Request) {
 	today := todayUTC()
 	n, ok := artDayIndex(today)
@@ -140,58 +142,15 @@ func (s *Server) handleArtStructure(w http.ResponseWriter, r *http.Request) {
 		http.NotFound(w, r) // unreachable until ~2199
 		return
 	}
-	x, y, z, tw := hilbert4d(n, artOrder)
-	ws, ok := structureSliceW(r, tw)
-	if !ok {
-		http.NotFound(w, r)
-		return
-	}
-
-	// Occupied cells per w-slice — walk the curve once, day 0 through today.
-	counts := make([]int, artSide)
-	maxCount := 0
-	for i := uint64(0); i <= n; i++ {
-		_, _, _, cw := hilbert4d(i, artOrder)
-		counts[cw]++
-		if counts[cw] > maxCount {
-			maxCount = counts[cw]
-		}
-	}
-
-	// fillBarMax is the tallest bar of the fill-map, in CSS pixels; the rest
-	// scale proportionally, with a 2px floor so a non-empty slice stays visible.
-	const fillBarMax = 48
-	type slice struct {
-		W       int
-		URL     string
-		Current bool
-		Count   int
-		BarPx   int
-	}
-	slices := make([]slice, artSide)
-	for i := range slices {
-		px := counts[i] * fillBarMax / maxCount
-		if counts[i] > 0 && px < 2 {
-			px = 2
-		}
-		slices[i] = slice{
-			W: i, URL: fmt.Sprintf("/art/structure?w=%d", i),
-			Current: i == ws, Count: counts[i], BarPx: px,
-		}
-	}
+	_, _, _, tw := hilbert4d(n, artOrder)
 	cacheFor(w, todayMaxAge)
 	s.rd.Render(w, "art_structure.html", map[string]any{
-		"W":          ws,
 		"N":          n,
 		"Date":       today,
-		"Coord":      [4]int{x, y, z, tw},
-		"TodayW":     tw,
-		"OnW":        tw == ws,
-		"Count":      counts[ws],
-		"SliceCells": artSide * artSide * artSide,
-		"SVG":        template.HTML(renderStructureSVG(ws, n)),
-		"Slices":     slices,
+		"Epoch":      artifactEpoch,
+		"SVG":        template.HTML(renderStructureSVG(tw, n)),
 		"JSVer":      structureJSVer,
+		"TerrainVer": terrainJSVer,
 		"ThreeVer":   threeJSVer,
 		"OrbitVer":   orbitJSVer,
 		"Nav":        navData(today, "art"),
@@ -210,6 +169,12 @@ func (s *Server) handleArtStructure(w http.ResponseWriter, r *http.Request) {
 //go:embed static/structure.js
 var structureJS []byte
 
+//go:embed static/art.js
+var artJS []byte
+
+//go:embed static/terrain.js
+var terrainJS []byte
+
 //go:embed static/vendor/three.module.min.js
 var threeJS []byte
 
@@ -218,6 +183,8 @@ var orbitControlsJS []byte
 
 var (
 	structureJSVer = cid.Of(structureJS)[:16]
+	artJSVer       = cid.Of(artJS)[:16]
+	terrainJSVer   = cid.Of(terrainJS)[:16]
 	threeJSVer     = cid.Of(threeJS)[:16]
 	orbitJSVer     = cid.Of(orbitControlsJS)[:16]
 )
@@ -239,26 +206,192 @@ func immutableJSHandler(body []byte, etag string) http.HandlerFunc {
 	}
 }
 
-// ── structure JSON API ─────────────────────────────────────────────────────
+// ── shared terrain language ────────────────────────────────────────────────
+//
+// Both art pages draw the same geometry — a quantized heightfield as
+// terraced terrain — at two sample densities. The plate page gets the full
+// 24×24 field via /api/art/terrain; each structure cell carries a miniature
+// of its own day's field, downsampled at the same cell centers the SVG
+// miniatures sample.
 
-// structureSliceW resolves the ?w= query — defaulting to today's slice — and
-// reports ok=false when it is out of range.
-func structureSliceW(r *http.Request, todayW int) (int, bool) {
-	q := r.URL.Query().Get("w")
-	if q == "" {
-		return todayW, true
+// structTileGrid is the per-axis sample count of the miniature tile each
+// structure cell carries; today's cell ships denser, near plate resolution.
+const (
+	structTileGrid      = 6
+	structTodayTileGrid = 12
+)
+
+// tileLevels downsamples a plate heightfield onto a g×g grid, row-major,
+// sampling at cell centers — the same centers renderStructureSVG uses for
+// its glyph miniatures, so the viewer's tiles and the SVG's tops agree.
+func tileLevels(hf [][]int, g int) []int {
+	out := make([]int, 0, g*g)
+	for j := 0; j < g; j++ {
+		row := (2*j + 1) * plotSize / (2 * g)
+		for i := 0; i < g; i++ {
+			col := (2*i + 1) * plotSize / (2 * g)
+			out = append(out, hf[row][col])
+		}
 	}
-	v, err := strconv.Atoi(q)
-	if err != nil || v < 0 || v >= artSide {
-		return 0, false
-	}
-	return v, true
+	return out
 }
 
-// handleAPIArtStructure emits one w-slice of the hyperstructure as JSON — the
-// occupied cells of that slice in day order, plus the biome palette table —
-// for the three.js viewer. Like /api/art it rolls forward at midnight UTC, so
-// it is publicly cacheable for minutes, with its content CID as ETag.
+// handleAPIArtTerrainToday emits today's heightfield for the plate viewer.
+func (s *Server) handleAPIArtTerrainToday(w http.ResponseWriter, r *http.Request) {
+	s.writeArtTerrainJSON(w, r, todayUTC(), todayMaxAge)
+}
+
+// handleAPIArtTerrainDay emits one date's heightfield.
+func (s *Server) handleAPIArtTerrainDay(w http.ResponseWriter, r *http.Request) {
+	date := r.PathValue("date")
+	maxAge := publicMaxAge
+	if date == todayUTC() {
+		maxAge = todayMaxAge
+	}
+	s.writeArtTerrainJSON(w, r, date, maxAge)
+}
+
+// writeArtTerrainJSON emits one day's quantized heightfield — the plate's
+// server-canonical terrain, so the client never re-derives noise — plus the
+// biome inks to draw it in. Cached like /api/art, with the plate CID as
+// ETag: the levels and the SVG derive from the same stream, so the CID
+// versions both.
+func (s *Server) writeArtTerrainJSON(w http.ResponseWriter, r *http.Request, date string, maxAge int) {
+	n, ok := artDayIndex(date)
+	if !ok {
+		web.WriteError(w, http.StatusNotFound, "no art for that date")
+		return
+	}
+	p := artPlotFor(date, n)
+	levels := make([]int, 0, plotSize*plotSize)
+	for _, row := range p.HF {
+		levels = append(levels, row...)
+	}
+	cacheFor(w, maxAge)
+	w.Header().Set("ETag", `"`+p.CID+`"`)
+	if web.ETagMatch(r, p.CID) {
+		w.WriteHeader(http.StatusNotModified)
+		return
+	}
+	web.WriteJSON(w, http.StatusOK, map[string]any{
+		"date":  p.Date,
+		"n":     p.N,
+		"side":  plotSize,
+		"bands": len(p.Biome.Ramp),
+		"biome": map[string]any{
+			"index":  p.BiomeIdx,
+			"name":   p.Biome.Name,
+			"colors": p.Biome.Palette[:],
+		},
+		"levels": levels,
+		"cid":    p.CID,
+	})
+}
+
+// ── structure JSON API ─────────────────────────────────────────────────────
+
+// structAPICell is one occupied cell as the structure API emits it.
+type structAPICell struct {
+	I     uint64 `json:"i"`
+	X     int    `json:"x"`
+	Y     int    `json:"y"`
+	Z     int    `json:"z"`
+	Biome int    `json:"biome"`
+	Age   int    `json:"age"` // age band, 0 = newest ink … bands-1 = oldest
+	Today bool   `json:"today"`
+	HF    []int  `json:"hf"` // tile levels, row-major, side = √len; empty = buried
+}
+
+// structAPISlice is one non-empty w-slice of the full-structure response,
+// its cells in day order.
+type structAPISlice struct {
+	W     int             `json:"w"`
+	Cells []structAPICell `json:"cells"`
+}
+
+// structCellAt derives one cell of the structure response. The heightfield
+// is the cell's own day's, downsampled to a miniature tile (today's at
+// higher density), so the viewer renders real terrain, never re-derived
+// noise.
+func structCellAt(i, n uint64, x, y, z, w int) structAPICell {
+	bi := biomeIndexAt(x, y, z, w)
+	b := biomes[bi]
+	grid := structTileGrid
+	if i == n {
+		grid = structTodayTileGrid
+	}
+	hf := heightfield(newRNG(domainArt, addDays(artifactEpoch, int(i))), b.Terrain, plotSize, len(b.Ramp))
+	return structAPICell{
+		I: i, X: x, Y: y, Z: z,
+		Biome: bi,
+		Age:   ageBand(i, n),
+		Today: i == n,
+		HF:    tileLevels(hf, grid),
+	}
+}
+
+// structureSliceCells walks the curve day 0 through n and returns one
+// w-slice's occupied cells in day order — pre-sorted for the viewer's
+// accretion animation.
+func structureSliceCells(n uint64, ws int) []structAPICell {
+	cells := make([]structAPICell, 0, n/artSide+1)
+	for i := uint64(0); i <= n; i++ {
+		x, y, z, cw := hilbert4d(i, artOrder)
+		if cw != ws {
+			continue
+		}
+		cells = append(cells, structCellAt(i, n, x, y, z, cw))
+	}
+	return cells
+}
+
+// structureSlices walks the curve day 0 through n and returns every
+// non-empty w-slice, each slice's cells in day order. A fully buried cell
+// (all six neighbors within its slice occupied) renders nothing in the
+// viewer, so its heightfield tile is trimmed to empty — exposed cells keep
+// theirs — which keeps the full payload compact.
+func structureSlices(n uint64) []structAPISlice {
+	var occ [artSide][artSide][artSide][artSide]bool // [w][x][y][z]
+	for i := uint64(0); i <= n; i++ {
+		x, y, z, w := hilbert4d(i, artOrder)
+		occ[w][x][y][z] = true
+	}
+	at := func(w, x, y, z int) bool {
+		if x < 0 || y < 0 || z < 0 || x >= artSide || y >= artSide || z >= artSide {
+			return false // off the lattice = exposed
+		}
+		return occ[w][x][y][z]
+	}
+	buried := func(w, x, y, z int) bool {
+		return at(w, x+1, y, z) && at(w, x-1, y, z) &&
+			at(w, x, y+1, z) && at(w, x, y-1, z) &&
+			at(w, x, y, z+1) && at(w, x, y, z-1)
+	}
+	byW := make([][]structAPICell, artSide)
+	for i := uint64(0); i <= n; i++ {
+		x, y, z, w := hilbert4d(i, artOrder)
+		c := structCellAt(i, n, x, y, z, w)
+		if i != n && buried(w, x, y, z) {
+			c.HF = []int{} // invisible — no tile needed
+		}
+		byW[w] = append(byW[w], c)
+	}
+	slices := make([]structAPISlice, 0, artSide)
+	for w, cells := range byW {
+		if len(cells) > 0 {
+			slices = append(slices, structAPISlice{W: w, Cells: cells})
+		}
+	}
+	return slices
+}
+
+// handleAPIArtStructure emits the hyperstructure as JSON for the three.js
+// viewer. Without ?w it returns the full structure — every non-empty
+// w-slice, each slice's occupied cells in day order — plus the biome
+// palette table. With ?w=N it returns that single slice in the original
+// flat shape (back-compat; every cell keeps its tile there). Like /api/art
+// it rolls forward at midnight UTC, so it is publicly cacheable for
+// minutes, with its content CID as ETag.
 func (s *Server) handleAPIArtStructure(w http.ResponseWriter, r *http.Request) {
 	today := todayUTC()
 	n, ok := artDayIndex(today)
@@ -267,36 +400,25 @@ func (s *Server) handleAPIArtStructure(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	tx, ty, tz, tw := hilbert4d(n, artOrder)
-	ws, ok := structureSliceW(r, tw)
-	if !ok {
-		web.WriteError(w, http.StatusNotFound, "no such slice — w must be 0..15")
-		return
-	}
 
-	// Walk the curve once, day 0 through today; keep this slice's cells.
-	// The walk is in day order, so the cells arrive pre-sorted for the
-	// viewer's accretion animation.
-	type apiCell struct {
-		I     uint64 `json:"i"`
-		X     int    `json:"x"`
-		Y     int    `json:"y"`
-		Z     int    `json:"z"`
-		Biome int    `json:"biome"`
-		Age   int    `json:"age"` // age band, 0 = newest ink … bands-1 = oldest
-		Today bool   `json:"today"`
+	payload := map[string]any{
+		"side":    artSide,
+		"date":    today,
+		"epoch":   artifactEpoch,
+		"bands":   structAgeBands,
+		"hfBands": len(biomes[0].Ramp), // every ramp quantizes to the same level count
+		"today":   map[string]any{"index": n, "coord": []int{tx, ty, tz, tw}},
 	}
-	cells := make([]apiCell, 0, n/artSide+1)
-	for i := uint64(0); i <= n; i++ {
-		x, y, z, cw := hilbert4d(i, artOrder)
-		if cw != ws {
-			continue
+	if q := r.URL.Query().Get("w"); q != "" {
+		ws, err := strconv.Atoi(q)
+		if err != nil || ws < 0 || ws >= artSide {
+			web.WriteError(w, http.StatusNotFound, "no such slice — w must be 0..15")
+			return
 		}
-		cells = append(cells, apiCell{
-			I: i, X: x, Y: y, Z: z,
-			Biome: biomeIndexAt(x, y, z, ws),
-			Age:   ageBand(i, n),
-			Today: i == n,
-		})
+		payload["w"] = ws
+		payload["cells"] = structureSliceCells(n, ws)
+	} else {
+		payload["slices"] = structureSlices(n)
 	}
 	type apiBiome struct {
 		Name   string   `json:"name"`
@@ -306,16 +428,9 @@ func (s *Server) handleAPIArtStructure(w http.ResponseWriter, r *http.Request) {
 	for i, b := range biomes {
 		bs[i] = apiBiome{Name: b.Name, Colors: b.Palette[:]}
 	}
-	body, err := json.Marshal(map[string]any{
-		"w":      ws,
-		"side":   artSide,
-		"date":   today,
-		"epoch":  artifactEpoch,
-		"bands":  structAgeBands,
-		"today":  map[string]any{"index": n, "coord": []int{tx, ty, tz, tw}},
-		"cells":  cells,
-		"biomes": bs,
-	})
+	payload["biomes"] = bs
+
+	body, err := json.Marshal(payload)
 	if err != nil {
 		web.WriteError(w, http.StatusInternalServerError, "could not encode structure")
 		return

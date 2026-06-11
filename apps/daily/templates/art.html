@@ -5,22 +5,21 @@
     /* art — one survey plate a day, derived from the date alone */
     .art-plate { border: 1px solid var(--ink); }
     .art-plate svg { width: 100%; height: auto; }
+
+    /* the plate is the SVG until art.js swaps in its live terraced tile;
+       .live pins the SVG's proportions for the three.js viewport */
+    #plate-canvas { position: relative; display: block; }
+    #plate-canvas.live { aspect-ratio: 500 / 310; }
+    #plate-canvas canvas {
+      display: block; width: 100%; height: 100%;
+      touch-action: none; cursor: grab;
+    }
+    #plate-canvas canvas:active { cursor: grabbing; }
     .art-plate figcaption {
-      display: flex; justify-content: space-between; gap: 1rem;
       padding: 0.55rem 0.8rem; border-top: 1px solid var(--ink);
       font: 500 0.7rem/1 var(--font-mono);
       text-transform: uppercase; letter-spacing: 0.07em;
     }
-    .art-meta { margin-top: 1.5rem; border-top: 2px solid var(--ink); }
-    .art-meta > div {
-      display: flex; gap: 1rem; padding: 0.45rem 0;
-      border-bottom: 1px solid rgba(10, 10, 10, 0.15);
-    }
-    .art-meta dt {
-      flex: 0 0 6.5rem; font: 500 0.7rem/1.5 var(--font-mono);
-      text-transform: uppercase; letter-spacing: 0.08em; opacity: 0.5;
-    }
-    .art-meta dd { margin: 0; font-family: var(--font-mono); font-size: 0.8rem; overflow-wrap: anywhere; }
   </style>
 {{end}}
 
@@ -28,29 +27,20 @@
   {{template "masthead" .}}
 
   <div class="label source-eyebrow">
-    <span>ART · 4D HYPERSTRUCTURE · ONE CELL PER DAY</span>
+    <span>ART · ONE CELL PER DAY</span>
     <nav class="actions">
-      <a href="{{.StructureURL}}">Structure</a>
+      <a href="/art/structure">Structure</a>
       <a href="{{.SVGURL}}">SVG</a>
       <a href="{{.JSONURL}}">JSON</a>
     </nav>
   </div>
 
   <figure class="art-plate">
-    {{.SVG}}
-    <figcaption>
-      <span>{{.Date}}</span>
-      <span class="muted">DAY {{.N}} · {{.Biome}}</span>
-    </figcaption>
+    <div id="plate-canvas" data-api="{{.TerrainURL}}">
+      {{.SVG}}
+    </div>
+    <figcaption>{{.Date}} · day {{.N}} · {{.Biome}}</figcaption>
   </figure>
-
-  <dl class="art-meta">
-    <div><dt>Date</dt><dd>{{.Date}}</dd></div>
-    <div><dt>Day index</dt><dd>{{.N}} since {{.Epoch}}</dd></div>
-    <div><dt>Cell</dt><dd><a href="{{.StructureURL}}">[{{index .Coord 0}}, {{index .Coord 1}}, {{index .Coord 2}}, {{index .Coord 3}}]</a> · hilbert order 4</dd></div>
-    <div><dt>Biome</dt><dd>{{printf "%02d" .BiomeIdx}} · {{.Biome}}</dd></div>
-    <div><dt>CID</dt><dd>{{.CID}}</dd></div>
-  </dl>
 
   <nav class="stepper">
     {{if .PrevURL}}<a href="{{.PrevURL}}">← Previous</a>
@@ -64,4 +54,19 @@
     <span>farfield · daily · art</span>
     <span>derived from the date · nothing stored</span>
   </footer>
+
+  {{/* live terraced plate — progressive enhancement; the SVG above is the
+       canonical artifact and the no-JS / no-WebGL fallback. The importmap
+       resolves "three" (used by OrbitControls too) to the vendored module
+       and "terrain" to the geometry language shared with /art/structure. */}}
+  <script type="importmap">
+    {
+      "imports": {
+        "three": "/static/vendor/three.module.min.js?v={{.ThreeVer}}",
+        "three/addons/controls/OrbitControls.js": "/static/vendor/OrbitControls.js?v={{.OrbitVer}}",
+        "terrain": "/static/terrain.js?v={{.TerrainVer}}"
+      }
+    }
+  </script>
+  <script type="module" src="/static/art.js?v={{.ArtJSVer}}"></script>
 {{end}}

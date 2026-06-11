@@ -157,8 +157,10 @@ func (s *Server) routes() http.Handler {
 	mux.HandleFunc("GET /api/photo/{date}", s.handleAPIDay)
 	mux.HandleFunc("GET /api/photos", s.handleAPIPhotos)
 	mux.HandleFunc("GET /api/art", s.handleAPIArtToday)
-	// The literal /structure segment wins over the {date} wildcard.
+	// The literal /structure and /terrain segments win over the {date} wildcard.
 	mux.HandleFunc("GET /api/art/structure", s.handleAPIArtStructure)
+	mux.HandleFunc("GET /api/art/terrain", s.handleAPIArtTerrainToday)
+	mux.HandleFunc("GET /api/art/terrain/{date}", s.handleAPIArtTerrainDay)
 	mux.HandleFunc("GET /api/art/{date}", s.handleAPIArtDay)
 	mux.HandleFunc("GET /api/sudoku", s.handleAPISudokuToday)
 	mux.HandleFunc("GET /api/sudoku/{date}", s.handleAPISudokuDay)
@@ -166,11 +168,14 @@ func (s *Server) routes() http.Handler {
 	mux.HandleFunc("GET /api/wordle/{date}", s.handleAPIWordleDay)
 
 	// Shared theme stylesheet, plus the app-local game grid scripts and the
-	// structure viewer (scene script + vendored three.js, all immutable).
+	// art viewers (scene scripts, the shared terrain module, vendored
+	// three.js — all immutable).
 	mux.HandleFunc("GET /static/styles.css", theme.CSSHandler())
 	mux.HandleFunc("GET /static/sudoku.js", sudokuJSHandler())
 	mux.HandleFunc("GET /static/wordle.js", wordleJSHandler())
 	mux.HandleFunc("GET /static/structure.js", immutableJSHandler(structureJS, structureJSVer))
+	mux.HandleFunc("GET /static/art.js", immutableJSHandler(artJS, artJSVer))
+	mux.HandleFunc("GET /static/terrain.js", immutableJSHandler(terrainJS, terrainJSVer))
 	mux.HandleFunc("GET /static/vendor/three.module.min.js", immutableJSHandler(threeJS, threeJSVer))
 	mux.HandleFunc("GET /static/vendor/OrbitControls.js", immutableJSHandler(orbitControlsJS, orbitJSVer))
 

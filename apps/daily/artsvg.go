@@ -106,19 +106,22 @@ type structCell struct {
 // Age shading — "ink = elapsed days" made literal. Each cell's age (today's
 // index minus the cell's) quantizes into structAgeBands linear bands across
 // the whole elapsed span; every ink the cell uses is modulated by its band,
-// so the 2020 core fades back while the frontier stays crisp. All opacities
-// are fixed strings: no float formatting can leak into the bytes.
+// so the 2020 core reads older than the frontier. The fade is compressed —
+// the oldest band keeps ≥ ~0.55 of full ink — so the core stays clearly
+// inked rather than washing out to the surface; the three.js viewer applies
+// the same compression. All opacities are fixed strings: no float
+// formatting can leak into the bytes.
 const structAgeBands = 5
 
 var (
 	// top-face wash — kept faint so the terrain glyphs carry the texture
-	structWashOp = [structAgeBands]string{"0.3", "0.24", "0.18", "0.13", "0.09"}
+	structWashOp = [structAgeBands]string{"0.3", "0.27", "0.24", "0.21", "0.18"}
 	// side-face base fill, inside the strata patterns
-	structSideOp = [structAgeBands]string{"0.88", "0.72", "0.56", "0.42", "0.3"}
+	structSideOp = [structAgeBands]string{"0.88", "0.78", "0.69", "0.6", "0.52"}
 	// strata hairlines, inside the patterns
-	structLineOp = [structAgeBands]string{"0.9", "0.76", "0.62", "0.5", "0.4"}
+	structLineOp = [structAgeBands]string{"0.9", "0.8", "0.71", "0.62", "0.54"}
 	// terrain glyphs on the top faces
-	structGlyphOp = [structAgeBands]string{"1", "0.82", "0.66", "0.52", "0.4"}
+	structGlyphOp = [structAgeBands]string{"1", "0.88", "0.77", "0.66", "0.56"}
 )
 
 // ageBand quantizes a cell's age into [0, structAgeBands): 0 for today's

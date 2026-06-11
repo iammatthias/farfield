@@ -184,12 +184,13 @@ func TestArtEndpoints(t *testing.T) {
 		t.Errorf("revalidation = %d, want 304", rec.Code)
 	}
 
-	// Structure slices render for any w in range; out of range is 404.
-	if rec := get("/art/structure?w=3", ""); rec.Code != 200 || !strings.Contains(rec.Body.String(), "<svg") {
-		t.Errorf("/art/structure?w=3 = %d", rec.Code)
+	// The structure page renders with its SVG fallback; stray ?w= queries
+	// from old links are ignored, not 404s.
+	if rec := get("/art/structure", ""); rec.Code != 200 || !strings.Contains(rec.Body.String(), "<svg") {
+		t.Errorf("/art/structure = %d", rec.Code)
 	}
-	if rec := get("/art/structure?w=16", ""); rec.Code != 404 {
-		t.Errorf("/art/structure?w=16 = %d, want 404", rec.Code)
+	if rec := get("/art/structure?w=16", ""); rec.Code != 200 {
+		t.Errorf("/art/structure?w=16 = %d, want 200 (query ignored)", rec.Code)
 	}
 
 	// JSON carries coord and cid.
@@ -239,11 +240,12 @@ func TestArtStructureAPI(t *testing.T) {
 		t.Error("structure JSON must carry an ETag")
 	}
 	var body struct {
-		W     int    `json:"w"`
-		Side  int    `json:"side"`
-		Bands int    `json:"bands"`
-		Date  string `json:"date"`
-		Today struct {
+		W       int    `json:"w"`
+		Side    int    `json:"side"`
+		Bands   int    `json:"bands"`
+		HFBands int    `json:"hfBands"`
+		Date    string `json:"date"`
+		Today   struct {
 			Index uint64 `json:"index"`
 			Coord []int  `json:"coord"`
 		} `json:"today"`
@@ -255,6 +257,7 @@ func TestArtStructureAPI(t *testing.T) {
 			Biome int    `json:"biome"`
 			Age   int    `json:"age"`
 			Today bool   `json:"today"`
+			HF    []int  `json:"hf"`
 		} `json:"cells"`
 		Biomes []struct {
 			Name   string   `json:"name"`
@@ -266,6 +269,9 @@ func TestArtStructureAPI(t *testing.T) {
 	}
 	if body.W != 6 || body.Side != artSide || body.Bands != structAgeBands {
 		t.Errorf("w/side/bands = %d/%d/%d", body.W, body.Side, body.Bands)
+	}
+	if body.HFBands != len(biomes[0].Ramp) {
+		t.Errorf("hfBands = %d, want %d", body.HFBands, len(biomes[0].Ramp))
 	}
 	if len(body.Today.Coord) != 4 || body.Today.Index == 0 {
 		t.Errorf("today = %+v, want index>0 and a 4-coord", body.Today)
@@ -293,6 +299,20 @@ func TestArtStructureAPI(t *testing.T) {
 		if c.Today && c.I != body.Today.Index {
 			t.Errorf("today cell index %d != %d", c.I, body.Today.Index)
 		}
+		// Every cell carries its miniature tile: today's at the denser
+		// grid, the rest at the standard one, levels within the ramp.
+		wantHF := structTileGrid * structTileGrid
+		if c.Today {
+			wantHF = structTodayTileGrid * structTodayTileGrid
+		}
+		if len(c.HF) != wantHF {
+			t.Fatalf("cell %d hf len = %d, want %d", c.I, len(c.HF), wantHF)
+		}
+		for _, lv := range c.HF {
+			if lv < 0 || lv >= body.HFBands {
+				t.Fatalf("cell %d tile level %d out of [0,%d)", c.I, lv, body.HFBands)
+			}
+		}
 	}
 	// The today flag appears exactly when today's w is this slice.
 	wantToday := body.Today.Coord[3] == 6
@@ -311,11 +331,217 @@ func TestArtStructureAPI(t *testing.T) {
 			t.Errorf("%s = %d, want 404", path, rec.Code)
 		}
 	}
+}
 
-	// No ?w defaults to today's slice.
-	rec = get("/api/art/structure")
+// TestArtStructureAPIFull: without ?w the structure JSON carries the whole
+// structure — every non-empty w-slice, each slice's cells in day order,
+// with fully buried cells' tiles trimmed empty and every exposed cell
+// keeping its tile.
+func TestArtStructureAPIFull(t *testing.T) {
+	s := testServer(t)
+	h := s.routes()
+
+	req := httptest.NewRequest("GET", "/api/art/structure", nil)
+	req.Header.Set("Accept-Encoding", "identity")
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, req)
 	if rec.Code != 200 {
 		t.Fatalf("/api/art/structure = %d", rec.Code)
+	}
+	if cc := rec.Header().Get("Cache-Control"); !strings.Contains(cc, "public") {
+		t.Errorf("cache-control = %q, want public", cc)
+	}
+	if rec.Header().Get("ETag") == "" {
+		t.Error("structure JSON must carry an ETag")
+	}
+	var body struct {
+		Side    int    `json:"side"`
+		Bands   int    `json:"bands"`
+		HFBands int    `json:"hfBands"`
+		Date    string `json:"date"`
+		Epoch   string `json:"epoch"`
+		Today   struct {
+			Index uint64 `json:"index"`
+			Coord []int  `json:"coord"`
+		} `json:"today"`
+		Slices []struct {
+			W     int `json:"w"`
+			Cells []struct {
+				I     uint64 `json:"i"`
+				X     int    `json:"x"`
+				Y     int    `json:"y"`
+				Z     int    `json:"z"`
+				Biome int    `json:"biome"`
+				Age   int    `json:"age"`
+				Today bool   `json:"today"`
+				HF    []int  `json:"hf"`
+			} `json:"cells"`
+		} `json:"slices"`
+		Biomes []struct {
+			Name   string   `json:"name"`
+			Colors []string `json:"colors"`
+		} `json:"biomes"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if body.Side != artSide || body.Bands != structAgeBands || body.HFBands != len(biomes[0].Ramp) {
+		t.Errorf("side/bands/hfBands = %d/%d/%d", body.Side, body.Bands, body.HFBands)
+	}
+	if len(body.Today.Coord) != 4 || body.Today.Index == 0 {
+		t.Errorf("today = %+v, want index>0 and a 4-coord", body.Today)
+	}
+	if len(body.Biomes) != len(biomes) {
+		t.Fatalf("biomes = %d, want %d", len(body.Biomes), len(biomes))
+	}
+	if len(body.Slices) == 0 {
+		t.Fatal("full structure must carry at least one slice")
+	}
+	total := 0
+	buriedTrimmed := 0
+	todaySeen := 0
+	prevW := -1
+	for _, sl := range body.Slices {
+		if sl.W <= prevW || sl.W >= artSide {
+			t.Fatalf("slice w=%d out of order or off the lattice (prev %d)", sl.W, prevW)
+		}
+		prevW = sl.W
+		if len(sl.Cells) == 0 {
+			t.Fatalf("slice w=%d is empty — empty slices must be omitted", sl.W)
+		}
+		prev := int64(-1)
+		for _, c := range sl.Cells {
+			total++
+			if c.X < 0 || c.X >= artSide || c.Y < 0 || c.Y >= artSide || c.Z < 0 || c.Z >= artSide {
+				t.Fatalf("cell %d off the lattice: %+v", c.I, c)
+			}
+			if c.Biome < 0 || c.Biome >= len(biomes) || c.Age < 0 || c.Age >= structAgeBands {
+				t.Fatalf("cell %d bad biome/age: %+v", c.I, c)
+			}
+			if int64(c.I) <= prev {
+				t.Fatalf("slice w=%d cells must arrive in ascending day order", sl.W)
+			}
+			prev = int64(c.I)
+			if c.Today {
+				todaySeen++
+				if c.I != body.Today.Index || sl.W != body.Today.Coord[3] {
+					t.Errorf("today cell %d in slice %d, want %d in slice %d",
+						c.I, sl.W, body.Today.Index, body.Today.Coord[3])
+				}
+				if len(c.HF) != structTodayTileGrid*structTodayTileGrid {
+					t.Errorf("today hf len = %d, want %d", len(c.HF), structTodayTileGrid*structTodayTileGrid)
+				}
+				continue
+			}
+			// A past cell either keeps its tile (exposed) or ships an empty
+			// one (fully buried — it renders nothing).
+			switch len(c.HF) {
+			case 0:
+				buriedTrimmed++
+			case structTileGrid * structTileGrid:
+				for _, lv := range c.HF {
+					if lv < 0 || lv >= body.HFBands {
+						t.Fatalf("cell %d tile level %d out of [0,%d)", c.I, lv, body.HFBands)
+					}
+				}
+			default:
+				t.Fatalf("cell %d hf len = %d, want 0 or %d", c.I, len(c.HF), structTileGrid*structTileGrid)
+			}
+		}
+	}
+	if want := int(body.Today.Index) + 1; total != want {
+		t.Errorf("total cells = %d, want every day since the epoch (%d)", total, want)
+	}
+	if todaySeen != 1 {
+		t.Errorf("today cells = %d, want exactly 1", todaySeen)
+	}
+	// Years in, the mass has an interior — the trim must be doing real work.
+	if buriedTrimmed == 0 {
+		t.Error("no buried cell was trimmed — the payload trim is not working")
+	}
+}
+
+// TestArtTerrainAPI: the terrain JSON carries the day's full quantized
+// heightfield — server-canonical, so the plate viewer never re-derives
+// noise — plus the biome inks, with the plate CID as ETag, cached like
+// /api/art, and 404s off the calendar.
+func TestArtTerrainAPI(t *testing.T) {
+	s := testServer(t)
+	h := s.routes()
+
+	get := func(path, etag string) *httptest.ResponseRecorder {
+		req := httptest.NewRequest("GET", path, nil)
+		if etag != "" {
+			req.Header.Set("If-None-Match", etag)
+		}
+		req.Header.Set("Accept-Encoding", "identity")
+		rec := httptest.NewRecorder()
+		h.ServeHTTP(rec, req)
+		return rec
+	}
+
+	for _, path := range []string{"/api/art/terrain", "/api/art/terrain/2024-03-15"} {
+		rec := get(path, "")
+		if rec.Code != 200 {
+			t.Fatalf("%s = %d", path, rec.Code)
+		}
+		if cc := rec.Header().Get("Cache-Control"); !strings.Contains(cc, "public") {
+			t.Errorf("%s cache-control = %q, want public", path, cc)
+		}
+		var body struct {
+			Date  string `json:"date"`
+			N     uint64 `json:"n"`
+			Side  int    `json:"side"`
+			Bands int    `json:"bands"`
+			Biome struct {
+				Index  int      `json:"index"`
+				Name   string   `json:"name"`
+				Colors []string `json:"colors"`
+			} `json:"biome"`
+			Levels []int  `json:"levels"`
+			CID    string `json:"cid"`
+		}
+		if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
+			t.Fatalf("%s unmarshal: %v", path, err)
+		}
+		if body.Side != plotSize || len(body.Levels) != plotSize*plotSize {
+			t.Errorf("%s side/levels = %d/%d, want %d/%d", path, body.Side, len(body.Levels), plotSize, plotSize*plotSize)
+		}
+		if body.Bands != len(biomes[body.Biome.Index].Ramp) || len(body.Biome.Colors) != 3 {
+			t.Errorf("%s bands/colors = %d/%d", path, body.Bands, len(body.Biome.Colors))
+		}
+		for i, lv := range body.Levels {
+			if lv < 0 || lv >= body.Bands {
+				t.Fatalf("%s level[%d] = %d out of [0,%d)", path, i, lv, body.Bands)
+			}
+		}
+		if body.CID == "" {
+			t.Errorf("%s missing cid", path)
+		}
+		// The levels are the plate's own: the CID matches the SVG's, and the
+		// ETag revalidates.
+		n, _ := artDayIndex(body.Date)
+		if p := artPlotFor(body.Date, n); p.CID != body.CID {
+			t.Errorf("%s cid %q != plate cid %q", path, body.CID, p.CID)
+		}
+		etag := rec.Header().Get("ETag")
+		if etag == "" {
+			t.Fatalf("%s missing etag", path)
+		}
+		if rec := get(path, etag); rec.Code != 304 {
+			t.Errorf("%s revalidation = %d, want 304", path, rec.Code)
+		}
+	}
+
+	// A past day caches for a day; off-calendar dates do not exist.
+	if cc := get("/api/art/terrain/2024-03-15", "").Header().Get("Cache-Control"); !strings.Contains(cc, "86400") {
+		t.Errorf("past terrain cache-control = %q, want max-age=86400", cc)
+	}
+	for _, path := range []string{"/api/art/terrain/2019-12-31",
+		"/api/art/terrain/" + addDays(todayUTC(), 1), "/api/art/terrain/nope"} {
+		if rec := get(path, ""); rec.Code != 404 {
+			t.Errorf("%s = %d, want 404", path, rec.Code)
+		}
 	}
 }
 
@@ -336,6 +562,8 @@ func TestStructureViewerAssets(t *testing.T) {
 
 	for path, ver := range map[string]string{
 		"/static/structure.js":               structureJSVer,
+		"/static/art.js":                     artJSVer,
+		"/static/terrain.js":                 terrainJSVer,
 		"/static/vendor/three.module.min.js": threeJSVer,
 		"/static/vendor/OrbitControls.js":    orbitJSVer,
 	} {
@@ -351,17 +579,19 @@ func TestStructureViewerAssets(t *testing.T) {
 		}
 	}
 
-	page := get("/art/structure?w=3")
+	page := get("/art/structure")
 	if page.Code != 200 {
-		t.Fatalf("/art/structure?w=3 = %d", page.Code)
+		t.Fatalf("/art/structure = %d", page.Code)
 	}
 	body := page.Body.String()
 	for _, want := range []string{
 		"/static/structure.js?v=" + structureJSVer,
+		"/static/terrain.js?v=" + terrainJSVer,
 		"/static/vendor/three.module.min.js?v=" + threeJSVer,
 		"/static/vendor/OrbitControls.js?v=" + orbitJSVer,
 		`id="structure-plate"`,
-		"/api/art/structure?w=3",
+		`data-api="/api/art/structure"`,
+		"Grown one cell per day since " + artifactEpoch,
 	} {
 		if !strings.Contains(body, want) {
 			t.Errorf("structure page missing %q", want)
@@ -370,5 +600,43 @@ func TestStructureViewerAssets(t *testing.T) {
 	// The fallback SVG is still inline, with no baked-in title block.
 	if !strings.Contains(body, "<svg") || strings.Contains(body, "STRUCTURE · W=") {
 		t.Error("structure page must keep the SVG fallback, without an in-SVG title block")
+	}
+	// The output is the focus: no w-axis apparatus anywhere on the page.
+	for _, jargon := range []string{"W-SLICE", "W-AXIS", "fillmap", "CELLS ACCRETED", "CELLS PER SLICE"} {
+		if strings.Contains(body, jargon) {
+			t.Errorf("structure page still carries apparatus copy %q", jargon)
+		}
+	}
+
+	// The plate page wires the same shared modules around its live tile,
+	// keeping the inline SVG as the fallback inside the canvas mount.
+	artPage := get("/art/2024-03-15")
+	if artPage.Code != 200 {
+		t.Fatalf("/art/2024-03-15 = %d", artPage.Code)
+	}
+	body = artPage.Body.String()
+	for _, want := range []string{
+		"/static/art.js?v=" + artJSVer,
+		"/static/terrain.js?v=" + terrainJSVer,
+		"/static/vendor/three.module.min.js?v=" + threeJSVer,
+		`id="plate-canvas"`,
+		"/api/art/terrain/2024-03-15",
+		"<svg",
+	} {
+		if !strings.Contains(body, want) {
+			t.Errorf("art page missing %q", want)
+		}
+	}
+	// One quiet caption line — the coordinate, order, and CID live in
+	// /api/art, not on the page.
+	for _, jargon := range []string{"hilbert order", "art-meta", "HYPERSTRUCTURE"} {
+		if strings.Contains(body, jargon) {
+			t.Errorf("art page still carries apparatus copy %q", jargon)
+		}
+	}
+	if n, ok := artDayIndex("2024-03-15"); ok {
+		if p := artPlotFor("2024-03-15", n); strings.Contains(body, p.CID) {
+			t.Error("art page must not print the plate CID — it lives in /api/art")
+		}
 	}
 }

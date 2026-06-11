@@ -57,9 +57,11 @@ func (s *Server) renderHubPage(w http.ResponseWriter, r *http.Request, date stri
 
 	// Art card — the plate is an <img> on the already-cached SVG route.
 	artURL, artSVG := "", ""
-	if _, ok := artDayIndex(date); ok {
+	var artN uint64
+	if n, ok := artDayIndex(date); ok {
 		artURL = "/art/" + date
 		artSVG = "/art/" + date + ".svg"
+		artN = n
 	}
 
 	// Sudoku card metadata — the difficulty and clue count derive from the date.
@@ -85,6 +87,7 @@ func (s *Server) renderHubPage(w http.ResponseWriter, r *http.Request, date stri
 		"Photo":      photo,
 		"ArtURL":     artURL,
 		"ArtSVG":     artSVG,
+		"ArtN":       artN,
 		"Difficulty": p.Difficulty,
 		"ClueCount":  p.ClueCount,
 		"Epoch":      artifactEpoch,

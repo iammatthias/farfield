@@ -84,7 +84,7 @@ func TestHubRouting(t *testing.T) {
 	s := newSudokuTestServer(t)
 	cases := map[string]string{
 		"/photo":             "Astronomy Picture", // the photo page eyebrow
-		"/art":               "HYPERSTRUCTURE",    // the art page eyebrow
+		"/art":               "ONE CELL PER DAY",  // the art page eyebrow
 		"/sudoku":            "sudoku-grid",       // the sudoku grid
 		"/wordle":            "wordle-grid",       // the wordle grid
 		"/status":            `"service"`,         // JSON status
