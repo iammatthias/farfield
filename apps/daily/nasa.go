@@ -13,10 +13,10 @@ import (
 	"github.com/iammatthias/farfield/lib/store"
 )
 
-// calendarStart is the first day Farfield's public calendar records. NASA APOD
-// goes back to 1995, but this app intentionally starts on Jan 1 2026 and then
-// records forward from there.
-const calendarStart = "2026-01-01"
+// photoStart is the first day Farfield's public photo archive records. NASA
+// APOD goes back to 1995, but this app intentionally starts on Jan 1 2026 and
+// then records forward from there.
+const photoStart = "2026-01-01"
 
 // apodBase is NASA's APOD JSON endpoint. It is queried by single date or by
 // start_date/end_date range; thumbs=true asks for a still on video days.
@@ -36,7 +36,7 @@ type apodResponse struct {
 	Msg          string `json:"msg"`
 }
 
-// apodToPhoto converts one APOD record into a calendar Photo.
+// apodToPhoto converts one APOD record into a Photo.
 func apodToPhoto(a apodResponse) Photo {
 	media := a.MediaType
 	if media == "" {

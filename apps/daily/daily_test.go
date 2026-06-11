@@ -16,10 +16,10 @@ func TestValidDateAndRange(t *testing.T) {
 		t.Error("malformed dates should be rejected")
 	}
 	if nasaDateInRange("2025-12-31") {
-		t.Error("a pre-Farfield-calendar date should be out of range")
+		t.Error("a pre-Farfield-archive date should be out of range")
 	}
-	if !nasaDateInRange(calendarStart) {
-		t.Error("the Farfield calendar start should be in range")
+	if !nasaDateInRange(photoStart) {
+		t.Error("the Farfield photo start should be in range")
 	}
 }
 
@@ -72,7 +72,7 @@ func TestNASAArchivePaginatesCachedPhotosOnly(t *testing.T) {
 
 	// Simulate a partially warmed cache: recent APOD records exist, but the
 	// full Jan 1 -> today archive has not been backfilled. The archive must
-	// not advertise empty pages for theoretical calendar days.
+	// not advertise empty pages for theoretical days.
 	for _, d := range []string{"2026-05-06", "2026-05-07", "2026-05-08"} {
 		if err := upsertPhoto(db, &Photo{
 			Source: sourceNASA, Date: d, Title: "day " + d,

@@ -42,13 +42,19 @@ var docPages = []doc{
 	{"feed", "feed", "Feed", "Feed — Farfield Docs"},
 	{"blobs", "blobs", "Blobs", "Blobs — Farfield Docs"},
 	{"library", "library", "Library", "Library — Farfield Docs"},
-	{"calendar", "calendar", "Calendar", "Calendar — Farfield Docs"},
+	{"daily", "daily", "Daily", "Daily — Farfield Docs"},
 	{"bookmarks", "bookmarks", "Bookmarks", "Bookmarks — Farfield Docs"},
 	{"qr", "qr", "QR", "QR — Farfield Docs"},
 	{"bard", "bard", "Bard", "Bard — Farfield Docs"},
 	{"dead-presidents", "dead-presidents", "Dead Presidents", "Dead Presidents — Farfield Docs"},
 	{"backup", "backup", "Backup", "Backup — Farfield Docs"},
 	{"skills", "skills", "Skills", "Skills — Farfield Docs"},
+}
+
+// legacyDocs maps renamed docs pages to their current homes — old URLs keep
+// working with a permanent redirect.
+var legacyDocs = map[string]string{
+	"calendar": "daily",
 }
 
 // pageData is the template context for a rendered docs page. AssetVer
@@ -184,6 +190,10 @@ func routes() (http.Handler, error) {
 	mux.HandleFunc("GET /docs/{page}", func(w http.ResponseWriter, r *http.Request) {
 		name := r.PathValue("page")
 		stem := strings.TrimSuffix(name, ".html")
+		if to, ok := legacyDocs[stem]; ok { // renamed pages — e.g. calendar → daily
+			http.Redirect(w, r, "/docs/"+to, http.StatusMovedPermanently)
+			return
+		}
 		if _, ok := pages[stem]; ok {
 			switch {
 			case stem == "index": // /docs/index(.html) → the directory index

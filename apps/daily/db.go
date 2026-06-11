@@ -9,7 +9,7 @@ import (
 	_ "modernc.org/sqlite" // registers the "sqlite" driver
 )
 
-// dateLayout is the calendar key format — every photo is keyed by a day.
+// dateLayout is the day key format — every photo is keyed by a day.
 const dateLayout = "2006-01-02"
 
 // Photo is one day's image, from one source. (source, date) is the stable
@@ -87,17 +87,17 @@ func openDB(path string) (*sql.DB, error) {
 	if err := backfillCIDs(db); err != nil {
 		return nil, err
 	}
-	// 5. The public calendar starts on Jan 1 2026. If a development DB was warmed
-	// from NASA's full APOD history, drop those old rows so navigation, counts,
-	// and archive pages only move forward from calendarStart.
-	if err := pruneBeforeCalendarStart(db); err != nil {
+	// 5. The public photo archive starts on Jan 1 2026. If a development DB was
+	// warmed from NASA's full APOD history, drop those old rows so navigation,
+	// counts, and archive pages only move forward from photoStart.
+	if err := pruneBeforePhotoStart(db); err != nil {
 		return nil, err
 	}
 	return db, nil
 }
 
-func pruneBeforeCalendarStart(db *sql.DB) error {
-	_, err := db.Exec(`DELETE FROM photos WHERE source = ? AND date < ?`, sourceNASA, calendarStart)
+func pruneBeforePhotoStart(db *sql.DB) error {
+	_, err := db.Exec(`DELETE FROM photos WHERE source = ? AND date < ?`, sourceNASA, photoStart)
 	return err
 }
 

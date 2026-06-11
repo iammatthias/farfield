@@ -1,4 +1,4 @@
-module github.com/iammatthias/farfield/apps/calendar
+module github.com/iammatthias/farfield/apps/daily
 
 go 1.25.0
 

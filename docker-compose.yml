@@ -157,18 +157,35 @@ services:
       - HOST=0.0.0.0
       - DEAD_PRESIDENTS_PORT=8796
 
-  calendar:
+  pulse:
     <<: *defaults
     build:
       context: .
-      args: { APP: calendar }
-    image: farfield-calendar
+      args: { APP: pulse }
+    image: farfield-pulse
     ports:
-      - "${CALENDAR_PORT:-8792}:8792"
+      - "${PULSE_PORT:-8798}:8798"
     environment:
       - HOST=0.0.0.0
-      - CALENDAR_PORT=8792
-      - CALENDAR_DB_PATH=/data/calendar.sqlite
+      - PULSE_PORT=8798
+      - PULSE_DB_PATH=/data/pulse.sqlite
+      - PASSWORD=${PASSWORD:-changeme}
+      - COOKIE_SECURE=true
+    volumes:
+      - ./data:/data
+
+  daily:
+    <<: *defaults
+    build:
+      context: .
+      args: { APP: daily }
+    image: farfield-daily
+    ports:
+      - "${DAILY_PORT:-8792}:8792"
+    environment:
+      - HOST=0.0.0.0
+      - DAILY_PORT=8792
+      - DAILY_DB_PATH=/data/daily.sqlite
       - NASA_API_KEY=${NASA_API_KEY:-DEMO_KEY}
     volumes:
       - ./data:/data

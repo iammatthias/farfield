@@ -1,12 +1,12 @@
-// Command calendar is the farfield calendar service — a daily photo calendar.
-// Each day shows NASA's Astronomy Picture of the Day. It exposes HTML pages for
-// browsing and a public JSON API the website can read. Photos are cached in
-// SQLite, so APOD is touched only on a cache miss and an upstream outage never
-// breaks the calendar.
+// Command daily is the farfield daily service — a hub of daily artifacts.
+// Its first artifact is the photo: each day shows NASA's Astronomy Picture of
+// the Day. It exposes HTML pages for browsing and a public JSON API the
+// website can read. Photos are cached in SQLite, so APOD is touched only on a
+// cache miss and an upstream outage never breaks the archive.
 //
 // Usage:
 //
-//	calendar    serve the HTTP service
+//	daily    serve the HTTP service
 package main
 
 import (
@@ -39,17 +39,17 @@ func main() {
 			return
 		case "health":
 			// Probes /status — backs the Docker healthcheck (distroless: no curl).
-			os.Exit(web.Health(store.Env("CALENDAR_PORT", "8792")))
+			os.Exit(web.Health(store.Env("DAILY_PORT", "8792")))
 		case "serve":
 			// explicit serve is accepted; falling through starts the HTTP service
 		default:
-			_, _ = fmt.Fprintf(os.Stderr, "usage: calendar [serve|health|backfill [start YYYY-MM-DD] [end YYYY-MM-DD]]\n")
+			_, _ = fmt.Fprintf(os.Stderr, "usage: daily [serve|health|backfill [start YYYY-MM-DD] [end YYYY-MM-DD]]\n")
 			os.Exit(2)
 		}
 	}
 
 	host := store.Env("HOST", "127.0.0.1")
-	port := store.Env("CALENDAR_PORT", "8792")
+	port := store.Env("DAILY_PORT", "8792")
 	if err := run(host, port); err != nil {
 		slog.Error("fatal", "err", err)
 		os.Exit(1)

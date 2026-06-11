@@ -3,11 +3,11 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>{{block "title" .}}farfield · calendar{{end}}</title>
+  <title>{{block "title" .}}farfield · daily{{end}}</title>
   <meta name="theme-color" content="#fafaf7">
   <link rel="stylesheet" href="/static/styles.css?v={{.AssetVer}}">
   <style>
-    /* calendar — a single-plate viewer, one image at a time */
+    /* photo — a single-plate viewer, one image at a time */
     .container { max-width: 60rem; }
 
     figure.plate { border: 1px solid var(--ink); background: var(--wash); }
@@ -111,7 +111,7 @@
 
 {{define "foot"}}
   <footer class="cal-foot">
-    <span>farfield calendar</span>
+    <span>farfield · daily</span>
     <a href="https://apod.nasa.gov/apod/" target="_blank" rel="noopener">APOD ↗</a>
   </footer>
 {{end}}

@@ -24,7 +24,7 @@ func TestTargets(t *testing.T) {
 	dir := t.TempDir()
 	for _, f := range []string{
 		"content.sqlite", "feed.sqlite", "blobs.sqlite",
-		"calendar.sqlite", "bookmarks.sqlite", "qr.sqlite", "backup.sqlite",
+		"daily.sqlite", "bookmarks.sqlite", "qr.sqlite", "backup.sqlite",
 	} {
 		if err := os.WriteFile(filepath.Join(dir, f), []byte("x"), 0o644); err != nil {
 			t.Fatal(err)
@@ -45,7 +45,7 @@ func TestTargets(t *testing.T) {
 	}
 	// every app database is discovered, including the newer apps that the old
 	// hardcoded list missed.
-	for _, want := range []string{"content", "feed", "blobs", "calendar", "bookmarks", "qr"} {
+	for _, want := range []string{"content", "feed", "blobs", "daily", "bookmarks", "qr"} {
 		if !names[want] {
 			t.Errorf("targets() missing %q", want)
 		}

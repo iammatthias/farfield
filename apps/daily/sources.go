@@ -8,12 +8,13 @@ import (
 	"time"
 )
 
-// sourceNASA tags every cached photo. The calendar has a single source — NASA's
-// Astronomy Picture of the Day — but the cache still keys on (source, date).
+// sourceNASA tags every cached photo. The photo artifact has a single source —
+// NASA's Astronomy Picture of the Day — but the cache still keys on
+// (source, date).
 const sourceNASA = "nasa"
 
-// userAgent identifies the calendar service to the APOD upstream.
-const userAgent = "farfield-calendar/1.0 (+https://farfield.systems)"
+// userAgent identifies the daily service to the APOD upstream.
+const userAgent = "farfield-daily/1.0 (+https://farfield.systems)"
 
 // Resilience tuning — these keep the service from hammering a rate-limited
 // upstream. Cache-first reads mean APOD is touched only on a miss; on top of
@@ -223,15 +224,15 @@ func validDate(s string) bool {
 	return err == nil
 }
 
-// nasaDateInRange reports whether a date belongs to Farfield's public calendar:
-// Jan 1 2026 through today, inclusive. Earlier APOD records exist, but are
-// intentionally outside this app's archive.
+// nasaDateInRange reports whether a date belongs to Farfield's public photo
+// archive: Jan 1 2026 through today, inclusive. Earlier APOD records exist,
+// but are intentionally outside this app's archive.
 func nasaDateInRange(date string) bool {
 	d, err := time.Parse(dateLayout, date)
 	if err != nil {
 		return false
 	}
-	epoch, _ := time.Parse(dateLayout, calendarStart)
+	epoch, _ := time.Parse(dateLayout, photoStart)
 	today, _ := time.Parse(dateLayout, todayUTC())
 	return !d.Before(epoch) && !d.After(today)
 }

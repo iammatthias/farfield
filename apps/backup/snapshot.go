@@ -21,7 +21,7 @@ type appTarget struct {
 
 // targets resolves the apps to back up by scanning the shared data directory
 // for *.sqlite files. Every farfield app keeps its database beside the backup
-// app's own in /data, so a newly deployed app (calendar, bookmarks, qr, ...) is
+// app's own in /data, so a newly deployed app (daily, bookmarks, qr, ...) is
 // picked up automatically with no backup-side configuration to keep in sync.
 // The backup registry itself is skipped; SQLite -wal/-shm sidecars never match
 // the *.sqlite glob. apex has no database, so it simply never appears.

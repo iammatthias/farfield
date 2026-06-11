@@ -10,7 +10,7 @@ single-binary services; the website reads three of them.
 | content   | `https://content.farfield.systems`   | collections, entries, series fragments  |
 | feed      | `https://feed.farfield.systems`      | short ephemeral posts                   |
 | blobs     | `https://blobs.farfield.systems`     | image/media bytes + metadata            |
-| calendar  | `https://calendar.farfield.systems`  | daily photo calendar                    |
+| daily     | `https://daily.farfield.systems`     | daily artifacts: the photo (NASA APOD)  |
 | bookmarks | `https://bookmarks.farfield.systems` | curated link list with OG metadata      |
 | qr        | `https://qr.farfield.systems`        | direct and editable-proxy QR codes      |
 | apex      | `https://farfield.systems`           | the standalone landing page (not an API)|
@@ -76,22 +76,20 @@ how the feed editor builds galleries that live in content.
 A blob's `cid` *is* the hash of its bytes, so `/blobs/{cid}` is immutable —
 cache it forever.
 
-## calendar — `https://calendar.farfield.systems`
+## daily — `https://daily.farfield.systems`
 
-Public read endpoints serve the daily photo calendar. The default source is
-NASA Astronomy Picture of the Day; pass `?source=ufo` (aliases: `war`, `uap`,
-`dod`) to switch to the hidden Department of War UFO/UAP imagery source.
+Public read endpoints serve the daily photo, the first of daily's artifacts.
+The source is NASA's Astronomy Picture of the Day. The HTML pages live under
+`/photo` — `/photo` is today, `/photo/{date}` is one day, `/photo/archive` is
+the grid; the old `/`, `/day/{date}`, and `/archive` paths `301` there. The
+JSON API keeps its original paths.
 
 | Method & path                         | Returns                                      |
 |----------------------------------------|----------------------------------------------|
-| `GET /api/sources`                     | `{ "sources": [Source, …] }`                |
-| `GET /api/photo[?source=nasa|ufo]`     | today's `{ "source", "photo", "prev", "next" }` |
-| `GET /api/photo/{date}[?source=…]`     | one day/item, `ETag` is the photo CID        |
-| `GET /api/photos[?source=…&page=N]`    | `{ "source", "page", "pages", "total", "photos" }` |
-| `GET /status`                          | `{ "service", "ok", "nasa", "ufo" }`   |
-
-The HTML easter egg uses the same API switch: `/` is NASA, `/?source=ufo` is
-the alternate source, and archive/day links carry the selected source forward.
+| `GET /api/photo`                       | today's `{ "source", "photo", "prev", "next" }` |
+| `GET /api/photo/{date}`                | one day, `ETag` is the photo CID             |
+| `GET /api/photos[?page=N]`             | `{ "source", "page", "pages", "total", "photos" }` |
+| `GET /status`                          | `{ "service", "ok", "nasa" }`                |
 
 ## bookmarks — `https://bookmarks.farfield.systems`
 

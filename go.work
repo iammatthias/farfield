@@ -6,15 +6,17 @@ use (
 	./apps/bard
 	./apps/blobs
 	./apps/bookmarks
-	./apps/calendar
 	./apps/content
+	./apps/daily
 	./apps/dead-presidents
 	./apps/feed
 	./apps/library
+	./apps/pulse
 	./apps/qr
 	./lib/auth
 	./lib/backup
 	./lib/cid
+	./lib/pulse
 	./lib/store
 	./lib/theme
 	./lib/web

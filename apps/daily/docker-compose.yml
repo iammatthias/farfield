@@ -1,0 +1,21 @@
+# Local-dev compose for the daily app. Run from the repo root so Compose
+# interpolates ${...} from the root .env:
+#   docker compose -f apps/daily/docker-compose.yml up --build
+services:
+  daily:
+    build:
+      context: ../..
+      dockerfile: apps/daily/Dockerfile
+    ports:
+      - "${DAILY_PORT:-8792}:8792"
+    environment:
+      - HOST=0.0.0.0
+      - DAILY_PORT=8792
+      - DAILY_DB_PATH=/data/daily.sqlite
+      - NASA_API_KEY=${NASA_API_KEY:-DEMO_KEY}
+    volumes:
+      - daily-data:/data
+    restart: unless-stopped
+
+volumes:
+  daily-data:

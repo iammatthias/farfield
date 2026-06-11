@@ -32,30 +32,30 @@ const publicMaxAge = 86400
 // posts, so they get minutes of caching, not a day.
 const todayMaxAge = 600
 
-// Server holds the running calendar service.
+// Server holds the running daily service.
 type Server struct {
 	db      *sql.DB
 	fetcher *fetcher
 	rd      *web.Renderer
 }
 
-// backfillCommand warms the NASA cache from the configured calendar start
+// backfillCommand warms the NASA cache from the configured photo start
 // through the requested end date. It never walks before Jan 1 2026.
 func backfillCommand(start, end string) error {
 	if !validDate(start) || !validDate(end) {
 		return fmt.Errorf("dates must be YYYY-MM-DD")
 	}
-	if start < calendarStart {
-		start = calendarStart
+	if start < photoStart {
+		start = photoStart
 	}
 	today := todayUTC()
 	if end > today {
 		end = today
 	}
 	if end < start {
-		return fmt.Errorf("empty range after clamping to %s..%s", calendarStart, today)
+		return fmt.Errorf("empty range after clamping to %s..%s", photoStart, today)
 	}
-	db, err := openDB(store.Env("CALENDAR_DB_PATH", "calendar.sqlite"))
+	db, err := openDB(store.Env("DAILY_DB_PATH", "daily.sqlite"))
 	if err != nil {
 		return err
 	}
@@ -68,25 +68,25 @@ func backfillCommand(start, end string) error {
 	return nil
 }
 
-// backfillOnStartup warms the APOD archive across the full calendar range so a
+// backfillOnStartup warms the APOD archive across the full photo range so a
 // freshly deployed instance is populated without waiting for the first
 // visitor. NASA needs a real NASA_API_KEY to fill; with DEMO_KEY the range call
 // rate-limits and the cache fills lazily as pages are viewed instead.
 func (s *Server) backfillOnStartup() {
-	if err := s.nasaEnsureRange(context.Background(), calendarStart, todayUTC()); err != nil {
+	if err := s.nasaEnsureRange(context.Background(), photoStart, todayUTC()); err != nil {
 		slog.Warn("startup nasa backfill failed", "err", err)
 	}
 }
 
 // run wires up the service and serves until interrupted.
 func run(host, port string) error {
-	db, err := openDB(store.Env("CALENDAR_DB_PATH", "calendar.sqlite"))
+	db, err := openDB(store.Env("DAILY_DB_PATH", "daily.sqlite"))
 	if err != nil {
 		return err
 	}
 	defer db.Close()
 
-	tmpl, err := web.ParseTemplates(assets, calendarFuncs)
+	tmpl, err := web.ParseTemplates(assets, templateFuncs)
 	if err != nil {
 		return err
 	}
@@ -97,7 +97,7 @@ func run(host, port string) error {
 		rd:      &web.Renderer{Templates: tmpl, AssetVer: theme.Version},
 	}
 
-	// Backfill the whole calendar — Jan 1 through today — in the background so
+	// Backfill the whole photo archive — Jan 1 through today — in the background so
 	// a fresh deploy is populated without blocking startup.
 	go s.backfillOnStartup()
 
@@ -107,10 +107,20 @@ func run(host, port string) error {
 func (s *Server) routes() http.Handler {
 	mux := http.NewServeMux()
 
-	// HTML pages — public, no auth: the calendar is a read-only viewer.
-	mux.HandleFunc("GET /{$}", s.handleIndex)
-	mux.HandleFunc("GET /day/{date}", s.handleDay)
-	mux.HandleFunc("GET /archive", s.handleArchive)
+	// HTML pages — public, no auth: the photo artifact is a read-only viewer.
+	mux.HandleFunc("GET /photo", s.handleIndex)
+	mux.HandleFunc("GET /photo/archive", s.handleArchive)
+	mux.HandleFunc("GET /photo/{date}", s.handleDay)
+
+	// Legacy paths from when the photo was the whole app. They redirect
+	// permanently to the /photo artifact.
+	// TODO: the daily hub will reclaim / in a later pass — until then the root
+	// forwards to today's photo.
+	mux.HandleFunc("GET /{$}", redirect("/photo"))
+	mux.HandleFunc("GET /archive", redirect("/photo/archive"))
+	mux.HandleFunc("GET /day/{date}", func(w http.ResponseWriter, r *http.Request) {
+		http.Redirect(w, r, "/photo/"+r.PathValue("date"), http.StatusMovedPermanently)
+	})
 
 	// Public JSON API — the photo and photos reads are cacheable for a day.
 	mux.HandleFunc("GET /status", s.handleStatus)
@@ -121,7 +131,7 @@ func (s *Server) routes() http.Handler {
 	// Shared theme stylesheet.
 	mux.HandleFunc("GET /static/styles.css", theme.CSSHandler())
 
-	// Everything the calendar serves itself is text — HTML, JSON; the photos
+	// Everything the service serves itself is text — HTML, JSON; the photos
 	// are hot-linked from NASA — so Gzip wraps the whole mux. The default CORS
 	// method list (GET, OPTIONS) matches this read-only API.
 	return web.CORS(web.LogRequests(web.Gzip(mux)))
@@ -140,15 +150,15 @@ type archiveResult struct {
 }
 
 // archive returns one page of photos, newest first. Page 1 ends today; each
-// older page steps back pageSize days. It warms the real calendar range for
+// older page steps back pageSize days. It warms the real date range for
 // the requested page in one upstream call, then paginates over the cache.
 func (s *Server) archive(ctx context.Context, page int) (archiveResult, error) {
 	if page < 1 {
 		page = 1
 	}
-	// Farfield intentionally starts at calendarStart, not APOD's 1995 archive.
+	// Farfield intentionally starts at photoStart, not APOD's 1995 archive.
 	today, _ := time.Parse(dateLayout, todayUTC())
-	epoch, _ := time.Parse(dateLayout, calendarStart)
+	epoch, _ := time.Parse(dateLayout, photoStart)
 	end := today.AddDate(0, 0, -(page-1)*pageSize)
 	start := end.AddDate(0, 0, -(pageSize - 1))
 	if start.Before(epoch) {
@@ -249,7 +259,7 @@ func (s *Server) renderPhoto(w http.ResponseWriter, r *http.Request, photo *Phot
 	s.rd.Render(w, "photo.html", map[string]any{
 		"Photo":      photo,
 		"Date":       date,
-		"ArchiveURL": "/archive",
+		"ArchiveURL": "/photo/archive",
 		"JSONURL":    jsonURL,
 		"PrevURL":    dayURL(prev),
 		"NextURL":    dayURL(next),
@@ -292,7 +302,7 @@ func (s *Server) handleStatus(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	web.WriteJSON(w, http.StatusOK, map[string]any{
-		"service": "calendar", "ok": true, "nasa": nasa,
+		"service": "daily", "ok": true, "nasa": nasa,
 	})
 }
 
@@ -370,17 +380,29 @@ func pageParam(r *http.Request) int {
 	return 1
 }
 
-// dayURL builds a /day link for a date, or "" when there is no such date.
+// dayURL builds a /photo link for a date, or "" when there is no such date.
 func dayURL(date string) string {
 	if date == "" {
 		return ""
 	}
-	return "/day/" + date
+	return "/photo/" + date
 }
 
-// archiveURL builds an /archive link for a page.
+// archiveURL builds a /photo/archive link for a page.
 func archiveURL(page int) string {
-	return "/archive?page=" + strconv.Itoa(page)
+	return "/photo/archive?page=" + strconv.Itoa(page)
+}
+
+// redirect permanently redirects a legacy path to target, carrying the query
+// string (e.g. /archive?page=2 → /photo/archive?page=2) along.
+func redirect(target string) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		dest := target
+		if q := r.URL.RawQuery; q != "" {
+			dest += "?" + q
+		}
+		http.Redirect(w, r, dest, http.StatusMovedPermanently)
+	}
 }
 
 // cacheFor marks a response publicly cacheable for maxAge seconds.
@@ -388,9 +410,9 @@ func cacheFor(w http.ResponseWriter, maxAge int) {
 	w.Header().Set("Cache-Control", fmt.Sprintf("public, max-age=%d", maxAge))
 }
 
-// calendarFuncs are the template helpers. mediaKind lets the photo template
+// templateFuncs are the template helpers. mediaKind lets the photo template
 // branch on whether a video URL is a directly-playable file versus an embed.
-var calendarFuncs = template.FuncMap{"mediaKind": mediaKind}
+var templateFuncs = template.FuncMap{"mediaKind": mediaKind}
 
 // fail logs an internal error and returns a 500.
 func (s *Server) fail(w http.ResponseWriter, what string, err error) {

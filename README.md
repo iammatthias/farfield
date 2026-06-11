@@ -13,7 +13,7 @@ moderating content, plus a public JSON API the website reads.
 | `feed`    | `feed.farfield.systems`    | ephemeral short-form posts                     |
 | `blobs`   | `blobs.farfield.systems`   | image/media bytes + metadata, on Cloudflare R2 |
 | `library`    | `library.farfield.systems`    | OPDS e-book catalog: upload EPUBs, browse from any reader |
-| `calendar`| `calendar.farfield.systems`| daily photo calendar: NASA APOD + UFO easter egg |
+| `daily`   | `daily.farfield.systems`   | daily artifacts: the photo, from NASA APOD     |
 | `bookmarks`| `bookmarks.farfield.systems`| curated public/private link list with OG metadata |
 | `qr`      | `qr.farfield.systems`      | direct and editable-proxy QR codes              |
 | `backup`  | tailnet-only               | snapshots every app's database into R2         |

@@ -1,7 +1,7 @@
-{{define "title"}}{{with .Photo}}{{.Title}} · {{end}}farfield calendar{{end}}
+{{define "title"}}{{with .Photo}}{{.Title}} · {{end}}farfield · daily{{end}}
 {{define "content"}}
   <header class="bar">
-    <h1><a href="/">farfield · calendar</a></h1>
+    <h1><a href="/photo">farfield · daily</a></h1>
     <nav>
       <a href="{{.ArchiveURL}}">Archive</a>
       <a href="{{.JSONURL}}">JSON</a>
@@ -50,7 +50,7 @@
       </p>
     </div>
   {{else}}
-    <p class="notice">No photo is available for this day yet. The calendar
+    <p class="notice">No photo is available for this day yet. The service
     serves from its SQLite cache and will pick this one up once APOD
     responds.</p>
   {{end}}

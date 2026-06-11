@@ -1,0 +1,40 @@
+{{define "content"}}
+  <h1>daily</h1>
+  <p class="meta"><code>daily.farfield.systems</code></p>
+
+  <p>A hub of daily artifacts. Its first artifact is the photo: each day shows NASA's Astronomy Picture of the Day, cached in SQLite so an upstream outage never breaks the archive.</p>
+
+  <figure class="screenshot">
+    <img src="assets/daily.jpg?v=20260520-loggedin" alt="Screenshot of the Farfield daily photo UI" width="1280" height="800" loading="lazy">
+    <figcaption>Daily photo page. This service has public HTML and JSON reads.</figcaption>
+  </figure>
+
+  <h2>Public API</h2>
+
+  <div class="endpoint">
+    <span class="method">GET</span>
+    <span class="path">/api/photo</span>
+    <div class="returns">Today's photo: <code>{ "source", "photo", "prev", "next" }</code></div>
+  </div>
+
+  <div class="endpoint">
+    <span class="method">GET</span>
+    <span class="path">/api/photo/{date}</span>
+    <div class="returns">One day — <code>ETag</code> is the photo CID</div>
+  </div>
+
+  <div class="endpoint">
+    <span class="method">GET</span>
+    <span class="path">/api/photos?page=N</span>
+    <div class="returns"><code>{ "source", "page", "pages", "total", "photos" }</code></div>
+  </div>
+
+  <div class="endpoint">
+    <span class="method">GET</span>
+    <span class="path">/status</span>
+    <div class="returns"><code>{ "service": "daily", "ok": true, "nasa": N }</code></div>
+  </div>
+
+  <h2>HTML</h2>
+  <p>The photo pages live under <code>/photo</code>: <code>/photo</code> is today, <code>/photo/{date}</code> is one day, and <code>/photo/archive</code> is the grid. The old <code>/</code>, <code>/day/{date}</code>, and <code>/archive</code> paths redirect there permanently.</p>
+{{end}}
