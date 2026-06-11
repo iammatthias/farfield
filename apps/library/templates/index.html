@@ -15,14 +15,28 @@
     table.books td.pick, table.books th.pick { width: 1%; text-align: center; }
     table.books td.pick input { width: auto; }
 
-    /* folder rows — a directory entry spanning the list (colspan stays intact
-       because the flexbox lives on an inner div, not the <td> itself). */
-    .folder-row td.folder-cell { padding: 0.5rem 0.85rem; background: var(--wash); border-bottom: 1px solid var(--hairline); }
-    .folder-inner { display: flex; justify-content: space-between; align-items: baseline; gap: 1rem; }
-    .folder-row a { font-weight: 500; text-decoration: none; display: inline-flex; align-items: baseline; gap: 0.45rem; }
-    .folder-row a:hover { color: var(--accent); }
-    .folder-mark { font-size: 0.85em; opacity: 0.5; }
-    .folder-count { font: 500 0.7rem/1 var(--font-mono); text-transform: uppercase; letter-spacing: 0.06em; opacity: 0.55; white-space: nowrap; }
+    /* folder rows — directory entries spanning the list. The link fills the
+       cell so the whole bar is one click target (colspan stays intact because
+       the flexbox lives on the <a>, not the <td>). */
+    .folder-row td.folder-cell { padding: 0; background: var(--wash); border-bottom: 1px solid var(--hairline); }
+    .folder-link {
+      display: flex; align-items: center; gap: 0.6rem;
+      padding: 0.65rem 0.85rem; text-decoration: none;
+    }
+    .folder-link:hover { background: rgba(10, 10, 10, 0.04); }
+    .folder-icon { width: 1.1rem; height: 1.1rem; flex: none; opacity: 0.7; }
+    .folder-name { font-weight: 600; }
+    .folder-link:hover .folder-name { color: var(--accent); }
+    .folder-count {
+      margin-left: auto; font: 500 0.7rem/1 var(--font-mono);
+      text-transform: uppercase; letter-spacing: 0.06em; opacity: 0.55; white-space: nowrap;
+    }
+    .folder-open {
+      font: 500 0.7rem/1 var(--font-mono); text-transform: uppercase;
+      letter-spacing: 0.06em; opacity: 0.45; white-space: nowrap;
+      border-left: 1px solid var(--hairline); padding-left: 0.65rem;
+    }
+    .folder-link:hover .folder-open { opacity: 1; color: var(--accent); }
 
     /* Mobile: book rows become labelled cards; folder rows stay simple. */
     @media (max-width: 46rem) {
@@ -38,8 +52,9 @@
       table.books td.pick::before, table.books td.shrink::before { content: ""; flex: 0; }
       table.books td.actions { gap: 1rem; }
       .folder-row { border: 0; padding: 0; margin-bottom: 0.5rem; }
-      .folder-row td.folder-cell { display: block; padding: 0.55rem 0.75rem; }
+      .folder-row td.folder-cell { display: block; padding: 0; border: 1px solid var(--hairline); }
       .folder-row td.folder-cell::before { display: none; }
+      .folder-link { padding: 0.6rem 0.75rem; }
     }
   </style>
 
@@ -79,10 +94,14 @@
             {{range .Folders}}
               <tr class="folder-row">
                 <td class="folder-cell" colspan="7">
-                  <div class="folder-inner">
-                    <a href="/?collection={{.Name}}"><span class="folder-mark">▸</span> {{.Name}}</a>
+                  <a class="folder-link" href="/?collection={{.Name}}">
+                    <svg class="folder-icon" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.2" aria-hidden="true">
+                      <path d="M1.5 13.5v-10h4.4l1.5 1.8h7.1v8.2z"/>
+                    </svg>
+                    <span class="folder-name">{{.Name}}</span>
                     <span class="folder-count">{{.Count}} book{{if ne .Count 1}}s{{end}}</span>
-                  </div>
+                    <span class="folder-open">open →</span>
+                  </a>
                 </td>
               </tr>
             {{end}}
