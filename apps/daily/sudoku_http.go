@@ -153,6 +153,7 @@ func (s *Server) renderSudokuPage(w http.ResponseWriter, r *http.Request, date s
 		"PrevURL":    prevURL,
 		"NextURL":    nextURL,
 		"JSVer":      sudokuJSVer,
+		"Nav":        navData(date),
 	})
 }
 

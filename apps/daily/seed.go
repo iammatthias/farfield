@@ -15,6 +15,7 @@ import (
 const (
 	domainArt    = "art"
 	domainSudoku = "sudoku"
+	domainWordle = "wordle"
 )
 
 // artifactEpoch is day zero of the generative artifacts. Day indices count

@@ -1,0 +1,148 @@
+{{define "title"}}wordle · {{.Date}} · farfield · daily{{end}}
+
+{{define "head"}}
+  <style>
+    /* wordle — one secret word a day; tile states in the instrument language:
+       correct = solid ink fill, present = wash + inner rule, absent = ghost */
+    .wordle-wrap { max-width: 24rem; }
+    .wordle-grid { display: grid; gap: 0.4rem; }
+    .wordle-row { display: grid; grid-template-columns: repeat(5, 1fr); gap: 0.4rem; }
+    .wordle-wrap .tile {
+      aspect-ratio: 1; min-width: 0;
+      display: flex; align-items: center; justify-content: center;
+      border: 1px solid var(--hairline);
+      font: 500 clamp(1.1rem, 7vw, 1.5rem) var(--font-mono);
+      text-transform: uppercase;
+    }
+    .tile.pending { border-color: var(--ink); }
+    .tile.s-g { background: var(--ink); color: var(--surface); border-color: var(--ink); }
+    .tile.s-y {
+      background: var(--wash); border-color: var(--ink);
+      outline: 1px solid var(--ink); outline-offset: -4px;
+    }
+    .tile.s-a { opacity: 0.3; }
+
+    .wordle-legend {
+      display: flex; flex-wrap: wrap; gap: 0.5rem 1.25rem;
+      list-style: none; padding: 0.6rem 0 0; margin: 0;
+      font: 500 0.62rem/1.4 var(--font-mono);
+      text-transform: uppercase; letter-spacing: 0.06em; opacity: 0.8;
+    }
+    .wordle-legend li { display: flex; align-items: center; gap: 0.45rem; }
+    .wordle-legend .tile {
+      width: 1.3rem; height: 1.3rem; aspect-ratio: auto; flex: none;
+      font-size: 0.7rem;
+    }
+    .wordle-legend .tile.s-y { outline-offset: -3px; }
+
+    .wordle-controls {
+      display: flex; flex-wrap: wrap; gap: 0.6rem 1rem; align-items: center;
+      margin-top: 1rem;
+    }
+    .wordle-status {
+      font: 500 0.7rem/1.4 var(--font-mono);
+      text-transform: uppercase; letter-spacing: 0.07em; opacity: 0.7;
+      min-height: 1rem;
+    }
+    .wordle-status.alert { color: var(--accent); opacity: 1; }
+    .wordle-hard {
+      display: flex; align-items: center; gap: 0.4rem;
+      font: 500 0.7rem/1 var(--font-mono);
+      text-transform: uppercase; letter-spacing: 0.07em;
+    }
+    .wordle-hard input { width: auto; accent-color: var(--ink); }
+    .wordle-hint { margin-top: 0.6rem; }
+
+    /* visually hidden input — keeps mobile keyboards available without a
+       visible text field; physical keyboards go through document keydown */
+    .vh-input {
+      position: absolute; width: 1px; height: 1px;
+      margin: -1px; padding: 0; border: 0;
+      overflow: hidden; clip-path: inset(50%); white-space: nowrap;
+    }
+
+    .wordle-meta { margin-top: 1.5rem; border-top: 2px solid var(--ink); }
+    .wordle-meta > div {
+      display: flex; gap: 1rem; padding: 0.45rem 0;
+      border-bottom: 1px solid rgba(10, 10, 10, 0.15);
+    }
+    .wordle-meta dt {
+      flex: 0 0 6.5rem; font: 500 0.7rem/1.5 var(--font-mono);
+      text-transform: uppercase; letter-spacing: 0.08em; opacity: 0.5;
+    }
+    .wordle-meta dd { margin: 0; font-family: var(--font-mono); font-size: 0.8rem; overflow-wrap: anywhere; }
+  </style>
+  <script src="/static/wordle.js?v={{.JSVer}}" defer></script>
+{{end}}
+
+{{define "content"}}
+  <header class="bar">
+    <h1><a href="/wordle">farfield · daily</a></h1>
+    <nav>
+      <a href="{{.JSONURL}}">JSON</a>
+      {{if .Authed}}<a href="/logout">Log out</a>{{else}}<a href="/login">Log in</a>{{end}}
+    </nav>
+  </header>
+
+  {{template "artifactnav" .}}
+
+  <p class="label source-eyebrow">WORDLE · ONE WORD PER DAY · {{len .Rows}} GUESSES</p>
+
+  <section class="wordle-wrap">
+    <div class="wordle-grid" id="wordle-grid" data-date="{{.Date}}"
+         data-authed="{{if .Authed}}true{{else}}false{{end}}"
+         data-hard="{{if .Hard}}true{{else}}false{{end}}"
+         data-solved="{{if .Solved}}true{{else}}false{{end}}"
+         data-over="{{if .Over}}true{{else}}false{{end}}"
+         data-solvems="{{.SolveMs}}" data-guesses="{{.GuessesJSON}}">
+      {{range .Rows}}
+        <div class="wordle-row">
+          {{range .}}<div class="tile{{if eq .State "g"}} s-g{{else if eq .State "y"}} s-y{{else if eq .State "-"}} s-a{{end}}">{{.Ch}}</div>{{end}}
+        </div>
+      {{end}}
+      <input type="text" id="wordle-input" class="vh-input" autocomplete="off"
+             autocapitalize="none" autocorrect="off" spellcheck="false"
+             aria-label="type your guess, then press enter">
+    </div>
+
+    <ul class="wordle-legend">
+      <li><span class="tile s-g">A</span> correct spot</li>
+      <li><span class="tile s-y">B</span> in the word</li>
+      <li><span class="tile s-a">C</span> absent</li>
+    </ul>
+
+    <div class="wordle-controls">
+      <label class="wordle-hard" for="wordle-hardmode">
+        <input type="checkbox" id="wordle-hardmode" {{if .Hard}}checked{{end}}
+               {{if or .Over (gt .Guesses 0)}}disabled{{end}}>
+        hard mode
+      </label>
+      <span class="wordle-status" id="wordle-status">{{.Status}}{{if and .Answer (not .Solved)}} · answer {{.Answer}}{{end}}</span>
+    </div>
+    {{if not .Authed}}
+      <p class="hint wordle-hint">Type a five-letter word, Enter submits.
+      <a href="/login">Log in</a> to save progress.</p>
+    {{else if not .Over}}
+      <p class="hint wordle-hint">Type a five-letter word, Enter submits.</p>
+    {{end}}
+  </section>
+
+  <dl class="wordle-meta">
+    <div><dt>Date</dt><dd>{{.Date}}</dd></div>
+    <div><dt>Streak</dt><dd>{{.Streak}} day{{if ne .Streak 1}}s{{end}}</dd></div>
+    <div><dt>CID</dt><dd>{{.CID}}</dd></div>
+  </dl>
+
+  <nav class="stepper">
+    {{if .PrevURL}}<a href="{{.PrevURL}}">← Previous</a>
+    {{else}}<span class="muted">← Previous</span>{{end}}
+    <span class="muted">{{.Date}}</span>
+    {{if .NextURL}}<a href="{{.NextURL}}">Next →</a>
+    {{else}}<span class="muted">Next →</span>{{end}}
+  </nav>
+
+  <footer class="cal-foot">
+    <span>farfield · daily · wordle</span>
+    <span>derived from the date · answer never sent early</span>
+  </footer>
+{{end}}

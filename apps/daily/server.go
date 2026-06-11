@@ -124,11 +124,16 @@ func (s *Server) routes() http.Handler {
 	mux.HandleFunc("GET /photo/archive", s.handleArchive)
 	mux.HandleFunc("GET /photo/{date}", s.handleDay)
 
+	// The hub — today's four artifacts on one page, and the same view for
+	// any past date. The /{date} wildcard sits at the same depth as the
+	// literal artifact routes; ServeMux prefers literal segments, so /photo,
+	// /art, /sudoku, /wordle, /login, /static/…, /api/… all win over it
+	// (TestHubRouting pins this down). Non-date strays 404 in the handler.
+	mux.HandleFunc("GET /{$}", s.handleHubToday)
+	mux.HandleFunc("GET /{date}", s.handleHubDay)
+
 	// Legacy paths from when the photo was the whole app. They redirect
 	// permanently to the /photo artifact.
-	// TODO: the daily hub will reclaim / in a later pass — until then the root
-	// forwards to today's photo.
-	mux.HandleFunc("GET /{$}", redirect("/photo"))
 	mux.HandleFunc("GET /archive", redirect("/photo/archive"))
 	mux.HandleFunc("GET /day/{date}", func(w http.ResponseWriter, r *http.Request) {
 		http.Redirect(w, r, "/photo/"+r.PathValue("date"), http.StatusMovedPermanently)
@@ -148,6 +153,15 @@ func (s *Server) routes() http.Handler {
 	mux.HandleFunc("GET /sudoku/{date}", s.handleSudokuDay)
 	mux.HandleFunc("POST /sudoku/{date}/state", s.requireSessionJSON(s.handleSudokuState))
 
+	// The wordle artifact — one secret five-letter word a day, derived from
+	// the date. Pages are public; guess feedback is a public server call
+	// (the answer is secret, so a client cannot score itself); only the
+	// solve-state write needs a session.
+	mux.HandleFunc("GET /wordle", s.handleWordleToday)
+	mux.HandleFunc("GET /wordle/{date}", s.handleWordleDay)
+	mux.HandleFunc("POST /wordle/{date}/guess", s.handleWordleGuess)
+	mux.HandleFunc("POST /wordle/{date}/state", s.requireSessionJSON(s.handleWordleState))
+
 	// Login — public HTML. Sessions exist only for solve-state persistence.
 	mux.HandleFunc("GET /login", s.handleLoginForm)
 	mux.HandleFunc("POST /login", s.auth.HandleLogin)
@@ -162,10 +176,13 @@ func (s *Server) routes() http.Handler {
 	mux.HandleFunc("GET /api/art/{date}", s.handleAPIArtDay)
 	mux.HandleFunc("GET /api/sudoku", s.handleAPISudokuToday)
 	mux.HandleFunc("GET /api/sudoku/{date}", s.handleAPISudokuDay)
+	mux.HandleFunc("GET /api/wordle", s.handleAPIWordleToday)
+	mux.HandleFunc("GET /api/wordle/{date}", s.handleAPIWordleDay)
 
-	// Shared theme stylesheet, plus the app-local sudoku grid script.
+	// Shared theme stylesheet, plus the app-local game grid scripts.
 	mux.HandleFunc("GET /static/styles.css", theme.CSSHandler())
 	mux.HandleFunc("GET /static/sudoku.js", sudokuJSHandler())
+	mux.HandleFunc("GET /static/wordle.js", wordleJSHandler())
 
 	// Everything the service serves itself is text — HTML, JSON; the photos
 	// are hot-linked from NASA — so Gzip wraps the whole mux. The default CORS
@@ -330,6 +347,7 @@ func (s *Server) renderPhoto(w http.ResponseWriter, r *http.Request, photo *Phot
 		"JSONURL":    jsonURL,
 		"PrevURL":    dayURL(prev),
 		"NextURL":    dayURL(next),
+		"Nav":        navData(date),
 	})
 }
 

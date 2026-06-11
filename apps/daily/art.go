@@ -128,6 +128,7 @@ func (s *Server) renderArtPage(w http.ResponseWriter, r *http.Request, date stri
 		"PrevURL":      prevURL,
 		"NextURL":      nextURL,
 		"StructureURL": fmt.Sprintf("/art/structure?w=%d", p.Coord[3]),
+		"Nav":          navData(date),
 	})
 }
 

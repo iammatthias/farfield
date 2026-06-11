@@ -1,0 +1,130 @@
+{{define "title"}}{{if .IsToday}}today{{else}}{{.Date}}{{end}} · farfield · daily{{end}}
+
+{{define "head"}}
+  <style>
+    /* hub — the day's four artifacts as one instrument panel */
+    .hub-head { margin-top: 0.5rem; }
+    .hub-head h2 { font-family: var(--font-mono); font-weight: 500; }
+    .hub-head .label { margin-top: 0.2rem; }
+
+    .hub-grid {
+      display: grid; gap: 1rem; margin-top: 1.5rem;
+      grid-template-columns: repeat(auto-fit, minmax(min(17rem, 100%), 1fr));
+    }
+    .hub-card {
+      display: flex; flex-direction: column;
+      border: 1px solid var(--ink); color: inherit; text-decoration: none;
+    }
+    .hub-card:hover { outline: 2px solid var(--ink); outline-offset: -3px; }
+    .hub-card .frame {
+      position: relative; aspect-ratio: 3 / 2; background: var(--wash);
+      overflow: hidden;
+    }
+    .hub-card .frame img { width: 100%; height: 100%; object-fit: cover; }
+    .hub-card .frame .placeholder {
+      width: 100%; height: 100%;
+      display: flex; align-items: center; justify-content: center;
+      font: 500 0.7rem/1 var(--font-mono);
+      text-transform: uppercase; letter-spacing: 0.07em; opacity: 0.4;
+    }
+    .hub-card .frame .board {
+      width: 100%; height: 100%; padding: 1rem;
+      display: flex; align-items: center; justify-content: center;
+      font: 500 clamp(1.4rem, 4vw, 2rem) var(--font-mono); letter-spacing: 0.35em;
+    }
+    .hub-card .frame .board .dim { opacity: 0.25; }
+    .hub-card .cap {
+      display: flex; flex-direction: column; gap: 0.3rem;
+      padding: 0.55rem 0.7rem; border-top: 1px solid var(--ink);
+      margin-top: auto;
+    }
+    .hub-card .cap .name {
+      display: flex; justify-content: space-between; gap: 0.75rem;
+      font: 500 0.68rem/1.3 var(--font-mono);
+      text-transform: uppercase; letter-spacing: 0.08em;
+    }
+    .hub-card .cap .name .state { opacity: 0.55; text-align: right; }
+    .hub-card .cap .ttl {
+      font-size: 0.85rem;
+      white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+    }
+    .hub-card .cap .state.done { color: var(--accent); opacity: 1; }
+  </style>
+{{end}}
+
+{{define "content"}}
+  <header class="bar">
+    <h1><a href="/">farfield · daily</a></h1>
+    <nav>
+      {{if .Authed}}<a href="/logout">Log out</a>{{else}}<a href="/login">Log in</a>{{end}}
+    </nav>
+  </header>
+
+  {{template "artifactnav" .}}
+
+  <header class="hub-head">
+    <h2>{{.Date}}</h2>
+    <p class="label">{{.Weekday}}{{if .IsToday}} · TODAY{{end}} · FOUR ARTIFACTS · ONE PER DAY</p>
+  </header>
+
+  <section class="hub-grid">
+    <a class="hub-card" href="{{.Nav.Photo}}">
+      <div class="frame">
+        {{if .Photo}}
+          {{if .Photo.ThumbURL}}<img src="{{.Photo.ThumbURL}}" alt="{{.Photo.Title}}" loading="lazy">
+          {{else if and (eq .Photo.MediaType "image") .Photo.ImageURL}}<img src="{{.Photo.ImageURL}}" alt="{{.Photo.Title}}" loading="lazy">
+          {{else}}<div class="placeholder">{{.Photo.MediaType}}</div>{{end}}
+        {{else}}
+          <div class="placeholder">no photo cached</div>
+        {{end}}
+      </div>
+      <div class="cap">
+        <span class="name"><span>Photo</span><span class="state">NASA APOD</span></span>
+        {{if .Photo}}<span class="ttl">{{.Photo.Title}}</span>{{end}}
+      </div>
+    </a>
+
+    <a class="hub-card" href="{{.Nav.Art}}">
+      <div class="frame">
+        {{if .ArtSVG}}<img src="{{.ArtSVG}}" alt="art plate for {{.Date}}" loading="lazy">
+        {{else}}<div class="placeholder">no plate</div>{{end}}
+      </div>
+      <div class="cap">
+        <span class="name"><span>Art</span><span class="state">4D survey plate</span></span>
+      </div>
+    </a>
+
+    <a class="hub-card" href="{{.Nav.Sudoku}}">
+      <div class="frame"><div class="board">{{.ClueCount}}<span class="dim">/81</span></div></div>
+      <div class="cap">
+        <span class="name"><span>Sudoku</span>
+          <span class="state{{if .Sudoku.Solved}} done{{end}}">
+            difficulty {{.Difficulty}}{{with .Sudoku.Status}} · {{.}}{{end}}{{if .Sudoku.Streak}} · streak {{.Sudoku.Streak}}{{end}}
+          </span></span>
+      </div>
+    </a>
+
+    <a class="hub-card" href="{{.Nav.Wordle}}">
+      <div class="frame"><div class="board"><span class="dim">·····</span></div></div>
+      <div class="cap">
+        <span class="name"><span>Wordle</span>
+          <span class="state{{if .Wordle.Solved}} done{{end}}">
+            six guesses{{with .Wordle.Status}} · {{.}}{{end}}{{if .Wordle.Streak}} · streak {{.Wordle.Streak}}{{end}}
+          </span></span>
+      </div>
+    </a>
+  </section>
+
+  <nav class="stepper">
+    {{if .PrevURL}}<a href="{{.PrevURL}}">← Previous</a>
+    {{else}}<span class="muted">← Previous</span>{{end}}
+    <span class="muted">{{.Date}}</span>
+    {{if .NextURL}}<a href="{{.NextURL}}">Next →</a>
+    {{else}}<span class="muted">Next →</span>{{end}}
+  </nav>
+
+  <footer class="cal-foot">
+    <span>farfield · daily</span>
+    <span>one photo · one plate · two puzzles</span>
+  </footer>
+{{end}}
