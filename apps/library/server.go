@@ -18,6 +18,7 @@ import (
 	"time"
 
 	"github.com/iammatthias/farfield/lib/cid"
+	"github.com/iammatthias/farfield/lib/pulse"
 	"github.com/iammatthias/farfield/lib/store"
 	"github.com/iammatthias/farfield/lib/theme"
 	"github.com/iammatthias/farfield/lib/web"
@@ -130,8 +131,10 @@ func (s *Server) routes() http.Handler {
 	mux.HandleFunc("GET /static/styles.css", theme.CSSHandler())
 
 	// No Gzip: library's hot paths serve raw EPUB bytes and cover images,
-	// which are already compressed.
-	return web.CORS(web.LogRequests(mux), "GET", "POST", "PUT", "DELETE", "OPTIONS")
+	// which are already compressed. Pulse traffic recording sits innermost so
+	// logged timings stay real.
+	return web.CORS(web.LogRequests(pulse.Middleware(s.db, "library")(mux)),
+		"GET", "POST", "PUT", "DELETE", "OPTIONS")
 }
 
 // storeUpload validates EPUB bytes, extracts metadata and the cover, writes

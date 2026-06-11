@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/iammatthias/farfield/lib/auth"
+	"github.com/iammatthias/farfield/lib/pulse"
 	"github.com/iammatthias/farfield/lib/store"
 	"github.com/iammatthias/farfield/lib/theme"
 	"github.com/iammatthias/farfield/lib/web"
@@ -186,8 +187,9 @@ func (s *Server) routes() http.Handler {
 
 	// Everything the service serves itself is text — HTML, JSON; the photos
 	// are hot-linked from NASA — so Gzip wraps the whole mux. The default CORS
-	// method list (GET, OPTIONS) matches this read-only API.
-	return web.CORS(web.LogRequests(web.Gzip(mux)))
+	// method list (GET, OPTIONS) matches this read-only API. Pulse traffic
+	// recording sits innermost so logged timings stay real.
+	return web.CORS(web.LogRequests(web.Gzip(pulse.Middleware(s.db, "daily")(mux))))
 }
 
 // ── auth ───────────────────────────────────────────────────────────────────

@@ -29,6 +29,8 @@ func startCollector(db *sql.DB, dbPath string, interval time.Duration) {
 // (the same convention the backup app's snapshot targets use). Pulse's own
 // database is skipped; so is any database without a `requests` table —
 // that app simply has not adopted the lib/pulse middleware yet.
+// Pulse itself deliberately never wires that middleware: traffic to its own
+// gated console is noise, and its database is skipped here anyway.
 func collectAll(db *sql.DB, dbPath string) {
 	own, err := filepath.Abs(dbPath)
 	if err != nil {

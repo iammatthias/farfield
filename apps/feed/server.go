@@ -11,6 +11,7 @@ import (
 	"sync"
 
 	"github.com/iammatthias/farfield/lib/cid"
+	"github.com/iammatthias/farfield/lib/pulse"
 	"github.com/iammatthias/farfield/lib/store"
 	"github.com/iammatthias/farfield/lib/theme"
 	"github.com/iammatthias/farfield/lib/web"
@@ -115,8 +116,9 @@ func (s *Server) routes() http.Handler {
 
 	// Everything feed serves is text — HTML, JSON; media bytes live in the
 	// blobs service — so Gzip wraps the whole mux. Logging sits outside so
-	// the recorded status is the final one.
-	return web.CORS(web.LogRequests(web.Gzip(mux)),
+	// the recorded status is the final one; pulse traffic recording sits
+	// innermost so logged timings stay real.
+	return web.CORS(web.LogRequests(web.Gzip(pulse.Middleware(s.db, "feed")(mux))),
 		"GET", "POST", "PUT", "DELETE", "OPTIONS")
 }
 

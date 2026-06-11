@@ -132,6 +132,9 @@ services:
     environment:
       - HOST=0.0.0.0
       - APEX_PORT=8790
+      - APEX_DB_PATH=/data/apex.sqlite
+    volumes:
+      - ./data:/data
 
   bard:
     <<: *defaults
@@ -144,6 +147,9 @@ services:
     environment:
       - HOST=0.0.0.0
       - BARD_PORT=8795
+      - BARD_DB_PATH=/data/bard.sqlite
+    volumes:
+      - ./data:/data
 
   dead-presidents:
     <<: *defaults
@@ -156,6 +162,9 @@ services:
     environment:
       - HOST=0.0.0.0
       - DEAD_PRESIDENTS_PORT=8796
+      - DEAD_PRESIDENTS_DB_PATH=/data/dead-presidents.sqlite
+    volumes:
+      - ./data:/data
 
   pulse:
     <<: *defaults

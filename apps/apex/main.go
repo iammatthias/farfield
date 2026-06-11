@@ -18,9 +18,11 @@ import (
 	"strings"
 
 	"github.com/iammatthias/farfield/lib/cid"
+	"github.com/iammatthias/farfield/lib/pulse"
 	"github.com/iammatthias/farfield/lib/store"
 	"github.com/iammatthias/farfield/lib/theme"
 	"github.com/iammatthias/farfield/lib/web"
+	_ "modernc.org/sqlite" // registers the "sqlite" driver
 )
 
 //go:embed web
@@ -82,6 +84,16 @@ func main() {
 	if err != nil {
 		slog.Error("building routes", "err", err)
 		os.Exit(1)
+	}
+
+	// Apex is otherwise database-free; this SQLite file exists purely so the
+	// pulse collector can roll up request events. A static site must never
+	// fail over analytics, so an open error just disables recording.
+	if db, err := store.OpenDB(store.Env("APEX_DB_PATH", "apex.sqlite")); err != nil {
+		slog.Warn("pulse recording disabled: could not open database", "err", err)
+	} else {
+		defer db.Close()
+		handler = pulse.Middleware(db, "apex")(handler)
 	}
 
 	if err := web.Serve(host, port, web.LogRequests(web.Gzip(handler))); err != nil {

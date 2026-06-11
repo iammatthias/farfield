@@ -14,6 +14,7 @@ import (
 	"strconv"
 	"time"
 
+	"github.com/iammatthias/farfield/lib/pulse"
 	"github.com/iammatthias/farfield/lib/store"
 	"github.com/iammatthias/farfield/lib/theme"
 	"github.com/iammatthias/farfield/lib/web"
@@ -128,8 +129,10 @@ func (s *Server) routes() http.Handler {
 	mux.HandleFunc("GET /static/styles.css", theme.CSSHandler())
 
 	// No Gzip here: blobs serves raw, often already-compressed bytes (images),
-	// and the immutable blob responses are better left untouched.
-	return web.CORS(web.LogRequests(mux), "GET", "POST", "PUT", "DELETE", "OPTIONS")
+	// and the immutable blob responses are better left untouched. Pulse traffic
+	// recording sits innermost so logged timings stay real.
+	return web.CORS(web.LogRequests(pulse.Middleware(s.db, "blobs")(mux)),
+		"GET", "POST", "PUT", "DELETE", "OPTIONS")
 }
 
 // storeUpload derives metadata, writes the bytes to the store, generates a

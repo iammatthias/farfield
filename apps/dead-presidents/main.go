@@ -11,9 +11,11 @@ import (
 	"net/http"
 	"os"
 
+	"github.com/iammatthias/farfield/lib/pulse"
 	"github.com/iammatthias/farfield/lib/store"
 	"github.com/iammatthias/farfield/lib/theme"
 	"github.com/iammatthias/farfield/lib/web"
+	_ "modernc.org/sqlite" // registers the "sqlite" driver
 )
 
 //go:embed web
@@ -66,10 +68,21 @@ func main() {
 	mux.HandleFunc("GET /static/styles.css", theme.CSSHandler())
 	mux.Handle("/", cacheControl(http.FileServerFS(site)))
 
+	// Dead-presidents is otherwise database-free; this SQLite file exists
+	// purely so the pulse collector can roll up request events. A static site
+	// must never fail over analytics, so an open error just disables recording.
+	var handler http.Handler = mux
+	if db, err := store.OpenDB(store.Env("DEAD_PRESIDENTS_DB_PATH", "dead-presidents.sqlite")); err != nil {
+		slog.Warn("pulse recording disabled: could not open database", "err", err)
+	} else {
+		defer db.Close()
+		handler = pulse.Middleware(db, "dead-presidents")(handler)
+	}
+
 	// Gzip helps the text assets and model.json; model.bin is served as
 	// application/octet-stream, which is not in the gzip allowlist and passes
 	// through untouched. Logging sits outside so the recorded status is final.
-	if err := web.Serve(host, port, web.LogRequests(web.Gzip(mux))); err != nil {
+	if err := web.Serve(host, port, web.LogRequests(web.Gzip(handler))); err != nil {
 		slog.Error("server failed", "err", err)
 		os.Exit(1)
 	}
