@@ -48,7 +48,6 @@
       font-size: 0.85rem;
       white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
     }
-    .hub-card .cap .state.done { color: var(--accent); opacity: 1; }
   </style>
 {{end}}
 
@@ -91,9 +90,7 @@
       <div class="frame"><div class="board">{{.ClueCount}}<span class="dim">/81</span></div></div>
       <div class="cap">
         <span class="name"><span>Sudoku</span>
-          <span class="state{{if .Sudoku.Solved}} done{{end}}">
-            difficulty {{.Difficulty}}{{with .Sudoku.Status}} · {{.}}{{end}}{{if .Sudoku.Streak}} · streak {{.Sudoku.Streak}}{{end}}
-          </span></span>
+          <span class="state">difficulty {{.Difficulty}}</span></span>
       </div>
     </a>
 
@@ -101,9 +98,7 @@
       <div class="frame"><div class="board"><span class="dim">·····</span></div></div>
       <div class="cap">
         <span class="name"><span>Wordle</span>
-          <span class="state{{if .Wordle.Solved}} done{{end}}">
-            six guesses{{with .Wordle.Status}} · {{.}}{{end}}{{if .Wordle.Streak}} · streak {{.Wordle.Streak}}{{end}}
-          </span></span>
+          <span class="state">six guesses</span></span>
       </div>
     </a>
   </section>

@@ -34,13 +34,29 @@ func TestHubToday(t *testing.T) {
 	if !strings.Contains(body, "/art/"+todayUTC()+".svg") {
 		t.Error("hub art card should embed the day's SVG plate")
 	}
-	// Every HTML page embeds session state (nav login/logout, solve status),
-	// so even the anonymous hub must never be shared-cacheable.
-	if cc := rec.Header().Get("Cache-Control"); cc != "private, no-cache" {
-		t.Errorf("hub cache-control = %q, want private, no-cache", cc)
+	// No page varies per visitor anymore, so the hub HTML is publicly
+	// cacheable for minutes.
+	if cc := rec.Header().Get("Cache-Control"); cc != "public, max-age=600" {
+		t.Errorf("hub cache-control = %q, want public, max-age=600", cc)
 	}
 	if rec.Header().Get("ETag") != "" {
 		t.Error("HTML pages must not carry an ETag")
+	}
+	// No login affordance and no solve tracking anywhere on the page.
+	for _, banned := range []string{"Log in", "Log out", "/login", "/logout", "streak", "Streak"} {
+		if strings.Contains(body, banned) {
+			t.Errorf("hub must not contain %q", banned)
+		}
+	}
+}
+
+// TestLoginRoutesGone pins down that daily carries no auth surface at all.
+func TestLoginRoutesGone(t *testing.T) {
+	s := newSudokuTestServer(t)
+	for _, path := range []string{"/login", "/logout"} {
+		if rec := hubGet(t, s, path); rec.Code != 404 {
+			t.Errorf("GET %s = %d, want 404", path, rec.Code)
+		}
 	}
 }
 
@@ -71,7 +87,6 @@ func TestHubRouting(t *testing.T) {
 		"/art":               "HYPERSTRUCTURE",    // the art page eyebrow
 		"/sudoku":            "sudoku-grid",       // the sudoku grid
 		"/wordle":            "wordle-grid",       // the wordle grid
-		"/login":             "password",          // the login form
 		"/status":            `"service"`,         // JSON status
 		"/api/wordle":        `"cid"`,             // public wordle JSON
 		"/static/styles.css": "--ink",             // the shared theme
@@ -95,39 +110,5 @@ func TestHubRouting(t *testing.T) {
 	// Deeper legacy redirects still work.
 	if rec := hubGet(t, s, "/archive"); rec.Code != 301 {
 		t.Errorf("/archive = %d, want 301", rec.Code)
-	}
-}
-
-func TestHubShowsSolveStateWhenAuthed(t *testing.T) {
-	s := newSudokuTestServer(t)
-	cookie := loginCookie(t, s)
-	date := "2026-06-01"
-	if err := upsertSolveState(s.db, &solveState{
-		Domain: domainWordle, Date: date, Payload: `{"guesses":[],"hard":false}`,
-		Solved: true, SolveMs: 61000,
-	}); err != nil {
-		t.Fatalf("seed state: %v", err)
-	}
-
-	req := httptest.NewRequest("GET", "/"+date, nil)
-	req.Header.Set("Accept-Encoding", "identity")
-	req.AddCookie(cookie)
-	rec := httptest.NewRecorder()
-	s.routes().ServeHTTP(rec, req)
-	body := rec.Body.String()
-	if rec.Code != 200 || !strings.Contains(body, "solved · 1:01") {
-		t.Errorf("authed hub = %d, solved line present: %v", rec.Code,
-			strings.Contains(body, "solved · 1:01"))
-	}
-	if !strings.Contains(body, "unplayed") {
-		t.Error("authed hub should mark the unplayed sudoku")
-	}
-	if cc := rec.Header().Get("Cache-Control"); !strings.Contains(cc, "private") {
-		t.Errorf("authed hub cache-control = %q, want private", cc)
-	}
-
-	// The anonymous hub shows no play state.
-	if rec := hubGet(t, s, "/"+date); strings.Contains(rec.Body.String(), "unplayed") {
-		t.Error("anonymous hub must not show play state")
 	}
 }

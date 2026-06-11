@@ -1,8 +1,10 @@
-// wordle grid behavior — vanilla JS. The server-rendered grid shows restored
-// guesses without this file; it adds the typing surface: physical keyboards
-// via document keydown, mobile keyboards via the visually-hidden input, Enter
-// submits to the stateless guess endpoint, and authed visitors get their
-// state persisted after every accepted guess.
+// wordle grid behavior — vanilla JS. The server renders an empty grid; this
+// file adds the typing surface: physical keyboards via document keydown,
+// mobile keyboards via the visually-hidden input, Enter submits to the
+// stateless guess endpoint. Continuity between visits lives in localStorage
+// only, keyed by artifact and date (daily:wordle:YYYY-MM-DD) — guesses,
+// scored feedback, the hard-mode flag, and completion; nothing is ever sent
+// to or tracked by the server beyond each one-shot guess call.
 (function () {
   "use strict";
 
@@ -10,13 +12,8 @@
   if (!grid) return;
 
   var date = grid.dataset.date;
-  var authed = grid.dataset.authed === "true";
-  var hard = grid.dataset.hard === "true";
-  var over = grid.dataset.over === "true";
-  var savedMs = parseInt(grid.dataset.solvems || "0", 10) || 0;
+  var storeKey = "daily:wordle:" + date;
   var loadedAt = Date.now();
-  var guesses = [];
-  try { guesses = JSON.parse(grid.dataset.guesses || "[]") || []; } catch (e) { guesses = []; }
 
   var rows = Array.prototype.slice.call(grid.querySelectorAll(".wordle-row"));
   var status = document.getElementById("wordle-status");
@@ -54,19 +51,70 @@
     });
   }
 
-  function saveState(solvedNow) {
-    if (!authed) return;
-    fetch("/wordle/" + date + "/state", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
+  // ── local-only continuity ──────────────────────────────────────────────
+  // load/save round-trip the day's game through localStorage so a reload
+  // repaints the board without asking the server anything.
+
+  function load() {
+    try {
+      var raw = localStorage.getItem(storeKey);
+      return raw ? JSON.parse(raw) : null;
+    } catch (e) {
+      return null;
+    }
+  }
+
+  function saveState() {
+    try {
+      localStorage.setItem(storeKey, JSON.stringify({
         guesses: guesses,
+        feedback: feedback,
         hard: hard,
-        solveMs: savedMs + (Date.now() - loadedAt),
-      }),
-    }).catch(function () {
-      setStatus((solvedNow ? "solved · " : "") + "save failed", true);
-    });
+        solved: solvedGame,
+        over: over,
+        answer: answer,
+        solveMs: solvedGame ? savedMs : savedMs + (Date.now() - loadedAt),
+      }));
+    } catch (e) { /* storage full or blocked — play on without continuity */ }
+  }
+
+  var saved = load() || {};
+  var guesses = Array.isArray(saved.guesses) ? saved.guesses : [];
+  var feedback = Array.isArray(saved.feedback) ? saved.feedback : [];
+  var hard = !!saved.hard;
+  var solvedGame = !!saved.solved;
+  var over = !!saved.over;
+  var answer = typeof saved.answer === "string" ? saved.answer : "";
+  var savedMs = typeof saved.solveMs === "number" && saved.solveMs > 0 ? saved.solveMs : 0;
+
+  // A stored game only restores if guesses and feedback line up — anything
+  // odd degrades to a fresh board rather than a broken one.
+  if (guesses.length !== feedback.length || guesses.length > rows.length) {
+    guesses = [];
+    feedback = [];
+    solvedGame = false;
+    over = false;
+    answer = "";
+  }
+
+  function fmt(ms) {
+    var sec = Math.floor(ms / 1000);
+    return Math.floor(sec / 60) + ":" + String(sec % 60).padStart(2, "0");
+  }
+
+  // Repaint the restored game.
+  guesses.forEach(function (g, i) { paintFeedback(i, g, feedback[i]); });
+  if (hardBox) {
+    hardBox.checked = hard;
+    hardBox.disabled = over || guesses.length > 0; // mode locks once play begins
+  }
+  if (solvedGame) {
+    setStatus("solved in " + guesses.length + "/" + rows.length +
+      (savedMs > 0 ? " · " + fmt(savedMs) : ""));
+  } else if (over) {
+    setStatus("out of guesses" + (answer ? " · answer " + answer.toUpperCase() : ""), true);
+  } else if (guesses.length > 0) {
+    setStatus(guesses.length + "/" + rows.length + " guessed");
   }
 
   function submit() {
@@ -92,24 +140,27 @@
           return; // the guess is not consumed — the row stays editable
         }
         var word = current;
+        var fb = d.feedback.join("");
         current = "";
-        paintFeedback(guesses.length, word, d.feedback.join(""));
+        paintFeedback(guesses.length, word, fb);
         guesses.push(word);
+        feedback.push(fb);
         if (hardBox) hardBox.disabled = true; // mode locks once play begins
         if (d.solved) {
           over = true;
+          solvedGame = true;
+          savedMs = savedMs + (Date.now() - loadedAt);
+          loadedAt = Date.now();
           setStatus("solved in " + guesses.length + "/" + rows.length +
-            (authed ? " · saving…" : " · log in to keep streaks"));
+            " · " + fmt(savedMs));
         } else if (d.over) {
           over = true;
-          setStatus("out of guesses · answer " + (d.answer || "").toUpperCase(), true);
+          answer = d.answer || "";
+          setStatus("out of guesses · answer " + answer.toUpperCase(), true);
         } else {
           setStatus(guesses.length + "/" + rows.length + " guessed");
         }
-        if (authed) {
-          saveState(d.solved);
-          if (d.solved) setStatus("solved in " + guesses.length + "/" + rows.length);
-        }
+        saveState();
       })
       .catch(function () {
         busy = false;
@@ -163,6 +214,9 @@
   }
 
   if (hardBox) {
-    hardBox.addEventListener("change", function () { hard = hardBox.checked; });
+    hardBox.addEventListener("change", function () {
+      hard = hardBox.checked;
+      saveState();
+    });
   }
 })();

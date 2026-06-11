@@ -66,12 +66,11 @@
   </div>
 
   <section class="sudoku-wrap">
-    <div class="sudoku-grid" id="sudoku-grid" data-date="{{.Date}}"
-         data-authed="{{if .Authed}}true{{else}}false{{end}}" data-solvems="{{.SolveMs}}">
+    <div class="sudoku-grid" id="sudoku-grid" data-date="{{.Date}}">
       {{range .Cells}}
         {{if .Given}}<div class="cell given{{if .BR}} br{{end}}{{if .BB}} bb{{end}}">{{.Val}}</div>
         {{else}}<div class="cell{{if .BR}} br{{end}}{{if .BB}} bb{{end}}"><input type="text" maxlength="1"
-          inputmode="numeric" pattern="[1-9]" autocomplete="off" value="{{.Entry}}"
+          inputmode="numeric" pattern="[1-9]" autocomplete="off"
           aria-label="row {{.Row}} column {{.Col}}"></div>{{end}}
       {{end}}
     </div>
@@ -79,17 +78,13 @@
     <div class="sudoku-controls">
       <button type="button" id="sudoku-check">Check</button>
       <button type="button" id="sudoku-clear">Clear</button>
-      <span class="sudoku-status" id="sudoku-status">{{.Status}}</span>
+      <span class="sudoku-status" id="sudoku-status"></span>
     </div>
-    {{if not .Authed}}
-      <p class="hint sudoku-hint"><a href="/login">Log in</a> to save progress.</p>
-    {{end}}
   </section>
 
   <dl class="sudoku-meta">
     <div><dt>Date</dt><dd>{{.Date}} · {{.Weekday}}</dd></div>
     <div><dt>Difficulty</dt><dd>{{.Difficulty}} · {{.ClueCount}} clues</dd></div>
-    <div><dt>Streak</dt><dd>{{.Streak}} day{{if ne .Streak 1}}s{{end}}</dd></div>
     <div><dt>CID</dt><dd>{{.CID}}</dd></div>
   </dl>
 

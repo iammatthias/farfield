@@ -113,7 +113,7 @@ func TestWordleCIDStableAndOpaque(t *testing.T) {
 }
 
 // postJSON posts a JSON body through the full route stack.
-func postJSON(t *testing.T, h http.Handler, path string, body any, cookies ...*http.Cookie) *httptest.ResponseRecorder {
+func postJSON(t *testing.T, h http.Handler, path string, body any) *httptest.ResponseRecorder {
 	t.Helper()
 	raw, err := json.Marshal(body)
 	if err != nil {
@@ -122,9 +122,6 @@ func postJSON(t *testing.T, h http.Handler, path string, body any, cookies ...*h
 	req := httptest.NewRequest("POST", path, bytes.NewReader(raw))
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Accept-Encoding", "identity")
-	for _, c := range cookies {
-		req.AddCookie(c)
-	}
 	rec := httptest.NewRecorder()
 	h.ServeHTTP(rec, req)
 	return rec
@@ -299,83 +296,10 @@ func TestWordleAPIHasNoAnswer(t *testing.T) {
 	}
 }
 
-func TestWordleStatePersistAndRestore(t *testing.T) {
-	s := newSudokuTestServer(t)
-	h := s.routes()
-	cookie := loginCookie(t, s)
-	date := "2026-06-03"
-	answer := wordleAnswer(date)
-	miss := "crane"
-	if miss == answer {
-		miss = "slate"
-	}
-
-	// Unauthenticated writes are refused.
-	if rec := postJSON(t, h, "/wordle/"+date+"/state",
-		wordleStateBody{Guesses: []string{miss}}); rec.Code != 401 {
-		t.Fatalf("anonymous state write = %d, want 401", rec.Code)
-	}
-
-	// Solved is recomputed server-side, not trusted: misses save unsolved…
-	sixMisses := []string{miss, miss, miss, miss, miss, miss}
-	rec := postJSON(t, h, "/wordle/"+date+"/state",
-		wordleStateBody{Guesses: sixMisses, SolveMs: 1000}, cookie)
-	if rec.Code != 200 || strings.Contains(rec.Body.String(), `"solved":true`) {
-		t.Fatalf("miss state = %d body %s", rec.Code, rec.Body.String())
-	}
-
-	// A finished game's authed page reveals the answer ("answer XXXXX" in
-	// the status line); the anonymous page never carries it.
-	get := func(c *http.Cookie) string {
-		req := httptest.NewRequest("GET", "/wordle/"+date, nil)
-		req.Header.Set("Accept-Encoding", "identity")
-		if c != nil {
-			req.AddCookie(c)
-		}
-		rec := httptest.NewRecorder()
-		h.ServeHTTP(rec, req)
-		if rec.Code != 200 {
-			t.Fatalf("page = %d", rec.Code)
-		}
-		return rec.Body.String()
-	}
-	if body := get(cookie); !strings.Contains(body, "answer "+strings.ToUpper(answer)) {
-		t.Error("finished authed page should reveal the answer")
-	}
-	if body := get(nil); strings.Contains(body, strings.ToUpper(answer)) {
-		t.Error("the anonymous page must not contain the answer")
-	}
-
-	// …and the answer as the final guess saves solved.
-	rec = postJSON(t, h, "/wordle/"+date+"/state",
-		wordleStateBody{Guesses: []string{miss, answer}, SolveMs: 90000}, cookie)
-	if rec.Code != 200 || !strings.Contains(rec.Body.String(), `"solved":true`) {
-		t.Fatalf("solved state = %d body %s", rec.Code, rec.Body.String())
-	}
-	if body := get(cookie); !strings.Contains(body, "solved in 2/6") {
-		t.Error("authed page should restore the solved status line")
-	}
-
-	// Junk is rejected: non-words, and guesses after the answer.
-	if rec := postJSON(t, h, "/wordle/"+date+"/state",
-		wordleStateBody{Guesses: []string{"zzzzz"}}, cookie); rec.Code != 400 {
-		t.Errorf("non-word state = %d, want 400", rec.Code)
-	}
-	if rec := postJSON(t, h, "/wordle/"+date+"/state",
-		wordleStateBody{Guesses: []string{answer, miss}}, cookie); rec.Code != 400 {
-		t.Errorf("guess after answer = %d, want 400", rec.Code)
-	}
-
-	// Solved state feeds the streak.
-	streak, err := solveStreak(s.db, domainWordle, date)
-	if err != nil || streak != 1 {
-		t.Errorf("streak = %d (%v), want 1", streak, err)
-	}
-}
-
 func TestWordlePageRenders(t *testing.T) {
 	s := newSudokuTestServer(t)
 	h := s.routes()
+	answer := wordleAnswer(todayUTC())
 
 	req := httptest.NewRequest("GET", "/wordle", nil)
 	req.Header.Set("Accept-Encoding", "identity")
@@ -385,8 +309,21 @@ func TestWordlePageRenders(t *testing.T) {
 		t.Errorf("/wordle = %d, grid present: %v", rec.Code,
 			strings.Contains(rec.Body.String(), "wordle-grid"))
 	}
-	if !strings.Contains(rec.Body.String(), "/static/wordle.js?v="+wordleJSVer) {
+	body := rec.Body.String()
+	if !strings.Contains(body, "/static/wordle.js?v="+wordleJSVer) {
 		t.Error("page must link the fingerprinted wordle.js")
+	}
+	if strings.Contains(body, "Log in") || strings.Contains(body, "/login") {
+		t.Error("the page must carry no login affordance")
+	}
+	if strings.Contains(body, "treak") { // Streak/streak
+		t.Error("the page must not show a streak")
+	}
+	if strings.Contains(body, strings.ToUpper(answer)) {
+		t.Error("the page must not contain the answer")
+	}
+	if cc := rec.Header().Get("Cache-Control"); cc != "public, max-age=600" {
+		t.Errorf("wordle page cache-control = %q, want public, max-age=600", cc)
 	}
 
 	// Out-of-range dates do not exist.

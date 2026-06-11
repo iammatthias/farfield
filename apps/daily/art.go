@@ -84,10 +84,9 @@ func (s *Server) handleArtDay(w http.ResponseWriter, r *http.Request) {
 	s.renderArtPage(w, r, date)
 }
 
-// renderArtPage renders the plate page for one date. The plate itself is
-// immutable, but the page around it embeds session state (the masthead's
-// log in / log out), so the HTML is never shared-cacheable — the long-lived
-// caching lives on the .svg and /api/art routes instead.
+// renderArtPage renders the plate page for one date. Nothing on the page
+// varies per visitor, so the HTML is publicly cacheable — a past day's page
+// for a day (its plate is immutable), today's for minutes.
 func (s *Server) renderArtPage(w http.ResponseWriter, r *http.Request, date string) {
 	n, ok := artDayIndex(date)
 	if !ok {
@@ -107,7 +106,11 @@ func (s *Server) renderArtPage(w http.ResponseWriter, r *http.Request, date stri
 	if !isToday {
 		svgURL, jsonURL = "/art/"+date+".svg", "/api/art/"+date
 	}
-	noCacheHTML(w)
+	maxAge := todayMaxAge
+	if !isToday {
+		maxAge = publicMaxAge // a past day's plate never changes
+	}
+	cacheFor(w, maxAge)
 	s.rd.Render(w, "art.html", map[string]any{
 		"Date":         p.Date,
 		"N":            p.N,
@@ -122,7 +125,7 @@ func (s *Server) renderArtPage(w http.ResponseWriter, r *http.Request, date stri
 		"PrevURL":      prevURL,
 		"NextURL":      nextURL,
 		"StructureURL": fmt.Sprintf("/art/structure?w=%d", p.Coord[3]),
-		"Nav":          navData(date, "art", s.authed(r)),
+		"Nav":          navData(date, "art"),
 	})
 }
 
@@ -176,7 +179,7 @@ func (s *Server) handleArtStructure(w http.ResponseWriter, r *http.Request) {
 			Current: i == ws, Count: counts[i], BarPx: px,
 		}
 	}
-	noCacheHTML(w)
+	cacheFor(w, todayMaxAge)
 	s.rd.Render(w, "art_structure.html", map[string]any{
 		"W":          ws,
 		"N":          n,
@@ -191,7 +194,7 @@ func (s *Server) handleArtStructure(w http.ResponseWriter, r *http.Request) {
 		"JSVer":      structureJSVer,
 		"ThreeVer":   threeJSVer,
 		"OrbitVer":   orbitJSVer,
-		"Nav":        navData(today, "art", s.authed(r)),
+		"Nav":        navData(today, "art"),
 	})
 }
 

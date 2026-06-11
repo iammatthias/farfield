@@ -1,6 +1,9 @@
 // sudoku grid behavior — vanilla JS, progressive: the server-rendered grid
 // works without this file; it only adds keyboard movement, the check/clear
-// buttons, and solve-state saves for authed visitors.
+// buttons, and continuity between visits. Progress lives in localStorage
+// only, keyed by artifact and date (daily:sudoku:YYYY-MM-DD) — nothing is
+// ever sent to or tracked by the server; the stateless check endpoint judges
+// a grid and forgets it.
 (function () {
   "use strict";
 
@@ -8,8 +11,7 @@
   if (!grid) return;
 
   var date = grid.dataset.date;
-  var authed = grid.dataset.authed === "true";
-  var savedMs = parseInt(grid.dataset.solvems || "0", 10) || 0;
+  var storeKey = "daily:sudoku:" + date;
   var loadedAt = Date.now();
 
   var cells = Array.prototype.slice.call(grid.querySelectorAll(".cell"));
@@ -45,6 +47,45 @@
     return Math.floor(sec / 60) + ":" + String(sec % 60).padStart(2, "0");
   }
 
+  // ── local-only continuity ──────────────────────────────────────────────
+  // load/save round-trip {entries, solveMs, solved} through localStorage so
+  // a reload restores the board and a solved day keeps its time.
+
+  function load() {
+    try {
+      var raw = localStorage.getItem(storeKey);
+      return raw ? JSON.parse(raw) : null;
+    } catch (e) {
+      return null;
+    }
+  }
+
+  function save(state) {
+    try {
+      localStorage.setItem(storeKey, JSON.stringify(state));
+    } catch (e) { /* storage full or blocked — play on without continuity */ }
+  }
+
+  var saved = load() || {};
+  var savedMs = typeof saved.solveMs === "number" && saved.solveMs > 0 ? saved.solveMs : 0;
+  var solved = !!saved.solved;
+
+  // Restore the in-progress board into the editable cells.
+  if (typeof saved.entries === "string" && saved.entries.length === 81) {
+    inputs.forEach(function (inp, i) {
+      if (inp && /^[1-9]$/.test(saved.entries[i])) inp.value = saved.entries[i];
+    });
+  }
+  if (solved) setStatus("solved · " + fmt(savedMs));
+
+  function elapsedMs() {
+    return solved ? savedMs : savedMs + (Date.now() - loadedAt);
+  }
+
+  function persist() {
+    save({ entries: entries(), solveMs: elapsedMs(), solved: solved });
+  }
+
   // moveFocus walks from cell i in steps of delta until it lands on an
   // editable cell, skipping givens; it stops silently at the grid edge.
   // Horizontal steps flow across row ends so ←/→ traverse the whole grid.
@@ -68,12 +109,14 @@
         e.preventDefault();
         inp.value = "";
         cells[i].classList.remove("conflict");
+        persist();
         return;
       }
       if (/^[1-9]$/.test(k)) {
         e.preventDefault();
         inp.value = k;
         cells[i].classList.remove("conflict");
+        persist();
         moveFocus(i, 1);
       }
     });
@@ -83,6 +126,7 @@
       var m = inp.value.match(/[1-9]/g);
       inp.value = m ? m[m.length - 1] : "";
       cells[i].classList.remove("conflict");
+      persist();
       if (inp.value) moveFocus(i, 1);
     });
   });
@@ -92,38 +136,36 @@
       clearConflicts();
       var e = entries();
       var empty = (e.match(/0/g) || []).length;
-      if (!authed) {
-        setStatus(empty > 0
-          ? empty + " empty · log in to save & check"
-          : "complete · log in to save & check");
+      if (empty > 0) {
+        persist();
+        setStatus(empty + " empty");
         return;
       }
-      if (empty > 0) setStatus("saving · " + empty + " empty…");
-      else setStatus("checking…");
-      fetch("/sudoku/" + date + "/state", {
+      setStatus("checking…");
+      fetch("/sudoku/" + date + "/check", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ entries: e, solveMs: savedMs + (Date.now() - loadedAt) }),
+        body: JSON.stringify({ entries: e }),
       })
         .then(function (r) {
-          if (r.status === 401) { setStatus("session expired · log in again", true); return null; }
-          if (!r.ok) { setStatus("save failed", true); return null; }
+          if (!r.ok) { setStatus("check failed", true); return null; }
           return r.json();
         })
         .then(function (d) {
           if (!d) return;
           if (d.solved) {
-            setStatus("saved · solved in " + fmt(savedMs + (Date.now() - loadedAt)));
+            if (!solved) { savedMs = savedMs + (Date.now() - loadedAt); solved = true; }
+            persist();
+            setStatus("solved · " + fmt(savedMs));
             return;
           }
+          persist();
           if (d.conflicts && d.conflicts.length) {
             d.conflicts.forEach(function (ci) { cells[ci].classList.add("conflict"); });
-            setStatus("saved · " + d.conflicts.length + " conflict" + (d.conflicts.length === 1 ? "" : "s"), true);
-            return;
+            setStatus(d.conflicts.length + " conflict" + (d.conflicts.length === 1 ? "" : "s"), true);
           }
-          setStatus(empty > 0 ? "saved · " + empty + " empty" : "saved");
         })
-        .catch(function () { setStatus("save failed", true); });
+        .catch(function () { setStatus("check failed", true); });
     });
   }
 
@@ -131,7 +173,11 @@
     clearBtn.addEventListener("click", function () {
       inputs.forEach(function (inp) { if (inp) inp.value = ""; });
       clearConflicts();
-      setStatus(authed ? "cleared · not saved yet" : "cleared");
+      solved = false;
+      savedMs = 0;
+      loadedAt = Date.now();
+      try { localStorage.removeItem(storeKey); } catch (e) { /* ignore */ }
+      setStatus("cleared");
     });
   }
 })();

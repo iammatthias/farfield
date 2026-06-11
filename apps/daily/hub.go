@@ -30,21 +30,13 @@ func (s *Server) handleHubDay(w http.ResponseWriter, r *http.Request) {
 	s.renderHubPage(w, r, r.PathValue("date"))
 }
 
-// hubGameStatus is one game card's play-state line.
-type hubGameStatus struct {
-	Status string // "", or "solved …" / progress text
-	Solved bool
-	Streak int
-}
-
-// renderHubPage renders the hub for one date. The page embeds session state
-// (nav login/logout, solve status), so it is never shared-cacheable.
+// renderHubPage renders the hub for one date. The page is the same for every
+// visitor, so it is publicly cacheable for minutes.
 func (s *Server) renderHubPage(w http.ResponseWriter, r *http.Request, date string) {
 	if !hubDayValid(date) {
 		http.NotFound(w, r)
 		return
 	}
-	authed := s.authed(r)
 	today := todayUTC()
 	isToday := date == today
 
@@ -70,18 +62,8 @@ func (s *Server) renderHubPage(w http.ResponseWriter, r *http.Request, date stri
 		artSVG = "/art/" + date + ".svg"
 	}
 
-	// Sudoku and wordle cards — difficulty plus, when authed, play state.
+	// Sudoku card metadata — the difficulty and clue count derive from the date.
 	p := sudokuFor(date)
-	sudoku, err := s.hubGameStatus(domainSudoku, date, today, authed)
-	if err != nil {
-		s.fail(w, "hub sudoku", err)
-		return
-	}
-	wordle, err := s.hubGameStatus(domainWordle, date, today, authed)
-	if err != nil {
-		s.fail(w, "hub wordle", err)
-		return
-	}
 
 	prevURL, nextURL := "", ""
 	if date > artifactEpoch {
@@ -95,61 +77,27 @@ func (s *Server) renderHubPage(w http.ResponseWriter, r *http.Request, date stri
 		}
 	}
 
-	noCacheHTML(w)
+	cacheFor(w, todayMaxAge)
 	s.rd.Render(w, "hub.html", map[string]any{
 		"Date":       date,
 		"Weekday":    p.Weekday,
 		"IsToday":    isToday,
-		"Authed":     authed,
 		"Photo":      photo,
 		"ArtURL":     artURL,
 		"ArtSVG":     artSVG,
 		"Difficulty": p.Difficulty,
 		"ClueCount":  p.ClueCount,
-		"Sudoku":     sudoku,
-		"Wordle":     wordle,
 		"Epoch":      artifactEpoch,
 		"PrevURL":    prevURL,
 		"NextURL":    nextURL,
-		"Nav":        navData(date, "", authed),
+		"Nav":        navData(date, ""),
 	})
-}
-
-// hubGameStatus assembles one game card's line: streak always (it is the
-// instance's progress either way), play state only when authed.
-func (s *Server) hubGameStatus(domain, date, today string, authed bool) (hubGameStatus, error) {
-	streak, err := solveStreak(s.db, domain, today)
-	if err != nil {
-		return hubGameStatus{}, err
-	}
-	gs := hubGameStatus{Streak: streak}
-	if !authed {
-		return gs, nil
-	}
-	st, err := getSolveState(s.db, domain, date)
-	if err != nil {
-		return hubGameStatus{}, err
-	}
-	switch {
-	case st == nil:
-		gs.Status = "unplayed"
-	case st.Solved:
-		gs.Solved = true
-		gs.Status = "solved"
-		if st.SolveMs > 0 {
-			gs.Status += " · " + fmtSolveTime(st.SolveMs)
-		}
-	default:
-		gs.Status = "in progress"
-	}
-	return gs, nil
 }
 
 // navData builds the masthead nav for one date — today uses the canonical
 // undated routes, past days the date-addressed ones. section names the
-// artifact the current page belongs to ("" for the hub and login), and
-// authed picks the log in / log out link.
-func navData(date, section string, authed bool) map[string]any {
+// artifact the current page belongs to ("" for the hub).
+func navData(date, section string) map[string]any {
 	link := func(root string) string {
 		if date == todayUTC() {
 			return root
@@ -162,6 +110,5 @@ func navData(date, section string, authed bool) map[string]any {
 		"Sudoku":  link("/sudoku"),
 		"Wordle":  link("/wordle"),
 		"Section": section,
-		"Authed":  authed,
 	}
 }

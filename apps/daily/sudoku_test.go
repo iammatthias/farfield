@@ -3,17 +3,13 @@ package main
 import (
 	"bytes"
 	"encoding/json"
-	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
 	"strings"
 	"testing"
-	"time"
 
-	"github.com/iammatthias/farfield/lib/auth"
 	"github.com/iammatthias/farfield/lib/cid"
-	"github.com/iammatthias/farfield/lib/store"
 	"github.com/iammatthias/farfield/lib/theme"
 	"github.com/iammatthias/farfield/lib/web"
 )
@@ -121,20 +117,9 @@ func newSudokuTestServer(t *testing.T) *Server {
 		db:      db,
 		fetcher: newFetcher("DEMO_KEY"),
 		rd:      &web.Renderer{Templates: tmpl, AssetVer: theme.Version},
-		auth:    &web.Auth{DB: db, Password: "t"},
 	}
 	s.fetcher.noteNASAError() // keep the test offline
 	return s
-}
-
-// loginCookie opens a session directly in the store and returns its cookie.
-func loginCookie(t *testing.T, s *Server) *http.Cookie {
-	t.Helper()
-	token := auth.NewSessionToken()
-	if err := store.InsertSession(s.db, token, time.Now().Add(time.Hour)); err != nil {
-		t.Fatalf("insert session: %v", err)
-	}
-	return auth.SessionCookie(token, false)
 }
 
 func TestSudokuAPIJSONShape(t *testing.T) {
@@ -175,44 +160,35 @@ func TestSudokuAPIJSONShape(t *testing.T) {
 	}
 }
 
-func TestSudokuStatePost(t *testing.T) {
+func TestSudokuCheckPost(t *testing.T) {
 	s := newSudokuTestServer(t)
 	h := s.routes()
 	date := "2026-06-03"
 	p, sol := sudokuDerive(date)
 	solution := gridString(sol)
 
-	post := func(entries string, ck *http.Cookie) *httptest.ResponseRecorder {
-		body, _ := json.Marshal(map[string]any{"entries": entries, "solveMs": 90000})
-		req := httptest.NewRequest("POST", "/sudoku/"+date+"/state", bytes.NewReader(body))
+	post := func(entries string) *httptest.ResponseRecorder {
+		body, _ := json.Marshal(map[string]any{"entries": entries})
+		req := httptest.NewRequest("POST", "/sudoku/"+date+"/check", bytes.NewReader(body))
 		req.Header.Set("Content-Type", "application/json")
-		if ck != nil {
-			req.AddCookie(ck)
-		}
 		rec := httptest.NewRecorder()
 		h.ServeHTTP(rec, req)
 		return rec
 	}
 
-	// Unauthed → 401 JSON.
-	if rec := post(p.Clues, nil); rec.Code != http.StatusUnauthorized {
-		t.Fatalf("unauthed status = %d, want 401", rec.Code)
-	}
-
-	ck := loginCookie(t, s)
-
-	// Partial save persists, unsolved, no conflicts.
-	partial := []byte(p.Clues)
 	var open []int // cells the player fills
 	for i := range 81 {
 		if p.Clues[i] == '0' {
 			open = append(open, i)
 		}
 	}
+
+	// Partial grid — anonymous, no cookie — is unsolved with no conflicts.
+	partial := []byte(p.Clues)
 	partial[open[0]] = solution[open[0]]
-	rec := post(string(partial), ck)
+	rec := post(string(partial))
 	if rec.Code != http.StatusOK {
-		t.Fatalf("partial save status = %d, want 200; body %s", rec.Code, rec.Body)
+		t.Fatalf("partial check status = %d, want 200; body %s", rec.Code, rec.Body)
 	}
 	var res struct {
 		Solved    bool  `json:"solved"`
@@ -220,28 +196,21 @@ func TestSudokuStatePost(t *testing.T) {
 	}
 	_ = json.Unmarshal(rec.Body.Bytes(), &res)
 	if res.Solved || len(res.Conflicts) != 0 {
-		t.Errorf("partial save = %+v, want unsolved with no conflicts", res)
-	}
-	st, err := getSolveState(s.db, domainSudoku, date)
-	if err != nil || st == nil || st.Payload != string(partial) || st.Solved || st.SolveMs != 90000 {
-		t.Fatalf("persisted state = %+v, err %v", st, err)
+		t.Errorf("partial check = %+v, want unsolved with no conflicts", res)
 	}
 
 	// Complete and correct → solved.
-	rec = post(solution, ck)
+	rec = post(solution)
 	_ = json.Unmarshal(rec.Body.Bytes(), &res)
 	if rec.Code != http.StatusOK || !res.Solved || len(res.Conflicts) != 0 {
 		t.Fatalf("correct grid: status %d, result %+v", rec.Code, res)
-	}
-	if st, _ := getSolveState(s.db, domainSudoku, date); st == nil || !st.Solved {
-		t.Fatal("solved state should persist")
 	}
 
 	// Complete but wrong → unsolved, with the wrong cell in conflicts.
 	wrong := []byte(solution)
 	i := open[0]
 	wrong[i] = '1' + (wrong[i]-'1'+1)%9 // a different digit, still 1..9
-	rec = post(string(wrong), ck)
+	rec = post(string(wrong))
 	_ = json.Unmarshal(rec.Body.Bytes(), &res)
 	if rec.Code != http.StatusOK || res.Solved {
 		t.Fatalf("wrong grid: status %d, result %+v", rec.Code, res)
@@ -264,18 +233,31 @@ func TestSudokuStatePost(t *testing.T) {
 			break
 		}
 	}
-	if rec := post(string(bad), ck); rec.Code != http.StatusBadRequest {
+	if rec := post(string(bad)); rec.Code != http.StatusBadRequest {
 		t.Errorf("givens-violating entries: status %d, want 400", rec.Code)
+	}
+
+	// The check is stateless: the database holds no solve-state (or session)
+	// tables at all — openDB drops them.
+	for _, table := range []string{"solve_state", "sessions"} {
+		var n int
+		if err := s.db.QueryRow(
+			`SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name=?`,
+			table).Scan(&n); err != nil {
+			t.Fatalf("sqlite_master: %v", err)
+		}
+		if n != 0 {
+			t.Errorf("table %q exists — checks must persist nothing", table)
+		}
 	}
 }
 
-func TestSudokuPageRendersAndRestoresState(t *testing.T) {
+func TestSudokuPageRenders(t *testing.T) {
 	s := newSudokuTestServer(t)
 	h := s.routes()
 	date := "2026-06-03"
-	p, sol := sudokuDerive(date)
+	_, sol := sudokuDerive(date)
 
-	// Unauthed page renders the grid and the login hint.
 	rec := httptest.NewRecorder()
 	h.ServeHTTP(rec, httptest.NewRequest("GET", "/sudoku/"+date, nil))
 	if rec.Code != http.StatusOK {
@@ -285,89 +267,16 @@ func TestSudokuPageRendersAndRestoresState(t *testing.T) {
 	if !strings.Contains(html, `id="sudoku-grid"`) {
 		t.Error("page should contain the grid")
 	}
-	if !strings.Contains(html, "save progress") {
-		t.Error("unauthed page should hint at logging in")
+	if strings.Contains(html, "Log in") || strings.Contains(html, "/login") {
+		t.Error("the page must carry no login affordance")
+	}
+	if strings.Contains(html, "treak") { // Streak/streak
+		t.Error("the page must not show a streak")
 	}
 	if strings.Contains(html, gridString(sol)) {
 		t.Error("the solution string must never reach the page")
 	}
-
-	// A saved entry is restored into the grid when authed.
-	var i int
-	for i = range 81 {
-		if p.Clues[i] == '0' {
-			break
-		}
-	}
-	entries := []byte(p.Clues)
-	entries[i] = sol[i] + '0'
-	if err := upsertSolveState(s.db, &solveState{
-		Domain: domainSudoku, Date: date, Payload: string(entries),
-	}); err != nil {
-		t.Fatalf("seed state: %v", err)
-	}
-	req := httptest.NewRequest("GET", "/sudoku/"+date, nil)
-	req.AddCookie(loginCookie(t, s))
-	rec = httptest.NewRecorder()
-	h.ServeHTTP(rec, req)
-	want := fmt.Sprintf(`value="%c"`, entries[i])
-	if !strings.Contains(rec.Body.String(), want) {
-		t.Errorf("authed page should restore the saved entry (%s)", want)
-	}
-}
-
-func TestSolveStreak(t *testing.T) {
-	db, err := openDB(filepath.Join(t.TempDir(), "daily.sqlite"))
-	if err != nil {
-		t.Fatalf("openDB: %v", err)
-	}
-	defer db.Close()
-
-	today := todayUTC()
-	seed := func(date string, solved bool) {
-		t.Helper()
-		if err := upsertSolveState(db, &solveState{
-			Domain: domainSudoku, Date: date, Payload: "", Solved: solved,
-		}); err != nil {
-			t.Fatalf("seed %s: %v", date, err)
-		}
-	}
-
-	if n, _ := solveStreak(db, domainSudoku, today); n != 0 {
-		t.Errorf("empty table streak = %d, want 0", n)
-	}
-
-	// Three consecutive solved days ending today.
-	seed(today, true)
-	seed(addDays(today, -1), true)
-	seed(addDays(today, -2), true)
-	if n, _ := solveStreak(db, domainSudoku, today); n != 3 {
-		t.Errorf("streak = %d, want 3", n)
-	}
-
-	// A gap stops the count.
-	seed(addDays(today, -4), true)
-	if n, _ := solveStreak(db, domainSudoku, today); n != 3 {
-		t.Errorf("streak across a gap = %d, want 3", n)
-	}
-
-	// An unsolved day breaks the run at the break point.
-	seed(addDays(today, -1), false)
-	if n, _ := solveStreak(db, domainSudoku, today); n != 1 {
-		t.Errorf("streak with unsolved yesterday = %d, want 1", n)
-	}
-
-	// Today still pending: the run ending yesterday counts.
-	seed(addDays(today, -1), true)
-	seed(today, false)
-	if n, _ := solveStreak(db, domainSudoku, today); n != 2 {
-		t.Errorf("pending-today streak = %d, want 2 (yesterday + day before)", n)
-	}
-
-	// Other domains do not contribute.
-	seed2 := &solveState{Domain: "wordle", Date: today, Solved: true}
-	_ = upsertSolveState(db, seed2)
-	if n, _ := solveStreak(db, "wordle", today); n != 1 {
-		t.Errorf("wordle streak = %d, want 1", n)
+	if cc := rec.Header().Get("Cache-Control"); cc != "public, max-age=600" {
+		t.Errorf("sudoku page cache-control = %q, want public, max-age=600", cc)
 	}
 }

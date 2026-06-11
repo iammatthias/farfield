@@ -134,7 +134,6 @@
       <a href="{{.Art}}"{{if eq .Section "art"}} class="on" aria-current="page"{{end}}>Art</a>
       <a href="{{.Sudoku}}"{{if eq .Section "sudoku"}} class="on" aria-current="page"{{end}}>Sudoku</a>
       <a href="{{.Wordle}}"{{if eq .Section "wordle"}} class="on" aria-current="page"{{end}}>Wordle</a>
-      {{if .Authed}}<a href="/logout">Log out</a>{{else}}<a href="/login">Log in</a>{{end}}
     </nav>
   </header>
 {{end}}{{end}}

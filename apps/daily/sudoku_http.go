@@ -3,7 +3,6 @@ package main
 import (
 	_ "embed"
 	"encoding/json"
-	"fmt"
 	"net/http"
 	"strings"
 
@@ -11,10 +10,10 @@ import (
 	"github.com/iammatthias/farfield/lib/web"
 )
 
-// HTTP surface of the sudoku artifact. Reads are public — the puzzle derives
-// from the date and anyone may play in-page. Only the solve-state write is
-// session-gated, and the solution itself never leaves the server: posted
-// entries are validated against a freshly re-derived solution.
+// HTTP surface of the sudoku artifact. Everything is public — the puzzle
+// derives from the date and anyone may play in-page. The check endpoint is
+// stateless, and the solution itself never leaves the server: posted entries
+// are validated against a freshly re-derived solution.
 
 // sudokuJS is the app-local grid script. It is fingerprinted like the shared
 // theme assets — the page links /static/sudoku.js?v={{.JSVer}} and the
@@ -61,33 +60,18 @@ type sudokuCell struct {
 	Row, Col int
 	Given    bool
 	Val      string // the given digit
-	Entry    string // restored entry, "" when blank
 	BR, BB   bool
 }
 
-// renderSudokuPage renders the puzzle page for one date. When the visitor is
-// authed, saved entries are restored into the grid. The page varies on the
-// session cookie, so it is never publicly cacheable.
+// renderSudokuPage renders the puzzle page for one date. The page is the same
+// for every visitor — in-progress entries live in the browser's localStorage,
+// restored by sudoku.js — so the HTML is publicly cacheable.
 func (s *Server) renderSudokuPage(w http.ResponseWriter, r *http.Request, date string) {
 	if !sudokuDayValid(date) {
 		http.NotFound(w, r)
 		return
 	}
 	p := sudokuFor(date)
-	authed := s.authed(r)
-
-	var st *solveState
-	if authed {
-		var err error
-		if st, err = getSolveState(s.db, domainSudoku, date); err != nil {
-			s.fail(w, "sudoku state", err)
-			return
-		}
-	}
-	entries := ""
-	if st != nil {
-		entries = st.Payload
-	}
 
 	cells := make([]sudokuCell, 81)
 	for i := range cells {
@@ -97,27 +81,8 @@ func (s *Server) renderSudokuPage(w http.ResponseWriter, r *http.Request, date s
 		}
 		if d := p.Clues[i]; d != '0' {
 			c.Given, c.Val = true, string(d)
-		} else if len(entries) == 81 && entries[i] != '0' && entries[i] >= '1' && entries[i] <= '9' {
-			c.Entry = string(entries[i])
 		}
 		cells[i] = c
-	}
-
-	streak, err := solveStreak(s.db, domainSudoku, todayUTC())
-	if err != nil {
-		s.fail(w, "sudoku streak", err)
-		return
-	}
-
-	status := ""
-	solveMs := int64(0)
-	switch {
-	case st != nil && st.Solved:
-		solveMs = st.SolveMs
-		status = "solved in " + fmtSolveTime(st.SolveMs)
-	case st != nil:
-		solveMs = st.SolveMs
-		status = "saved"
 	}
 
 	isToday := date == todayUTC()
@@ -133,8 +98,7 @@ func (s *Server) renderSudokuPage(w http.ResponseWriter, r *http.Request, date s
 		jsonURL = "/api/sudoku/" + date
 	}
 
-	// The grid carries restored per-session state — never share a cached copy.
-	noCacheHTML(w)
+	cacheFor(w, todayMaxAge)
 	s.rd.Render(w, "sudoku.html", map[string]any{
 		"Date":       p.Date,
 		"Clues":      p.Clues,
@@ -143,24 +107,13 @@ func (s *Server) renderSudokuPage(w http.ResponseWriter, r *http.Request, date s
 		"Weekday":    p.Weekday,
 		"CID":        p.CID,
 		"Cells":      cells,
-		"Authed":     authed,
-		"Solved":     st != nil && st.Solved,
-		"SolveMs":    solveMs,
-		"Status":     status,
-		"Streak":     streak,
 		"Epoch":      artifactEpoch,
 		"JSONURL":    jsonURL,
 		"PrevURL":    prevURL,
 		"NextURL":    nextURL,
 		"JSVer":      sudokuJSVer,
-		"Nav":        navData(date, "sudoku", authed),
+		"Nav":        navData(date, "sudoku"),
 	})
-}
-
-// fmtSolveTime renders a solve duration as m:ss.
-func fmtSolveTime(ms int64) string {
-	sec := ms / 1000
-	return fmt.Sprintf("%d:%02d", sec/60, sec%60)
 }
 
 // ── JSON API handlers ──────────────────────────────────────────────────────
@@ -200,25 +153,24 @@ func (s *Server) writeSudokuJSON(w http.ResponseWriter, r *http.Request, date st
 	})
 }
 
-// ── solve-state write ──────────────────────────────────────────────────────
+// ── check endpoint ─────────────────────────────────────────────────────────
 
-// sudokuStateBody is the POST /sudoku/{date}/state request body.
-type sudokuStateBody struct {
+// sudokuCheckBody is the POST /sudoku/{date}/check request body.
+type sudokuCheckBody struct {
 	Entries string `json:"entries"` // 81 chars, '0' for blank
-	SolveMs int64  `json:"solveMs"`
 }
 
-// handleSudokuState persists posted progress for one date — partial saves
-// just persist; a complete grid is judged against the re-derived solution.
-// Conflicts are reported only for a complete-but-wrong grid: the indices
-// whose entries differ from the solution.
-func (s *Server) handleSudokuState(w http.ResponseWriter, r *http.Request) {
+// handleSudokuCheck judges a posted grid against the re-derived solution —
+// public and stateless, nothing is persisted. A partial grid is simply
+// unsolved; conflicts are reported only for a complete-but-wrong grid: the
+// indices whose entries differ from the solution.
+func (s *Server) handleSudokuCheck(w http.ResponseWriter, r *http.Request) {
 	date := r.PathValue("date")
 	if !sudokuDayValid(date) {
 		web.WriteError(w, http.StatusNotFound, "no sudoku for that date")
 		return
 	}
-	var body sudokuStateBody
+	var body sudokuCheckBody
 	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 		web.WriteError(w, http.StatusBadRequest, "invalid JSON")
 		return
@@ -238,19 +190,6 @@ func (s *Server) handleSudokuState(w http.ResponseWriter, r *http.Request) {
 				conflicts = append(conflicts, i)
 			}
 		}
-	}
-	if body.SolveMs < 0 {
-		body.SolveMs = 0
-	}
-	if err := upsertSolveState(s.db, &solveState{
-		Domain:  domainSudoku,
-		Date:    date,
-		Payload: body.Entries,
-		Solved:  solved,
-		SolveMs: body.SolveMs,
-	}); err != nil {
-		web.WriteError(w, http.StatusInternalServerError, "could not save state")
-		return
 	}
 	web.WriteJSON(w, http.StatusOK, map[string]any{
 		"solved":    solved,

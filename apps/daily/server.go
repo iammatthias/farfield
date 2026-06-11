@@ -11,7 +11,6 @@ import (
 	"strconv"
 	"time"
 
-	"github.com/iammatthias/farfield/lib/auth"
 	"github.com/iammatthias/farfield/lib/pulse"
 	"github.com/iammatthias/farfield/lib/store"
 	"github.com/iammatthias/farfield/lib/theme"
@@ -39,7 +38,6 @@ type Server struct {
 	db      *sql.DB
 	fetcher *fetcher
 	rd      *web.Renderer
-	auth    *web.Auth
 }
 
 // backfillCommand warms the NASA cache from the configured photo start
@@ -88,9 +86,6 @@ func run(host, port string) error {
 		return err
 	}
 	defer db.Close()
-	if err := store.PruneSessions(db); err != nil {
-		slog.Warn("could not prune sessions", "err", err)
-	}
 
 	tmpl, err := web.ParseTemplates(assets, templateFuncs)
 	if err != nil {
@@ -101,13 +96,6 @@ func run(host, port string) error {
 		db:      db,
 		fetcher: newFetcher(store.Env("NASA_API_KEY", "DEMO_KEY")),
 		rd:      &web.Renderer{Templates: tmpl, AssetVer: theme.Version},
-		// The whole site stays public-read; the session exists only so
-		// solve-state writes (sudoku, soon wordle) can persist.
-		auth: &web.Auth{
-			DB:           db,
-			Password:     store.Env("PASSWORD", ""),
-			CookieSecure: store.Env("COOKIE_SECURE", "false") == "true",
-		},
 	}
 
 	// Backfill the whole photo archive — Jan 1 through today — in the background so
@@ -128,7 +116,7 @@ func (s *Server) routes() http.Handler {
 	// The hub — today's four artifacts on one page, and the same view for
 	// any past date. The /{date} wildcard sits at the same depth as the
 	// literal artifact routes; ServeMux prefers literal segments, so /photo,
-	// /art, /sudoku, /wordle, /login, /static/…, /api/… all win over it
+	// /art, /sudoku, /wordle, /static/…, /api/… all win over it
 	// (TestHubRouting pins this down). Non-date strays 404 in the handler.
 	mux.HandleFunc("GET /{$}", s.handleHubToday)
 	mux.HandleFunc("GET /{date}", s.handleHubDay)
@@ -149,24 +137,19 @@ func (s *Server) routes() http.Handler {
 	mux.HandleFunc("GET /art/{date}", s.handleArtDay)
 
 	// The sudoku artifact — a deterministic daily puzzle derived from the
-	// date. Pages are public; only the solve-state write needs a session.
+	// date. Everything is public and stateless: the check endpoint judges a
+	// posted grid against a freshly re-derived solution and persists nothing.
 	mux.HandleFunc("GET /sudoku", s.handleSudokuToday)
 	mux.HandleFunc("GET /sudoku/{date}", s.handleSudokuDay)
-	mux.HandleFunc("POST /sudoku/{date}/state", s.requireSessionJSON(s.handleSudokuState))
+	mux.HandleFunc("POST /sudoku/{date}/check", s.handleSudokuCheck)
 
 	// The wordle artifact — one secret five-letter word a day, derived from
-	// the date. Pages are public; guess feedback is a public server call
-	// (the answer is secret, so a client cannot score itself); only the
-	// solve-state write needs a session.
+	// the date. Everything is public and stateless; guess feedback is a
+	// server call because the answer is secret, so a client cannot score
+	// itself.
 	mux.HandleFunc("GET /wordle", s.handleWordleToday)
 	mux.HandleFunc("GET /wordle/{date}", s.handleWordleDay)
 	mux.HandleFunc("POST /wordle/{date}/guess", s.handleWordleGuess)
-	mux.HandleFunc("POST /wordle/{date}/state", s.requireSessionJSON(s.handleWordleState))
-
-	// Login — public HTML. Sessions exist only for solve-state persistence.
-	mux.HandleFunc("GET /login", s.handleLoginForm)
-	mux.HandleFunc("POST /login", s.auth.HandleLogin)
-	mux.HandleFunc("GET /logout", s.auth.HandleLogout)
 
 	// Public JSON API — the photo and photos reads are cacheable for a day.
 	mux.HandleFunc("GET /status", s.handleStatus)
@@ -196,41 +179,6 @@ func (s *Server) routes() http.Handler {
 	// method list (GET, OPTIONS) matches this read-only API. Pulse traffic
 	// recording sits innermost so logged timings stay real.
 	return web.CORS(web.LogRequests(web.Gzip(pulse.Middleware(s.db, "daily")(mux))))
-}
-
-// ── auth ───────────────────────────────────────────────────────────────────
-
-// authed reports whether the request carries a valid session cookie. daily
-// stays public-read everywhere; this only decides whether solve state
-// persists and is restored.
-func (s *Server) authed(r *http.Request) bool {
-	token, ok := auth.Session(r)
-	if !ok {
-		return false
-	}
-	valid, err := store.ValidSession(s.db, token)
-	return err == nil && valid
-}
-
-// requireSessionJSON gates a JSON write on a valid session, answering 401
-// JSON instead of the login redirect web.Auth.RequireSession uses for HTML.
-func (s *Server) requireSessionJSON(next http.HandlerFunc) http.HandlerFunc {
-	return func(w http.ResponseWriter, r *http.Request) {
-		if !s.authed(r) {
-			web.WriteError(w, http.StatusUnauthorized, "login required")
-			return
-		}
-		next(w, r)
-	}
-}
-
-// handleLoginForm renders the login page.
-func (s *Server) handleLoginForm(w http.ResponseWriter, r *http.Request) {
-	noCacheHTML(w)
-	s.rd.Render(w, "login.html", map[string]any{
-		"Error": r.URL.Query().Get("error"),
-		"Nav":   navData(todayUTC(), "", s.authed(r)),
-	})
 }
 
 // ── archive paging ─────────────────────────────────────────────────────────
@@ -319,9 +267,9 @@ func (s *Server) handleDay(w http.ResponseWriter, r *http.Request) {
 }
 
 // renderPhoto renders the photo page for one date. isToday suppresses the
-// "next" step, since nothing is newer than the current day. The HTML embeds
-// session state (the masthead's log in / log out), so it is never shared-
-// cacheable — the long-lived caching lives on the /api/photo JSON instead.
+// "next" step, since nothing is newer than the current day. Pages carry no
+// per-visitor state, so the HTML is publicly cacheable — a past day's page
+// for a day, today's (which rolls forward) for minutes.
 func (s *Server) renderPhoto(w http.ResponseWriter, r *http.Request, photo *Photo, date string, isToday bool) {
 	prev, err := neighborDate(s.db, sourceNASA, date, true)
 	if err != nil {
@@ -339,7 +287,11 @@ func (s *Server) renderPhoto(w http.ResponseWriter, r *http.Request, photo *Phot
 	if !isToday {
 		jsonURL = "/api/photo/" + date
 	}
-	noCacheHTML(w)
+	maxAge := todayMaxAge
+	if !isToday {
+		maxAge = publicMaxAge // a past day's photo page never changes
+	}
+	cacheFor(w, maxAge)
 	s.rd.Render(w, "photo.html", map[string]any{
 		"Photo":      photo,
 		"Date":       date,
@@ -347,12 +299,12 @@ func (s *Server) renderPhoto(w http.ResponseWriter, r *http.Request, photo *Phot
 		"JSONURL":    jsonURL,
 		"PrevURL":    dayURL(prev),
 		"NextURL":    dayURL(next),
-		"Nav":        navData(date, "photo", s.authed(r)),
+		"Nav":        navData(date, "photo"),
 	})
 }
 
-// handleArchive renders a paginated grid of previous days. Like every HTML
-// page it embeds session state, so it is never shared-cacheable.
+// handleArchive renders a paginated grid of previous days. It rolls forward
+// when a new day posts, so it caches for minutes like the other rolling views.
 func (s *Server) handleArchive(w http.ResponseWriter, r *http.Request) {
 	res, err := s.archive(r.Context(), pageParam(r))
 	if err != nil {
@@ -366,7 +318,7 @@ func (s *Server) handleArchive(w http.ResponseWriter, r *http.Request) {
 	if res.HasNext {
 		nextURL = archiveURL(res.Page + 1)
 	}
-	noCacheHTML(w)
+	cacheFor(w, todayMaxAge)
 	s.rd.Render(w, "archive.html", map[string]any{
 		"Photos":  res.Photos,
 		"Page":    res.Page,
@@ -375,7 +327,7 @@ func (s *Server) handleArchive(w http.ResponseWriter, r *http.Request) {
 		"JSONURL": "/api/photos",
 		"PrevURL": prevURL,
 		"NextURL": nextURL,
-		"Nav":     navData(todayUTC(), "photo", s.authed(r)),
+		"Nav":     navData(todayUTC(), "photo"),
 	})
 }
 
@@ -491,19 +443,11 @@ func redirect(target string) http.HandlerFunc {
 	}
 }
 
-// cacheFor marks a response publicly cacheable for maxAge seconds. It belongs
-// on session-independent payloads only — the SVG plates, the JSON API, the
-// static assets — never on an HTML page.
+// cacheFor marks a response publicly cacheable for maxAge seconds. With no
+// sessions anywhere, nothing daily serves varies per visitor, so the HTML
+// pages share it with the SVG plates and the JSON API.
 func cacheFor(w http.ResponseWriter, maxAge int) {
 	w.Header().Set("Cache-Control", fmt.Sprintf("public, max-age=%d", maxAge))
-}
-
-// noCacheHTML marks an HTML page as revalidate-always and private. Every page
-// embeds session state — the masthead's log in / log out, solve status,
-// streaks — so a shared cache must never hold one, and a browser must
-// revalidate rather than reuse a stale copy.
-func noCacheHTML(w http.ResponseWriter) {
-	w.Header().Set("Cache-Control", "private, no-cache")
 }
 
 // templateFuncs are the template helpers. mediaKind lets the photo template

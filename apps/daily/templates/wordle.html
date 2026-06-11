@@ -84,12 +84,7 @@
   </div>
 
   <section class="wordle-wrap">
-    <div class="wordle-grid" id="wordle-grid" data-date="{{.Date}}"
-         data-authed="{{if .Authed}}true{{else}}false{{end}}"
-         data-hard="{{if .Hard}}true{{else}}false{{end}}"
-         data-solved="{{if .Solved}}true{{else}}false{{end}}"
-         data-over="{{if .Over}}true{{else}}false{{end}}"
-         data-solvems="{{.SolveMs}}" data-guesses="{{.GuessesJSON}}">
+    <div class="wordle-grid" id="wordle-grid" data-date="{{.Date}}">
       {{range .Rows}}
         <div class="wordle-row">
           {{range .}}<div class="tile{{if eq .State "g"}} s-g{{else if eq .State "y"}} s-y{{else if eq .State "-"}} s-a{{end}}">{{.Ch}}</div>{{end}}
@@ -108,23 +103,16 @@
 
     <div class="wordle-controls">
       <label class="wordle-hard" for="wordle-hardmode">
-        <input type="checkbox" id="wordle-hardmode" {{if .Hard}}checked{{end}}
-               {{if or .Over (gt .Guesses 0)}}disabled{{end}}>
+        <input type="checkbox" id="wordle-hardmode">
         hard mode
       </label>
-      <span class="wordle-status" id="wordle-status">{{.Status}}{{if and .Answer (not .Solved)}} · answer {{.Answer}}{{end}}</span>
+      <span class="wordle-status" id="wordle-status"></span>
     </div>
-    {{if not .Authed}}
-      <p class="hint wordle-hint">Type a five-letter word, Enter submits.
-      <a href="/login">Log in</a> to save progress.</p>
-    {{else if not .Over}}
-      <p class="hint wordle-hint">Type a five-letter word, Enter submits.</p>
-    {{end}}
+    <p class="hint wordle-hint">Type a five-letter word, Enter submits.</p>
   </section>
 
   <dl class="wordle-meta">
     <div><dt>Date</dt><dd>{{.Date}}</dd></div>
-    <div><dt>Streak</dt><dd>{{.Streak}} day{{if ne .Streak 1}}s{{end}}</dd></div>
     <div><dt>CID</dt><dd>{{.CID}}</dd></div>
   </dl>
 
