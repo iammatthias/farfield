@@ -174,16 +174,22 @@ func (s *Server) routes() http.Handler {
 	mux.HandleFunc("GET /api/photo/{date}", s.handleAPIDay)
 	mux.HandleFunc("GET /api/photos", s.handleAPIPhotos)
 	mux.HandleFunc("GET /api/art", s.handleAPIArtToday)
+	// The literal /structure segment wins over the {date} wildcard.
+	mux.HandleFunc("GET /api/art/structure", s.handleAPIArtStructure)
 	mux.HandleFunc("GET /api/art/{date}", s.handleAPIArtDay)
 	mux.HandleFunc("GET /api/sudoku", s.handleAPISudokuToday)
 	mux.HandleFunc("GET /api/sudoku/{date}", s.handleAPISudokuDay)
 	mux.HandleFunc("GET /api/wordle", s.handleAPIWordleToday)
 	mux.HandleFunc("GET /api/wordle/{date}", s.handleAPIWordleDay)
 
-	// Shared theme stylesheet, plus the app-local game grid scripts.
+	// Shared theme stylesheet, plus the app-local game grid scripts and the
+	// structure viewer (scene script + vendored three.js, all immutable).
 	mux.HandleFunc("GET /static/styles.css", theme.CSSHandler())
 	mux.HandleFunc("GET /static/sudoku.js", sudokuJSHandler())
 	mux.HandleFunc("GET /static/wordle.js", wordleJSHandler())
+	mux.HandleFunc("GET /static/structure.js", immutableJSHandler(structureJS, structureJSVer))
+	mux.HandleFunc("GET /static/vendor/three.module.min.js", immutableJSHandler(threeJS, threeJSVer))
+	mux.HandleFunc("GET /static/vendor/OrbitControls.js", immutableJSHandler(orbitControlsJS, orbitJSVer))
 
 	// Everything the service serves itself is text — HTML, JSON; the photos
 	// are hot-linked from NASA — so Gzip wraps the whole mux. The default CORS

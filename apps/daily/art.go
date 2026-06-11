@@ -1,6 +1,8 @@
 package main
 
 import (
+	_ "embed"
+	"encoding/json"
 	"fmt"
 	"html/template"
 	"net/http"
@@ -56,7 +58,7 @@ func artPlotFor(date string, n uint64) artPlot {
 	bi := biomeIndexAt(x, y, z, w)
 	b := biomes[bi]
 	hf := heightfield(newRNG(domainArt, date), b.Terrain, plotSize, len(b.Ramp))
-	svg := renderPlotSVG(date, n, [4]int{x, y, z, w}, bi, b, hf)
+	svg := renderPlotSVG(date, b, hf)
 	return artPlot{
 		Date: date, N: n, Coord: [4]int{x, y, z, w},
 		BiomeIdx: bi, Biome: b, SVG: svg, CID: cid.Of(svg),
@@ -136,14 +138,10 @@ func (s *Server) handleArtStructure(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	x, y, z, tw := hilbert4d(n, artOrder)
-	ws := tw
-	if q := r.URL.Query().Get("w"); q != "" {
-		v, err := strconv.Atoi(q)
-		if err != nil || v < 0 || v >= artSide {
-			http.NotFound(w, r)
-			return
-		}
-		ws = v
+	ws, ok := structureSliceW(r, tw)
+	if !ok {
+		http.NotFound(w, r)
+		return
 	}
 
 	// Occupied cells per w-slice — walk the curve once, day 0 through today.
@@ -190,8 +188,144 @@ func (s *Server) handleArtStructure(w http.ResponseWriter, r *http.Request) {
 		"SliceCells": artSide * artSide * artSide,
 		"SVG":        template.HTML(renderStructureSVG(ws, n)),
 		"Slices":     slices,
+		"JSVer":      structureJSVer,
+		"ThreeVer":   threeJSVer,
+		"OrbitVer":   orbitJSVer,
 		"Nav":        navData(today, "art", s.authed(r)),
 	})
+}
+
+// ── structure viewer assets ────────────────────────────────────────────────
+//
+// The structure page progressively enhances its server-rendered SVG with a
+// three.js scene. All scripts are app-local and embedded: the vendored
+// three.js r170 module + OrbitControls (MIT — see static/vendor/README.md)
+// and the scene script. Each is fingerprinted with its content CID and served
+// immutable, like sudoku.js/wordle.js; an importmap in the template maps the
+// bare specifier "three" to the vendored module, so no CDN and no build step.
+
+//go:embed static/structure.js
+var structureJS []byte
+
+//go:embed static/vendor/three.module.min.js
+var threeJS []byte
+
+//go:embed static/vendor/OrbitControls.js
+var orbitControlsJS []byte
+
+var (
+	structureJSVer = cid.Of(structureJS)[:16]
+	threeJSVer     = cid.Of(threeJS)[:16]
+	orbitJSVer     = cid.Of(orbitControlsJS)[:16]
+)
+
+// immutableJSHandler serves an embedded script with immutable caching and its
+// CID as a strong ETag — the URL carries the version, so the bytes never
+// change under it. Gzip comes from the app-wide middleware.
+func immutableJSHandler(body []byte, etag string) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		h := w.Header()
+		h.Set("Content-Type", "text/javascript; charset=utf-8")
+		h.Set("Cache-Control", "public, max-age=31536000, immutable")
+		h.Set("ETag", `"`+etag+`"`)
+		if web.ETagMatch(r, etag) {
+			w.WriteHeader(http.StatusNotModified)
+			return
+		}
+		_, _ = w.Write(body)
+	}
+}
+
+// ── structure JSON API ─────────────────────────────────────────────────────
+
+// structureSliceW resolves the ?w= query — defaulting to today's slice — and
+// reports ok=false when it is out of range.
+func structureSliceW(r *http.Request, todayW int) (int, bool) {
+	q := r.URL.Query().Get("w")
+	if q == "" {
+		return todayW, true
+	}
+	v, err := strconv.Atoi(q)
+	if err != nil || v < 0 || v >= artSide {
+		return 0, false
+	}
+	return v, true
+}
+
+// handleAPIArtStructure emits one w-slice of the hyperstructure as JSON — the
+// occupied cells of that slice in day order, plus the biome palette table —
+// for the three.js viewer. Like /api/art it rolls forward at midnight UTC, so
+// it is publicly cacheable for minutes, with its content CID as ETag.
+func (s *Server) handleAPIArtStructure(w http.ResponseWriter, r *http.Request) {
+	today := todayUTC()
+	n, ok := artDayIndex(today)
+	if !ok {
+		web.WriteError(w, http.StatusNotFound, "no structure today") // unreachable until ~2199
+		return
+	}
+	tx, ty, tz, tw := hilbert4d(n, artOrder)
+	ws, ok := structureSliceW(r, tw)
+	if !ok {
+		web.WriteError(w, http.StatusNotFound, "no such slice — w must be 0..15")
+		return
+	}
+
+	// Walk the curve once, day 0 through today; keep this slice's cells.
+	// The walk is in day order, so the cells arrive pre-sorted for the
+	// viewer's accretion animation.
+	type apiCell struct {
+		I     uint64 `json:"i"`
+		X     int    `json:"x"`
+		Y     int    `json:"y"`
+		Z     int    `json:"z"`
+		Biome int    `json:"biome"`
+		Age   int    `json:"age"` // age band, 0 = newest ink … bands-1 = oldest
+		Today bool   `json:"today"`
+	}
+	cells := make([]apiCell, 0, n/artSide+1)
+	for i := uint64(0); i <= n; i++ {
+		x, y, z, cw := hilbert4d(i, artOrder)
+		if cw != ws {
+			continue
+		}
+		cells = append(cells, apiCell{
+			I: i, X: x, Y: y, Z: z,
+			Biome: biomeIndexAt(x, y, z, ws),
+			Age:   ageBand(i, n),
+			Today: i == n,
+		})
+	}
+	type apiBiome struct {
+		Name   string   `json:"name"`
+		Colors []string `json:"colors"`
+	}
+	bs := make([]apiBiome, len(biomes))
+	for i, b := range biomes {
+		bs[i] = apiBiome{Name: b.Name, Colors: b.Palette[:]}
+	}
+	body, err := json.Marshal(map[string]any{
+		"w":      ws,
+		"side":   artSide,
+		"date":   today,
+		"epoch":  artifactEpoch,
+		"bands":  structAgeBands,
+		"today":  map[string]any{"index": n, "coord": []int{tx, ty, tz, tw}},
+		"cells":  cells,
+		"biomes": bs,
+	})
+	if err != nil {
+		web.WriteError(w, http.StatusInternalServerError, "could not encode structure")
+		return
+	}
+	etag := cid.Of(body)
+	cacheFor(w, todayMaxAge)
+	w.Header().Set("ETag", `"`+etag+`"`)
+	if web.ETagMatch(r, etag) {
+		w.WriteHeader(http.StatusNotModified)
+		return
+	}
+	w.Header().Set("Content-Type", "application/json; charset=utf-8")
+	_, _ = w.Write(body)
 }
 
 // ── SVG handlers ───────────────────────────────────────────────────────────

@@ -47,7 +47,7 @@
   <dl class="art-meta">
     <div><dt>Date</dt><dd>{{.Date}}</dd></div>
     <div><dt>Day index</dt><dd>{{.N}} since {{.Epoch}}</dd></div>
-    <div><dt>Cell</dt><dd>[{{index .Coord 0}}, {{index .Coord 1}}, {{index .Coord 2}}, {{index .Coord 3}}] · hilbert order 4</dd></div>
+    <div><dt>Cell</dt><dd><a href="{{.StructureURL}}">[{{index .Coord 0}}, {{index .Coord 1}}, {{index .Coord 2}}, {{index .Coord 3}}]</a> · hilbert order 4</dd></div>
     <div><dt>Biome</dt><dd>{{printf "%02d" .BiomeIdx}} · {{.Biome}}</dd></div>
     <div><dt>CID</dt><dd>{{.CID}}</dd></div>
   </dl>

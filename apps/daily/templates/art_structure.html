@@ -5,6 +5,23 @@
     /* structure — one w-slice of the hyperstructure cube */
     .art-plate { border: 1px solid var(--ink); }
     .art-plate svg { width: 100%; height: auto; }
+
+    /* the plate is the SVG fallback until structure.js swaps in its canvas;
+       .live pins the same plate proportions for the three.js viewport */
+    #structure-plate { position: relative; display: block; }
+    #structure-plate.live { aspect-ratio: 400 / 244; }
+    #structure-plate canvas {
+      display: block; width: 100%; height: 100%;
+      touch-action: none; cursor: grab;
+    }
+    #structure-plate canvas:active { cursor: grabbing; }
+    .structure-tip {
+      position: absolute; z-index: 1; pointer-events: none;
+      padding: 0.3rem 0.5rem; max-width: 90%;
+      background: var(--surface); border: 1px solid var(--ink);
+      font: 500 0.62rem/1.4 var(--font-mono);
+      text-transform: uppercase; letter-spacing: 0.07em; white-space: nowrap;
+    }
     .art-plate figcaption {
       display: flex; justify-content: space-between; flex-wrap: wrap; gap: 0.35rem 1rem;
       padding: 0.55rem 0.8rem; border-top: 1px solid var(--ink);
@@ -47,10 +64,12 @@
   </div>
 
   <figure class="art-plate">
-    {{.SVG}}
+    <div id="structure-plate" data-api="/api/art/structure?w={{.W}}">
+      {{.SVG}}
+    </div>
     <figcaption>
-      <span>SLICE W={{.W}} · {{.Count}} / {{.SliceCells}} CELLS ACCRETED · INK = ELAPSED DAYS · OUTLINE = TODAY</span>
-      <span class="muted">{{if .OnW}}TODAY'S CELL ON THIS SLICE{{else}}TODAY AT W={{.TodayW}}{{end}}</span>
+      <span>SLICE W={{.W}} · DAY {{.N}} · {{.Count}} / {{.SliceCells}} CELLS ACCRETED · FAINT = OLDEST · FULL INK = NEWEST · ACCENT = TODAY</span>
+      <span class="muted"><a href="/art">{{if .OnW}}TODAY'S CELL ON THIS SLICE{{else}}TODAY AT W={{.TodayW}}{{end}} → PLATE</a></span>
     </figcaption>
   </figure>
 
@@ -69,4 +88,17 @@
     <span>farfield · daily · art</span>
     <span>16×16×16 cells per slice · filled as the curve passes</span>
   </footer>
+
+  {{/* three.js viewer — progressive enhancement; the SVG above is the
+       no-JS / no-WebGL fallback. The importmap resolves the bare "three"
+       specifier (used by OrbitControls too) to the vendored module. */}}
+  <script type="importmap">
+    {
+      "imports": {
+        "three": "/static/vendor/three.module.min.js?v={{.ThreeVer}}",
+        "three/addons/controls/OrbitControls.js": "/static/vendor/OrbitControls.js?v={{.OrbitVer}}"
+      }
+    }
+  </script>
+  <script type="module" src="/static/structure.js?v={{.JSVer}}"></script>
 {{end}}
