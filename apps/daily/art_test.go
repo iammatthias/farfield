@@ -713,8 +713,8 @@ func TestStructureViewerAssets(t *testing.T) {
 		"/static/vendor/OrbitControls.js?v=" + orbitJSVer,
 		`id="structure-plate"`,
 		`data-api="/api/art/path"`,
-		"One continuous line · grown one cell per day since " + artifactEpoch,
-		"today at the tip",
+		"Grown one cell per day since " + artifactEpoch,
+		"today at the tip of the thread",
 	} {
 		if !strings.Contains(body, want) {
 			t.Errorf("structure page missing %q", want)

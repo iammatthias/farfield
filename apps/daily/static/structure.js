@@ -1,7 +1,402 @@
 // structure.js — progressive enhancement for /art/structure: swaps the
-// server-rendered SVG (today's slice) for the worldline — the whole archive
-// drawn as ONE continuous fabric ribbon. The SVG remains the no-JS /
-// no-WebGL fallback; if anything here fails, the SVG stays put.
+// server-rendered SVG (today's slice) for the hypercastle — every day of
+// the archive as one flat glyph-printed plate, hung in 3-D space where the
+// 4-D Hilbert walk put it. The SVG remains the no-JS / no-WebGL fallback;
+// if anything here fails, the SVG stays put.
+//
+// The default scene (enhanceCastle) is a floating field of plates: each
+// day's 6×6 heightfield draped gently over a small horizontal sheet,
+// printed from the shared per-biome glyph atlases, with air on every side.
+// The lattice z axis becomes the vertical, stretched so the z-levels read
+// as floors of one airy castle; the w axis is a gentle diagonal offset, so
+// the four w-generations of a floor interleave instead of colliding. A
+// hairline thread runs through the plate centers in day order — the
+// worldline made quiet — and today's plate sits at its tip under an accent
+// rim. ?view=line keeps the older worldline scene (enhanceLine): the same
+// archive swept into ONE continuous fabric ribbon along the smoothed walk.
+// The print, atlases, lights, and orbit come from terrain.js, shared with
+// the plate page: the plate page is one day up close; the structure is all
+// of them, assembled.
+
+import * as THREE from 'three';
+import {
+  readTheme, reduceMotion, createRig,
+  RAMPS, glyphAtlas, fabricTexture, drapeHeights,
+} from 'terrain';
+
+const plate = document.getElementById('structure-plate');
+if (plate && plate.dataset.api) {
+  const view = new URLSearchParams(location.search).get('view');
+  const enhance = view === 'line' ? enhanceLine : enhanceCastle;
+  enhance(plate).catch((err) => {
+    // Keep the SVG fallback; just note why the canvas did not come up.
+    console.warn('[structure] keeping SVG fallback:', err);
+  });
+}
+
+// ═══ the castle: a floating field of glyph plates (default view) ═══════════
+
+async function enhanceCastle(plate) {
+  // ── tuning ────────────────────────────────────────────────────────────
+  // The 4-D → 3-D mapping: p = SCALE·((x, z·LEVEL_GAP, y) + w·DIAG). The
+  // lattice z axis is the vertical, stretched by LEVEL_GAP so each z-level
+  // reads as a floor of the castle. DIAG carries the w axis as a gentle
+  // diagonal. The walk so far fills w-generations 0–3 of the 8³ corner
+  // COMPLETELY (plus a sparse frontier at w 4–7), so any two generations
+  // can land in overlapping plan positions — which forces the vertical
+  // component to do the separating: 0.125/generation clears the plate
+  // relief (0.10) plus bob headroom for every Δw, while the four dense
+  // generations of a floor stay a thin laminate (≈0.48 of a cell) well
+  // under LEVEL_GAP, so the floor bands and the air between them both
+  // read. The horizontal components are small and incommensurate — the
+  // generations shear into an organic drift, never a staircase.
+  const LEVEL_GAP = 1.5;
+  const DIAG = [0.26, 0.125, 0.19]; // w offset per generation, lattice units
+  const SCALE = 2.1; // lattice spacing in scene units
+  const PLATE = 0.78 * SCALE; // plate side — 0.78 of a cell, air all around
+  const RELIEF = 0.10 * SCALE; // drape span — low: plates, not mounds
+  const THREAD_SPD = 4; // thread samples per day segment
+  const REVEAL_MS = 3000; // the castle assembles plate by plate over ~3s
+
+  const still = reduceMotion();
+  const theme = readTheme();
+
+  const res = await fetch(plate.dataset.api, { headers: { Accept: 'application/json' } });
+  if (!res.ok) throw new Error('path API ' + res.status);
+  const data = await res.json();
+  const days = data.days || [];
+  if (!days.length) throw new Error('empty path');
+  const N = days.length; // day count: epoch through today
+  const n = N - 1; // today's index
+  const hfBands = data.hfBands || 6;
+  const ageBands = data.bands || 5;
+
+  // ── plate centers: the lattice addresses, mapped and centered ───────────
+  const centers = days.map((d) => new THREE.Vector3(
+    (d.coord[0] + d.coord[3] * DIAG[0]) * SCALE,
+    (d.coord[2] * LEVEL_GAP + d.coord[3] * DIAG[1]) * SCALE,
+    (d.coord[1] + d.coord[3] * DIAG[2]) * SCALE,
+  ));
+  // Frame the inhabited region — the corner the walk has reached so far —
+  // never the empty full lattice.
+  const box = new THREE.Box3().setFromPoints(centers);
+  const center = box.getCenter(new THREE.Vector3());
+  for (const p of centers) p.sub(center);
+
+  const radius = box.getSize(new THREE.Vector3()).length() / 2 + PLATE;
+  const rig = createRig(plate, { theme, viewSize: radius, aspect: 16 / 10, camDist: 1.9 });
+  rig.controls.minDistance = radius * 0.16; // close enough to read one plate
+  // Fog toward the page surface: depth without darkness — far strata recede
+  // into the paper, light passes through the gaps.
+  rig.scene.fog = new THREE.Fog(theme.surface, radius * 1.5, radius * 4.4);
+
+  // ── ink: age fade, biome palettes, per-biome glyph atlases ──────────────
+  // Oldest plates faintest, floored at 0.55 of full ink, same as everywhere.
+  const fade = (band) => 1 - (band / Math.max(ageBands - 1, 1)) * 0.45;
+  const ageOf = (i) => Math.min(ageBands - 1, Math.floor(((n - i) * ageBands) / (n + 1)));
+  const palettes = (data.biomes || []).map((b) => b.colors.map((c) => new THREE.Color(c)));
+
+  // One glyph atlas per biome, built on first use — never one per day.
+  const atlases = new Map();
+  const atlasFor = (bi) => {
+    let a = atlases.get(bi);
+    if (!a) {
+      const biome = data.biomes[bi] || { name: 'basin' };
+      const made = glyphAtlas({
+        ramp: RAMPS[biome.name] || RAMPS.basin,
+        palette: palettes[bi] || [theme.ink, theme.ink, theme.ink],
+        surface: theme.surface,
+        bands: hfBands,
+        ages: ageBands,
+        fade,
+      });
+      a = { uvFor: made.uvFor, texture: fabricTexture(rig.renderer, made.canvas) };
+      atlases.set(bi, a);
+    }
+    return a;
+  };
+
+  // ── plate geometry: per-biome soup, appended in day order ───────────────
+  // One merged mesh per biome (one atlas each); within each, vertices land
+  // in day order, so the assembly reveal is advancing draw ranges and a
+  // raycast hit maps back to its day through recorded vertex ranges. The
+  // `phase` attribute (one constant per plate) drives the independent bob
+  // in the vertex shader — geometry never updates after the build.
+  class PlateBuilder {
+    constructor() {
+      this.pos = [];
+      this.nrm = [];
+      this.uv = [];
+      this.phase = [];
+      this.marks = []; // { ord, end } per day, for the reveal
+      this.ranges = []; // { start, end, day } per day, for hover
+    }
+
+    get vertexCount() {
+      return this.pos.length / 3;
+    }
+
+    // sheet drapes one day's 6×6 band field over a small horizontal plate
+    // centered on c — the FabricBuilder sheet, with the bob phase attached.
+    sheet({ levels, c, uvFor, age, ph }) {
+      const { g, H } = drapeHeights(levels, hfBands, RELIEF, 0);
+      const cs = PLATE / g;
+      const x0 = c.x - PLATE / 2;
+      const z0 = c.z - PLATE / 2;
+      const y = c.y - RELIEF / 2; // drape centered on the lattice point
+      const hAt = (i, j) => H[j * (g + 1) + i];
+      const nAt = (i, j) => {
+        const il = Math.max(i - 1, 0);
+        const ir = Math.min(i + 1, g);
+        const jl = Math.max(j - 1, 0);
+        const jr = Math.min(j + 1, g);
+        const dx = (hAt(ir, j) - hAt(il, j)) / ((ir - il) * cs);
+        const dz = (hAt(i, jr) - hAt(i, jl)) / ((jr - jl) * cs);
+        const inv = 1 / Math.hypot(dx, 1, dz);
+        return [-dx * inv, inv, -dz * inv];
+      };
+      const vert = (p, nv, u, v) => {
+        this.pos.push(p[0], p[1], p[2]);
+        this.nrm.push(nv[0], nv[1], nv[2]);
+        this.uv.push(u, v);
+        this.phase.push(ph);
+      };
+      for (let j = 0; j < g; j++) {
+        for (let i = 0; i < g; i++) {
+          const r = uvFor(levels[j * g + i], age);
+          const xa = x0 + i * cs;
+          const xb = xa + cs;
+          const za = z0 + j * cs;
+          const zb = za + cs;
+          const p00 = [xa, y + hAt(i, j), za];
+          const p01 = [xa, y + hAt(i, j + 1), zb];
+          const p11 = [xb, y + hAt(i + 1, j + 1), zb];
+          const p10 = [xb, y + hAt(i + 1, j), za];
+          vert(p00, nAt(i, j), r.u0, r.vHi);
+          vert(p01, nAt(i, j + 1), r.u0, r.vLo);
+          vert(p11, nAt(i + 1, j + 1), r.u1, r.vLo);
+          vert(p00, nAt(i, j), r.u0, r.vHi);
+          vert(p11, nAt(i + 1, j + 1), r.u1, r.vLo);
+          vert(p10, nAt(i + 1, j), r.u1, r.vHi);
+        }
+      }
+    }
+
+    geometry() {
+      const geo = new THREE.BufferGeometry();
+      geo.setAttribute('position', new THREE.Float32BufferAttribute(this.pos, 3));
+      geo.setAttribute('normal', new THREE.Float32BufferAttribute(this.nrm, 3));
+      geo.setAttribute('uv', new THREE.Float32BufferAttribute(this.uv, 2));
+      geo.setAttribute('phase', new THREE.Float32BufferAttribute(this.phase, 1));
+      return geo;
+    }
+  }
+
+  const builders = new Map(); // biome → PlateBuilder
+  for (let i = 0; i < N; i++) {
+    const bi = days[i].biome;
+    let b = builders.get(bi);
+    if (!b) {
+      b = new PlateBuilder();
+      builders.set(bi, b);
+    }
+    const start = b.vertexCount;
+    b.sheet({
+      levels: days[i].hf,
+      c: centers[i],
+      uvFor: atlasFor(bi).uvFor,
+      age: ageOf(i),
+      ph: (i * 2.399963) % (Math.PI * 2), // golden-angle phases — no beats
+    });
+    b.marks.push({ ord: i, end: b.vertexCount });
+    b.ranges.push({ start, end: b.vertexCount, day: i });
+  }
+
+  // The almost-imperceptible float: each plate bobs ±1% of its own size
+  // with its own phase, in the vertex shader — geometry stays static. uBob
+  // eases the float in only after the assembly settles; reduced motion
+  // never installs the shader at all.
+  const uTime = { value: 0 };
+  const uBob = { value: 0 };
+  const bobAmp = (PLATE * 0.01).toFixed(5);
+  const breathe = (mat) => {
+    if (still) return mat;
+    mat.onBeforeCompile = (sh) => {
+      sh.uniforms.uTime = uTime;
+      sh.uniforms.uBob = uBob;
+      sh.vertexShader = sh.vertexShader
+        .replace('#include <common>',
+          '#include <common>\nattribute float phase;\nuniform float uTime;\nuniform float uBob;')
+        .replace('#include <begin_vertex>',
+          '#include <begin_vertex>\ntransformed.y += uBob * ' + bobAmp + ' * sin(uTime + phase);');
+    };
+    return mat;
+  };
+
+  // Front: the printed face. Back: the same sheet seen from below — shared
+  // geometry redrawn dark, so a plate overhead reads as a plate, not a hole.
+  const meshes = []; // front meshes — raycast targets, reveal owners
+  for (const [bi, b] of [...builders.entries()].sort((x, y) => x[0] - y[0])) {
+    const geo = b.geometry();
+    const front = new THREE.Mesh(geo, breathe(new THREE.MeshLambertMaterial({
+      map: atlasFor(bi).texture,
+    })));
+    const back = new THREE.Mesh(geo, breathe(new THREE.MeshLambertMaterial({
+      map: atlasFor(bi).texture,
+      side: THREE.BackSide,
+      color: new THREE.Color(0.42, 0.42, 0.4),
+    })));
+    front.userData = { marks: b.marks, ranges: b.ranges };
+    rig.scene.add(front, back);
+    meshes.push(front);
+  }
+
+  // ── the thread of time: a hairline through the plate centers ────────────
+  // The worldline made quiet — day order as one faint smoothed polyline,
+  // fog-affected, present but never louder than the plates.
+  let thread = null;
+  let threadVerts = 0;
+  if (N >= 2) {
+    const curve = new THREE.CatmullRomCurve3(centers, false, 'centripetal');
+    threadVerts = (N - 1) * THREAD_SPD + 1;
+    const lp = new Float32Array(threadVerts * 3);
+    for (let s = 0; s < threadVerts; s++) {
+      curve.getPoint(s / (threadVerts - 1)).toArray(lp, s * 3);
+    }
+    const lgeo = new THREE.BufferGeometry();
+    lgeo.setAttribute('position', new THREE.BufferAttribute(lp, 3));
+    thread = new THREE.Line(lgeo, new THREE.LineBasicMaterial({
+      color: theme.ink, transparent: true, opacity: 0.18,
+    }));
+    rig.scene.add(thread);
+  }
+
+  // ── today: full ink at the thread's tip, under the accent rim ───────────
+  // The rim is a flat frame just outside today's plate, drawn through
+  // occlusion (no depth test) — the survey locator, never lost in the mass.
+  const rimMat = new THREE.MeshBasicMaterial({
+    color: theme.accent, side: THREE.DoubleSide, transparent: true, opacity: 0.9,
+    depthTest: false,
+  });
+  const rim = (() => {
+    const c = centers[n];
+    const a = PLATE * 0.57; // outer half-extent
+    const b = PLATE * 0.49; // inner half-extent
+    const y = c.y + RELIEF * 0.5 + PLATE * 0.02; // just above the drape
+    const pos = [];
+    const quad = (xa, za, xb, zb) => {
+      pos.push(
+        c.x + xa, y, c.z + za, c.x + xb, y, c.z + za, c.x + xb, y, c.z + zb,
+        c.x + xa, y, c.z + za, c.x + xb, y, c.z + zb, c.x + xa, y, c.z + zb,
+      );
+    };
+    quad(-a, -a, a, -b); // north band
+    quad(-a, b, a, a); // south band
+    quad(-a, -b, -b, b); // west band
+    quad(b, -b, a, b); // east band
+    const geo = new THREE.BufferGeometry();
+    geo.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
+    const m = new THREE.Mesh(geo, rimMat);
+    m.renderOrder = 1; // after the plates, so depthTest:false lands on top
+    return m;
+  })();
+  rig.scene.add(rim);
+
+  // ── swap the SVG for the canvas ──────────────────────────────────────────
+  rig.mount();
+
+  // ── hover tooltip: DAY n · date · biome, via raycast → vertex → day ──────
+  const tipEl = document.createElement('div');
+  tipEl.className = 'structure-tip';
+  tipEl.hidden = true;
+  plate.appendChild(tipEl);
+
+  const raycaster = new THREE.Raycaster();
+  const pointer = new THREE.Vector2();
+  const epochMs = Date.UTC(...(data.epoch || '2020-01-01').split('-')
+    .map(Number).map((v, i) => (i === 1 ? v - 1 : v)));
+  const dateOf = (i) => new Date(epochMs + i * 86400000).toISOString().slice(0, 10);
+  const describe = (i) => {
+    const biome = data.biomes[days[i].biome];
+    return 'DAY ' + i + ' · ' + dateOf(i) + ' · ' + (biome ? biome.name.toUpperCase() : '');
+  };
+  const dayAtVertex = (ranges, v) => {
+    let lo = 0;
+    let hi = ranges.length - 1;
+    while (lo < hi) {
+      const mid = (lo + hi) >> 1;
+      if (ranges[mid].end <= v) lo = mid + 1;
+      else hi = mid;
+    }
+    const r = ranges[lo];
+    return r && v >= r.start ? r.day : -1;
+  };
+  rig.renderer.domElement.addEventListener('pointermove', (ev) => {
+    const r = rig.renderer.domElement.getBoundingClientRect();
+    pointer.set(((ev.clientX - r.left) / r.width) * 2 - 1, -((ev.clientY - r.top) / r.height) * 2 + 1);
+    raycaster.setFromCamera(pointer, rig.camera);
+    const hit = raycaster.intersectObjects(meshes, false)[0];
+    const day = hit ? dayAtVertex(hit.object.userData.ranges || [], hit.faceIndex * 3) : -1;
+    if (day >= 0) {
+      tipEl.textContent = describe(day);
+      tipEl.style.left = ev.clientX - r.left + 12 + 'px';
+      tipEl.style.top = ev.clientY - r.top + 12 + 'px';
+      tipEl.hidden = false;
+    } else {
+      tipEl.hidden = true;
+    }
+  });
+  rig.renderer.domElement.addEventListener('pointerleave', () => { tipEl.hidden = true; });
+
+  // ── animation ────────────────────────────────────────────────────────────
+  // The reveal: the castle assembles plate by plate in day order over ~3s —
+  // every buffer keeps day order, so growth is advancing draw ranges (the
+  // back meshes share each geometry, so they grow in step for free; the
+  // thread's draw range advances with the same day count). After settle the
+  // rim lands with its pulse and the bob eases in. Geometry is static
+  // throughout. Reduced motion renders the finished castle, holding still.
+  const drawnEnd = (marks, shown) => {
+    let lo = 0;
+    let hi = marks.length;
+    while (lo < hi) {
+      const mid = (lo + hi) >> 1;
+      if (marks[mid].ord < shown) lo = mid + 1;
+      else hi = mid;
+    }
+    return lo === 0 ? 0 : marks[lo - 1].end;
+  };
+  const t0 = performance.now();
+  if (!still) {
+    for (const m of meshes) m.geometry.setDrawRange(0, 0);
+    if (thread) thread.geometry.setDrawRange(0, 0);
+    rim.visible = false;
+  }
+
+  rig.start((now) => {
+    if (still) return;
+    uTime.value = now * 0.0011;
+    const k = Math.min(1, (now - t0) / REVEAL_MS);
+    const shown = Math.ceil(k * N);
+    for (const m of meshes) {
+      m.geometry.setDrawRange(0, drawnEnd(m.userData.marks, shown));
+    }
+    if (thread) {
+      thread.geometry.setDrawRange(0, shown < 2 ? 0
+        : Math.min(threadVerts, (shown - 1) * THREAD_SPD + 1));
+    }
+    rim.visible = k >= 1;
+    rimMat.opacity = 0.62 + 0.3 * Math.sin((now - t0) / 900);
+    uBob.value = k < 1 ? 0 : Math.min(1, (now - t0 - REVEAL_MS) / 1500);
+  });
+
+  let tris = 0;
+  for (const m of meshes) tris += m.geometry.attributes.position.count / 3;
+  console.log('[structure] three r' + THREE.REVISION + ' · castle · ' + N +
+    ' plates · ' + meshes.length + ' biome meshes · ' + Math.round(tris / 1000) +
+    'k tris ×2 sides · ' + atlases.size + ' glyph atlases');
+}
+
+// ═══ the worldline: one continuous ribbon (?view=line) ═════════════════════
 //
 // The Hilbert mapping makes consecutive days 4-D lattice neighbors, so the
 // day sequence IS a single unbroken path through 16⁴. This scene renders
@@ -16,23 +411,6 @@
 // from the shared per-biome atlases. Biomes drift in weeks-long stretches
 // of shared ink, age fades the print toward the oldest end, and today is
 // the ribbon's living tip — an accent cap on the open end, pulsing slowly.
-// The print, atlases, lights, and orbit come from terrain.js, shared with
-// the plate page: the plate is one day of this cloth up close; the
-// structure is all of it, knotted into the curve.
-
-import * as THREE from 'three';
-import {
-  readTheme, reduceMotion, createRig,
-  RAMPS, glyphAtlas, fabricTexture,
-} from 'terrain';
-
-const plate = document.getElementById('structure-plate');
-if (plate && plate.dataset.api) {
-  enhance(plate).catch((err) => {
-    // Keep the SVG fallback; just note why the canvas did not come up.
-    console.warn('[structure] keeping SVG fallback:', err);
-  });
-}
 
 // ── tuning ──────────────────────────────────────────────────────────────────
 // The 4-D → 3-D projection: p = SCALE · ((x, z, y) + w·DIAG). Every Hilbert
@@ -49,7 +427,7 @@ const WIDTH = 1.18; // ribbon width, scene units
 const RELIEF = 0.52; // terrain displacement span along the frame normal
 const REVEAL_MS = 3000; // the worldline writes itself over ~3s
 
-async function enhance(plate) {
+async function enhanceLine(plate) {
   const still = reduceMotion();
   const theme = readTheme();
 

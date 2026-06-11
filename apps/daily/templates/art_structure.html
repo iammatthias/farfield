@@ -2,13 +2,14 @@
 
 {{define "head"}}
   <style>
-    /* structure — the worldline: one continuous ribbon, one cell per day */
+    /* structure — the hypercastle: one floating glyph plate per day
+       (?view=line keeps the continuous worldline ribbon) */
     .art-plate { border: 1px solid var(--ink); }
     .art-plate svg { width: 100%; height: auto; }
 
     /* the plate is the SVG fallback until structure.js swaps in its canvas;
-       .live frames the three.js viewport — the ribbon tangle is a compact
-       form, far closer to square than a panoramic strip */
+       .live frames the three.js viewport — both scenes are compact forms,
+       far closer to square than a panoramic strip */
     #structure-plate { position: relative; display: block; }
     #structure-plate.live { aspect-ratio: 16 / 10; }
     #structure-plate canvas {
@@ -46,7 +47,7 @@
     <div id="structure-plate" data-api="/api/art/path">
       {{.SVG}}
     </div>
-    <figcaption>One continuous line · grown one cell per day since {{.Epoch}} · day {{.N}} · today at the tip</figcaption>
+    <figcaption>Grown one cell per day since {{.Epoch}} · day {{.N}} · today at the tip of the thread</figcaption>
   </figure>
 
   <footer class="cal-foot">
