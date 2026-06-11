@@ -2,15 +2,15 @@
 
 {{define "head"}}
   <style>
-    /* structure — the whole hyperstructure, grown one cell per day */
+    /* structure — the worldline: one continuous ribbon, one cell per day */
     .art-plate { border: 1px solid var(--ink); }
     .art-plate svg { width: 100%; height: auto; }
 
     /* the plate is the SVG fallback until structure.js swaps in its canvas;
-       .live sets a panoramic strip for the three.js viewport — the row of
-       volumes is far wider than tall */
+       .live frames the three.js viewport — the ribbon tangle is a compact
+       form, far closer to square than a panoramic strip */
     #structure-plate { position: relative; display: block; }
-    #structure-plate.live { aspect-ratio: 5 / 2; }
+    #structure-plate.live { aspect-ratio: 16 / 10; }
     #structure-plate canvas {
       display: block; width: 100%; height: 100%;
       touch-action: none; cursor: grab;
@@ -38,15 +38,15 @@
     <span>ART · STRUCTURE</span>
     <nav class="actions">
       <a href="/art">Today → plate</a>
-      <a href="/api/art/structure">JSON</a>
+      <a href="/api/art/path">JSON</a>
     </nav>
   </div>
 
   <figure class="art-plate">
-    <div id="structure-plate" data-api="/api/art/structure">
+    <div id="structure-plate" data-api="/api/art/path">
       {{.SVG}}
     </div>
-    <figcaption>Grown one cell per day since {{.Epoch}} · day {{.N}} · today marked</figcaption>
+    <figcaption>One continuous line · grown one cell per day since {{.Epoch}} · day {{.N}} · today at the tip</figcaption>
   </figure>
 
   <footer class="cal-foot">

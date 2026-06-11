@@ -1,30 +1,29 @@
 // structure.js — progressive enhancement for /art/structure: swaps the
-// server-rendered SVG (today's slice) for a live three.js scene of the
-// whole structure — every cell accreted since the epoch. The SVG remains
-// the no-JS / no-WebGL fallback; if anything here fails, the SVG stays put.
+// server-rendered SVG (today's slice) for the worldline — the whole archive
+// drawn as ONE continuous fabric ribbon. The SVG remains the no-JS /
+// no-WebGL fallback; if anything here fails, the SVG stays put.
 //
-// Every occupied cell renders as its own day's fabric sheet — the day's
-// heightfield (downsampled by the server; the client never re-derives
-// noise) smoothly draped across the cell, printed with the day's ramp
-// glyphs, skirted and dark-backed so a column of days reads as a laminated
-// sheaf of survey sheets. Glyphs come from per-biome texture atlases (one
-// canvas per biome, tiles by elevation band × age fade — eight textures,
-// never one per day). The volumes stand in a receding procession: the
-// oldest completed volume looms nearest the camera, each younger volume a
-// step further into depth and a little across, through the sparse frontier
-// (the one holding today) to the ghost outline of the next empty volume
-// deepest of all — history looms, today far. The accretion reveal stacks
-// the sheets in day order, the procession building from the viewer's feet
-// toward the horizon; the print,
-// drape, lights, and orbit come from terrain.js, shared with the plate
-// page — the plate is one sheet up close, this is the archive of all of
-// them.
+// The Hilbert mapping makes consecutive days 4-D lattice neighbors, so the
+// day sequence IS a single unbroken path through 16⁴. This scene renders
+// that path directly: each day's 4-D cell projects to 3-D (the w axis
+// smeared along a fixed diagonal, so w-steps become diagonal moves), the
+// lattice walk is smoothed into an organic curve with centripetal
+// Catmull-Rom, and a flat cloth cross-section sweeps along it on
+// parallel-transport frames — minimal twist, no corner artifacts. The
+// surface flexes with each day's own terrain (the server's downsampled
+// heightfields read as one continuous strip — the plate's smoothstep
+// drape, never stairs) and carries each day's ramp glyphs as printed ink
+// from the shared per-biome atlases. Biomes drift in weeks-long stretches
+// of shared ink, age fades the print toward the oldest end, and today is
+// the ribbon's living tip — an accent cap on the open end, pulsing slowly.
+// The print, atlases, lights, and orbit come from terrain.js, shared with
+// the plate page: the plate is one day of this cloth up close; the
+// structure is all of it, knotted into the curve.
 
 import * as THREE from 'three';
 import {
   readTheme, reduceMotion, createRig,
-  RAMPS, glyphAtlas, fabricTexture, fabricMaterial,
-  FabricBuilder, InkBuilder, inkMaterial,
+  RAMPS, glyphAtlas, fabricTexture,
 } from 'terrain';
 
 const plate = document.getElementById('structure-plate');
@@ -35,90 +34,163 @@ if (plate && plate.dataset.api) {
   });
 }
 
+// ── tuning ──────────────────────────────────────────────────────────────────
+// The 4-D → 3-D projection: p = SCALE · ((x, z, y) + w·DIAG). Every Hilbert
+// step changes exactly one axis by 1; the diagonal is deliberately
+// incommensurate with the lattice so distinct w-layers never collapse onto
+// one another. SCALE spreads the lattice relative to the fixed ribbon
+// width — the breathing room that keeps the tangle from fusing into a
+// solid mass.
+const DIAG = new THREE.Vector3(0.62, 0.46, 0.55);
+const SCALE = 2.1; // lattice spacing in scene units
+const SPD = 6; // curve samples per day segment
+const WSEG = 5; // glyph cells across the ribbon
+const WIDTH = 1.18; // ribbon width, scene units
+const RELIEF = 0.52; // terrain displacement span along the frame normal
+const REVEAL_MS = 3000; // the worldline writes itself over ~3s
+
 async function enhance(plate) {
   const still = reduceMotion();
   const theme = readTheme();
 
   const res = await fetch(plate.dataset.api, { headers: { Accept: 'application/json' } });
-  if (!res.ok) throw new Error('structure API ' + res.status);
+  if (!res.ok) throw new Error('path API ' + res.status);
   const data = await res.json();
-  const side = data.side || 16;
-  const half = side / 2;
+  const days = data.days || [];
+  if (days.length < 2) throw new Error('path too short for a ribbon');
+  const N = days.length; // day count: epoch through today
+  const n = N - 1; // today's index
+  const hfBands = data.hfBands || 6;
+  const ageBands = data.bands || 5;
+  const tile = Math.round(Math.sqrt((days[0].hf || []).length)) || 6;
 
-  // The procession: one slot per non-empty slice in w order, with the same
-  // ~5 lattice units of air between volumes, plus one empty slot past the
-  // last slice. The oldest slot sits at the origin, nearest the camera;
-  // each younger slot steps further along -Z and a little +X — a gentle
-  // diagonal receding into depth — through the sparse frontier slot (the
-  // slice today's sheet lands in) to the ghost, deepest of all.
-  const gapU = 5;
-  const pitch = side + gapU;
-  const slices = (data.slices || []).slice().sort((a, b) => a.w - b.w);
-  const slots = slices.length + 1; // the ghost volume
-  const tw = (data.today && data.today.coord && data.today.coord[3]) ?? -1;
-  let frontierSlot = slices.findIndex((sl) => sl.w === tw);
-  if (frontierSlot < 0) frontierSlot = slices.length - 1;
-  const drift = (12 * Math.PI) / 180; // mostly depth, a little across
-  const stepX = pitch * Math.sin(drift);
-  const stepZ = pitch * Math.cos(drift);
-  // Volume center for a slot, by how many steps it sits behind the oldest.
-  const slotPos = (s) => ({ x: s * stepX, z: -s * stepZ });
+  // ── the path: the 4-D walk, projected and centered ───────────────────────
+  const pts = days.map((d) => new THREE.Vector3(
+    (d.coord[0] + d.coord[3] * DIAG.x) * SCALE,
+    (d.coord[2] + d.coord[3] * DIAG.y) * SCALE,
+    (d.coord[1] + d.coord[3] * DIAG.z) * SCALE,
+  ));
+  const box = new THREE.Box3().setFromPoints(pts);
+  const center = box.getCenter(new THREE.Vector3());
+  for (const p of pts) p.sub(center);
 
-  const rig = createRig(plate, { theme, viewSize: (slots * pitch) / 2, aspect: 5 / 2 });
-  const { scene } = rig;
+  // Smooth the right-angled lattice walk into an organic curve. Centripetal
+  // parameterization never overshoots or kinks at the walk's corners, and
+  // getPoint(t) at t = (i + f)/(N − 1) lands inside day i's span — the
+  // curve parameter stays day-addressable.
+  const curve = new THREE.CatmullRomCurve3(pts, false, 'centripetal');
+  const steps = (N - 1) * SPD;
+  const P = new Array(steps + 1);
+  for (let s = 0; s <= steps; s++) P[s] = curve.getPoint(s / steps);
 
-  // One shared ground grid under the whole procession, restyled to the
-  // hairlines — a survey sheet wide enough for every volume's footprint.
-  {
-    const near = slotPos(slots - 1);
-    const far = slotPos(0);
-    const x0 = Math.floor(Math.min(near.x, far.x) - half) - 2;
-    const x1 = Math.ceil(Math.max(near.x, far.x) + half) + 2;
-    const z0 = Math.floor(Math.min(near.z, far.z) - half) - 2;
-    const z1 = Math.ceil(Math.max(near.z, far.z) + half) + 2;
-    const pos = [];
-    for (let x = x0; x <= x1; x++) pos.push(x, -half, z0, x, -half, z1);
-    for (let z = z0; z <= z1; z++) pos.push(x0, -half, z, x1, -half, z);
-    const geo = new THREE.BufferGeometry();
-    geo.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
-    scene.add(new THREE.LineSegments(
-      geo,
-      new THREE.LineBasicMaterial({ color: theme.ink, transparent: true, opacity: 0.1 }),
-    ));
+  // Parallel-transport frames: tangents by central difference; the normal
+  // carried forward with the minimal rotation between tangents (no twist
+  // artifacts); the side vector completes the frame and spans the width.
+  const T = new Array(steps + 1);
+  for (let s = 0; s <= steps; s++) {
+    T[s] = P[Math.min(steps, s + 1)].clone().sub(P[Math.max(0, s - 1)]).normalize();
+  }
+  const Nrm = new Array(steps + 1);
+  const Side = new Array(steps + 1);
+  const seed = Math.abs(T[0].y) < 0.9 ? new THREE.Vector3(0, 1, 0) : new THREE.Vector3(1, 0, 0);
+  Nrm[0] = seed.addScaledVector(T[0], -T[0].dot(seed)).normalize();
+  Side[0] = new THREE.Vector3().crossVectors(T[0], Nrm[0]);
+  const axis = new THREE.Vector3();
+  for (let s = 1; s <= steps; s++) {
+    const nrm = Nrm[s - 1].clone();
+    axis.crossVectors(T[s - 1], T[s]);
+    if (axis.lengthSq() > 1e-12) {
+      const ang = Math.acos(THREE.MathUtils.clamp(T[s - 1].dot(T[s]), -1, 1));
+      nrm.applyAxisAngle(axis.normalize(), ang);
+    }
+    nrm.addScaledVector(T[s], -T[s].dot(nrm)).normalize();
+    Nrm[s] = nrm;
+    Side[s] = new THREE.Vector3().crossVectors(T[s], nrm);
   }
 
-  // Volume outlines: a faint box around the frontier (the slice still
-  // filling — the one today's sheet lands in) and a fainter ghost for the
-  // next, still-empty volume. Full massifs need no box — they are the box.
-  const volumeBox = (slot, opacity) => {
-    const box = new THREE.LineSegments(
-      new THREE.EdgesGeometry(new THREE.BoxGeometry(side, side, side)),
-      new THREE.LineBasicMaterial({ color: theme.ink, transparent: true, opacity }),
-    );
-    const p = slotPos(slot);
-    box.position.set(p.x, 0, p.z);
-    scene.add(box);
-    return box;
+  // ── terrain: every day's tile, read as one continuous strip ─────────────
+  // Day tiles stack end to end into an (N·tile) × tile field; smoothstep-
+  // bilinear sampling between cell centers (the plate's drape kernel) lets
+  // the cloth flex through one day's terrain into the next with no seam.
+  const rows = N * tile;
+  const strip = new Float32Array(rows * tile);
+  for (let i = 0; i < N; i++) {
+    const hf = days[i].hf;
+    for (let k = 0; k < tile * tile; k++) strip[i * tile * tile + k] = hf[k];
+  }
+  const smooth01 = (t) => t * t * (3 - 2 * t);
+  const stripAt = (r, c) => strip[
+    THREE.MathUtils.clamp(r, 0, rows - 1) * tile + THREE.MathUtils.clamp(c, 0, tile - 1)
+  ];
+  // a: continuous day coordinate in [0, N]; v: across the ribbon in [0, 1].
+  const stripSample = (a, v) => {
+    const gy = a * tile - 0.5;
+    const gx = v * tile - 0.5;
+    const j = Math.floor(gy);
+    const i = Math.floor(gx);
+    const fy = smooth01(gy - j);
+    const fx = smooth01(gx - i);
+    const s00 = stripAt(j, i);
+    const s10 = stripAt(j, i + 1);
+    const s01 = stripAt(j + 1, i);
+    const s11 = stripAt(j + 1, i + 1);
+    return s00 + (s10 - s00) * fx + (s01 - s00) * fy + (s00 - s10 + s11 - s01) * fx * fy;
   };
-  volumeBox(frontierSlot, 0.28);
-  volumeBox(slots - 1, 0.12); // the ghost — future growth, deepest of all
+  const stripA = (s) => (s / steps) * N; // strip day-coordinate at sample s
 
-  // ── cells: one fabric sheet per day ──────────────────────────────────────
-  // Lattice (x, y, z) with z up maps to scene (x, z, y) with Y up; each
-  // slice's volume is offset along scene X by its slot. Age fade tracks the
-  // SVG, compressed so the 2020 core stays clearly inked.
-  const ageBands = data.bands || 5;
-  const hfBands = data.hfBands || 6;
+  // ── the swept surface: one shared vertex grid ────────────────────────────
+  // Positions: the curve point, offset across by the side vector and out by
+  // the terrain drape (centered on the curve, so the ribbon flexes about
+  // its own spine). Normals: from the displaced surface itself, so the
+  // folds shade as cloth, not as a flat band.
+  const cols = WSEG + 1;
+  const GP = new Float32Array((steps + 1) * cols * 3);
+  {
+    const v3 = new THREE.Vector3();
+    for (let s = 0; s <= steps; s++) {
+      const a = stripA(s);
+      for (let j = 0; j < cols; j++) {
+        const h = (stripSample(a, j / WSEG) + 1) / hfBands; // (0, 1]
+        v3.copy(P[s])
+          .addScaledVector(Side[s], (j / WSEG - 0.5) * WIDTH)
+          .addScaledVector(Nrm[s], (h - 0.55) * RELIEF);
+        v3.toArray(GP, (s * cols + j) * 3);
+      }
+    }
+  }
+  const GN = new Float32Array((steps + 1) * cols * 3);
+  {
+    const du = new THREE.Vector3();
+    const dv = new THREE.Vector3();
+    const nv = new THREE.Vector3();
+    const pa = new THREE.Vector3();
+    const pb = new THREE.Vector3();
+    const at = (s, j, out) => out.fromArray(GP, (s * cols + j) * 3);
+    for (let s = 0; s <= steps; s++) {
+      for (let j = 0; j < cols; j++) {
+        at(Math.min(steps, s + 1), j, pa);
+        at(Math.max(0, s - 1), j, pb);
+        du.subVectors(pa, pb);
+        at(s, Math.min(WSEG, j + 1), pa);
+        at(s, Math.max(0, j - 1), pb);
+        dv.subVectors(pa, pb);
+        nv.crossVectors(dv, du).normalize();
+        if (nv.dot(Nrm[s]) < 0) nv.negate(); // keep the print side consistent
+        nv.toArray(GN, (s * cols + j) * 3);
+      }
+    }
+  }
+
+  // ── ink: age fade, biome palettes, per-biome glyph atlases ───────────────
+  // Oldest end faintest, floored at 0.55 of full ink — the same compression
+  // the SVG plates use, so the 2020 end stays clearly written.
   const fade = (band) => 1 - (band / Math.max(ageBands - 1, 1)) * 0.45;
+  const ageOf = (i) => Math.min(ageBands - 1, Math.floor(((n - i) * ageBands) / (n + 1)));
   const palettes = (data.biomes || []).map((b) => b.colors.map((c) => new THREE.Color(c)));
 
-  // Each sheet drapes the full cell height, so the top band touches the
-  // sheet above — laminated sheaves of days; the hair of clearance keeps
-  // touching faces from z-fighting. The lift compresses the folds onto a
-  // thicker body: six samples per cell at full band span reads as crumpled
-  // rag, not a survey sheet.
-  const relief = 0.96;
-  const lift = 0.35;
+  const radius = box.getSize(new THREE.Vector3()).length() / 2 + WIDTH;
+  const rig = createRig(plate, { theme, viewSize: radius, aspect: 16 / 10, camDist: 2.2 });
+  rig.controls.minDistance = radius * 0.22; // close enough to read the print
 
   // One glyph atlas per biome, built on first use — never one per day.
   const atlases = new Map();
@@ -140,189 +212,162 @@ async function enhance(plate) {
     return a;
   };
 
-  // Cells arrive grouped by slice; the reveal wants one day-ordered run.
-  const all = [];
-  for (let s = 0; s < slices.length; s++) {
-    for (const c of slices[s].cells) all.push({ c, slot: s });
-  }
-  all.sort((a, b) => a.c.i - b.c.i);
+  // ── ribbon geometry: per-biome quad soup, appended in day order ──────────
+  // One mesh per biome (one atlas each); within each, vertices land in day
+  // order, so the growth reveal is just advancing draw ranges, and a raycast
+  // hit maps back to its day through recorded vertex ranges. The `along`
+  // attribute (continuous day coordinate) drives the traveling undulation
+  // in the vertex shader — geometry never updates after the reveal.
+  class RibbonBuilder {
+    constructor() {
+      this.pos = [];
+      this.nrm = [];
+      this.uv = [];
+      this.along = [];
+      this.marks = []; // { ord, end } per day, for the reveal
+      this.ranges = []; // { start, end, day } per day, for hover
+    }
 
-  const sheetOpts = ({ c, slot }) => {
-    const p = slotPos(slot);
-    return {
-      levels: c.hf,
-      bands: hfBands,
-      x: p.x - half + c.x + 0.5,
-      z: p.z - half + c.y + 0.5,
-      y: c.z - half,
-      size: 1,
-      relief,
-      lift,
+    get vertexCount() {
+      return this.pos.length / 3;
+    }
+
+    vert(o, u, v, a) {
+      this.pos.push(GP[o], GP[o + 1], GP[o + 2]);
+      this.nrm.push(GN[o], GN[o + 1], GN[o + 2]);
+      this.uv.push(u, v);
+      this.along.push(a);
+    }
+
+    geometry() {
+      const geo = new THREE.BufferGeometry();
+      geo.setAttribute('position', new THREE.Float32BufferAttribute(this.pos, 3));
+      geo.setAttribute('normal', new THREE.Float32BufferAttribute(this.nrm, 3));
+      geo.setAttribute('uv', new THREE.Float32BufferAttribute(this.uv, 2));
+      geo.setAttribute('along', new THREE.Float32BufferAttribute(this.along, 1));
+      return geo;
+    }
+  }
+
+  const builders = new Map(); // biome → RibbonBuilder
+  for (let i = 0; i < N - 1; i++) {
+    const bi = days[i].biome;
+    let b = builders.get(bi);
+    if (!b) {
+      b = new RibbonBuilder();
+      builders.set(bi, b);
+    }
+    const start = b.vertexCount;
+    const age = ageOf(i);
+    const { uvFor } = atlasFor(bi);
+    for (let s = i * SPD; s < (i + 1) * SPD; s++) {
+      const aMid = stripA(s + 0.5);
+      const a0 = s / SPD;
+      const a1 = (s + 1) / SPD;
+      for (let j = 0; j < WSEG; j++) {
+        const band = THREE.MathUtils.clamp(
+          Math.round(stripSample(aMid, (j + 0.5) / WSEG)), 0, hfBands - 1,
+        );
+        const r = uvFor(band, age);
+        const o00 = (s * cols + j) * 3;
+        const o01 = (s * cols + j + 1) * 3;
+        const o10 = ((s + 1) * cols + j) * 3;
+        const o11 = ((s + 1) * cols + j + 1) * 3;
+        b.vert(o00, r.u0, r.vLo, a0);
+        b.vert(o01, r.u1, r.vLo, a0);
+        b.vert(o11, r.u1, r.vHi, a1);
+        b.vert(o00, r.u0, r.vLo, a0);
+        b.vert(o11, r.u1, r.vHi, a1);
+        b.vert(o10, r.u0, r.vHi, a1);
+      }
+    }
+    b.marks.push({ ord: i, end: b.vertexCount });
+    b.ranges.push({ start, end: b.vertexCount, day: i });
+  }
+
+  // The barely-perceptible traveling undulation: a vertex-shader ripple
+  // along the day coordinate — about a 12-day wavelength crawling slowly
+  // toward the tip. Skipped wholesale under reduced motion.
+  const uTime = { value: 0 };
+  const breathe = (mat) => {
+    if (still) return mat;
+    mat.onBeforeCompile = (sh) => {
+      sh.uniforms.uTime = uTime;
+      sh.vertexShader = sh.vertexShader
+        .replace('#include <common>', '#include <common>\nattribute float along;\nuniform float uTime;')
+        .replace('#include <begin_vertex>',
+          '#include <begin_vertex>\ntransformed += normal * 0.045 * sin(along * 0.53 - uTime);');
     };
+    return mat;
   };
 
-  // The merged scene: one printed-top builder per biome (one atlas each)
-  // plus one ink builder for every skirt and underside, all appended in day
-  // order — the accretion animation is just growing draw ranges, and a
-  // raycast hit maps back to its day through recorded vertex ranges.
-  // Buried cells ship no heightfield and render nothing — skip them.
-  const tops = new Map(); // biome → { builder, marks, ranges }
-  const skin = { builder: new InkBuilder(), marks: [], ranges: [] };
-  const mark = (rec, ord, start, cell) => {
-    rec.marks.push({ ord, end: rec.builder.vertexCount });
-    rec.ranges.push({ start, end: rec.builder.vertexCount, cell });
-  };
-  let ord = 0;
-  let todayEntry = null;
-  for (const entry of all) {
-    if (entry.c.today) {
-      todayEntry = entry;
-      continue;
-    }
-    if (!entry.c.hf || entry.c.hf.length === 0) continue; // fully buried
-    const o = sheetOpts(entry);
-    const bi = entry.c.biome;
-    let top = tops.get(bi);
-    if (!top) {
-      top = { builder: new FabricBuilder(), marks: [], ranges: [] };
-      tops.set(bi, top);
-    }
-    const tStart = top.builder.vertexCount;
-    top.builder.sheet({ ...o, uvFor: atlasFor(bi).uvFor, age: entry.c.age });
-    mark(top, ord, tStart, entry.c);
-    const sStart = skin.builder.vertexCount;
-    skin.builder.sheetSides({
-      ...o,
-      palette: palettes[bi] || [theme.ink, theme.ink, theme.ink],
-      surface: theme.surface,
-      fade: fade(entry.c.age),
-    });
-    mark(skin, ord, sStart, entry.c);
-    ord++;
-  }
-  const meshes = [];
-  for (const [bi, top] of atlasOrdered(tops)) {
-    const mesh = new THREE.Mesh(top.builder.geometry(), fabricMaterial(atlasFor(bi).texture));
-    mesh.userData = { marks: top.marks, ranges: top.ranges };
-    scene.add(mesh);
-    meshes.push(mesh);
-  }
-  {
-    const mesh = new THREE.Mesh(skin.builder.geometry(), inkMaterial());
-    mesh.userData = { marks: skin.marks, ranges: skin.ranges };
-    scene.add(mesh);
-    meshes.push(mesh);
+  // Front: the printed face. Back: the same cloth seen from behind —
+  // shared geometry redrawn dark, the plate fabric's underside.
+  const meshes = []; // front meshes — raycast targets, reveal owners
+  for (const [bi, b] of [...builders.entries()].sort((x, y) => x[0] - y[0])) {
+    const geo = b.geometry();
+    const front = new THREE.Mesh(geo, breathe(new THREE.MeshLambertMaterial({
+      map: atlasFor(bi).texture,
+    })));
+    const back = new THREE.Mesh(geo, breathe(new THREE.MeshLambertMaterial({
+      map: atlasFor(bi).texture,
+      side: THREE.BackSide,
+      color: new THREE.Color(0.42, 0.42, 0.4),
+    })));
+    front.userData = { marks: b.marks, ranges: b.ranges };
+    rig.scene.add(front, back);
+    meshes.push(front);
   }
 
-  // Today's sheet — its own near-plate-resolution drape, full ink, marked
-  // by an accent hairline around the unit cell: an instrument pointer, not
-  // a beacon. Built at a local origin so its slight pulse scales in place.
-  let todayGroup = null;
-  let todayRim = null;
-  const todayCell = todayEntry ? todayEntry.c : null;
-  if (todayEntry) {
-    const o = sheetOpts(todayEntry);
-    const bi = todayEntry.c.biome;
-    const local = { ...o, x: 0, z: 0, y: 0 };
-    const tb = new FabricBuilder();
-    tb.sheet({ ...local, uvFor: atlasFor(bi).uvFor, age: 0 });
-    const ib = new InkBuilder();
-    ib.sheetSides({
-      ...local,
-      palette: palettes[bi] || [theme.ink, theme.ink, theme.ink],
-      surface: theme.surface,
-      fade: 1,
-    });
-    todayGroup = new THREE.Group();
-    const topMesh = new THREE.Mesh(tb.geometry(), fabricMaterial(atlasFor(bi).texture));
-    const sideMesh = new THREE.Mesh(ib.geometry(), inkMaterial());
-    topMesh.userData.cell = todayCell;
-    sideMesh.userData.cell = todayCell;
-    todayGroup.add(topMesh, sideMesh);
-    // A hair larger than the cell, so the hairline never lands inside the
-    // sheet's own skirt planes. The rim ignores the scene fog: it sits at
-    // the deep end of the procession now, and a fogged accent would wash
-    // to the page color — a small pointer is fine, an invisible one is not.
-    const rim = new THREE.LineSegments(
-      new THREE.EdgesGeometry(new THREE.BoxGeometry(1.03, 1.03, 1.03)),
-      new THREE.LineBasicMaterial({ color: theme.accent, fog: false }),
-    );
-    rim.position.y = 0.5;
-    todayRim = rim;
-    todayGroup.add(rim);
-    todayGroup.position.set(o.x, o.y, o.z);
-    scene.add(todayGroup);
-  }
+  // Today: the ribbon's living end — an accent cap sealing the open
+  // cross-section at the tip, pulsing slowly once the line has been written.
+  // The walk's frontier usually sits deep inside the knot, so the cap draws
+  // through occlusion (no depth test) — a survey locator, never lost, the
+  // way the old scene's accent rim ignored the fog.
+  const tipMat = new THREE.MeshBasicMaterial({
+    color: theme.accent, side: THREE.DoubleSide, transparent: true, opacity: 0.9,
+    depthTest: false,
+  });
+  const tip = (() => {
+    const c = P[steps].clone().addScaledVector(T[steps], 0.03);
+    const sw = WIDTH * 0.62;
+    const nh = RELIEF * 0.75;
+    const corner = (ks, kn) =>
+      c.clone().addScaledVector(Side[steps], ks * sw).addScaledVector(Nrm[steps], kn * nh);
+    const a = corner(-1, -1);
+    const b = corner(1, -1);
+    const d = corner(1, 1);
+    const e = corner(-1, 1);
+    const geo = new THREE.BufferGeometry();
+    geo.setAttribute('position', new THREE.Float32BufferAttribute([
+      ...a.toArray(), ...b.toArray(), ...d.toArray(),
+      ...a.toArray(), ...d.toArray(), ...e.toArray(),
+    ], 3));
+    const m = new THREE.Mesh(geo, tipMat);
+    m.renderOrder = 1; // after the cloth, so depthTest:false lands on top
+    return m;
+  })();
+  rig.scene.add(tip);
 
   // ── swap the SVG for the canvas ──────────────────────────────────────────
   rig.mount();
 
-  // Frame the procession: the oldest massif is the subject — the camera
-  // close and low so it looms at about half the frame height, its laminated
-  // strata the first thing read — while the younger volumes shrink along
-  // the diagonal to the sparse frontier and the ghost, the deepest hazed by
-  // fog. The framing measures what is actually built in slot 0 (today an
-  // 8×8×8 corner block; one day the full volume), not the volume's mostly
-  // empty bounding cube. Enough downward angle survives that the receding
-  // sheet roofs stay visible. The orbit pivot sits a little way down the
-  // procession, not on the massif, so the gentle azimuth sway turns the
-  // whole line without throwing either end out of frame.
-  {
-    const built = new THREE.Box3();
-    for (const c of slices[0].cells) {
-      built.expandByPoint(new THREE.Vector3(c.x - half + 0.5, c.z - half + 0.5, c.y - half + 0.5));
-    }
-    built.expandByScalar(0.5);
-    const massif = built.getCenter(new THREE.Vector3());
-    const vFov = (rig.camera.fov * Math.PI) / 180;
-    // Stand back just far enough that the massif fills ~55% of the frame
-    // height; ~29° off the procession axis and ~18° above it, so the
-    // younger volumes separate and recede across the frame instead of
-    // hiding behind the massif — and the sight line down to today's cell
-    // clears the mid-line stacks across the whole sway.
-    const subjectDist = (built.max.y - built.min.y) / (0.55 * 2 * Math.tan(vFov / 2));
-    rig.camera.position.set(0.49, 0.33, 0.88).normalize()
-      .multiplyScalar(subjectDist).add(massif);
-    // The pivot leans a little left of the line and below the massif's
-    // waist: the massif rides high in the frame, whole, while the line
-    // recedes toward the upper right. It sits only a little way down the
-    // procession — close to the massif — so the sway barely moves the
-    // looming subject and spends its motion on the far, hazed end.
-    rig.controls.target.set(1.2 * stepX - 6, massif.y - 3.5, -1.2 * stepZ);
-    const dist = rig.camera.position.distanceTo(rig.controls.target);
-    rig.controls.minDistance = dist * 0.35;
-    rig.controls.maxDistance = dist * 2.5;
-    rig.controls.update();
-    // Distance haze, matched to the surface so the frontier and the ghost
-    // sink toward the page rather than gray out — instrument-quiet
-    // recession, scaled to the line's actual depth.
-    const g = slotPos(slots - 1);
-    const ghostDist = rig.camera.position.distanceTo(new THREE.Vector3(g.x, 0, g.z));
-    scene.fog = new THREE.Fog(theme.surface, subjectDist * 2.2, ghostDist * 1.5);
-    // Today's rim ignores the fog (it must stay findable at the deep end of
-    // the line) and widens with distance — at range it reads as a locator
-    // bracket around the sheet, never washing out to a lost pixel.
-    if (todayRim) {
-      const d = rig.camera.position.distanceTo(todayGroup.position);
-      todayRim.scale.setScalar(THREE.MathUtils.clamp(d / 55, 1, 3.5));
-    }
-  }
+  // ── hover tooltip: DAY n · date · biome, via raycast → vertex → day ──────
+  const tipEl = document.createElement('div');
+  tipEl.className = 'structure-tip';
+  tipEl.hidden = true;
+  plate.appendChild(tipEl);
 
-  const tip = document.createElement('div');
-  tip.className = 'structure-tip';
-  tip.hidden = true;
-  plate.appendChild(tip);
-
-  // ── hover tooltip ────────────────────────────────────────────────────────
   const raycaster = new THREE.Raycaster();
   const pointer = new THREE.Vector2();
-  const epoch = Date.UTC(...(data.epoch || '2020-01-01').split('-').map(Number).map((v, i) => (i === 1 ? v - 1 : v)));
-  const dateOf = (i) => new Date(epoch + i * 86400000).toISOString().slice(0, 10);
-  const describe = (c) => {
-    const biome = data.biomes[c.biome];
-    return 'DAY ' + c.i + ' · ' + dateOf(c.i) + ' · ' + (biome ? biome.name.toUpperCase() : '');
+  const epochMs = Date.UTC(...(data.epoch || '2020-01-01').split('-')
+    .map(Number).map((v, i) => (i === 1 ? v - 1 : v)));
+  const dateOf = (i) => new Date(epochMs + i * 86400000).toISOString().slice(0, 10);
+  const describe = (i) => {
+    const biome = data.biomes[days[i].biome];
+    return 'DAY ' + i + ' · ' + dateOf(i) + ' · ' + (biome ? biome.name.toUpperCase() : '');
   };
-  const cellAtVertex = (ranges, v) => {
+  const dayAtVertex = (ranges, v) => {
     let lo = 0;
     let hi = ranges.length - 1;
     while (lo < hi) {
@@ -330,43 +375,33 @@ async function enhance(plate) {
       if (ranges[mid].end <= v) lo = mid + 1;
       else hi = mid;
     }
-    return ranges[lo] && v >= ranges[lo].start ? ranges[lo].cell : null;
+    const r = ranges[lo];
+    return r && v >= r.start ? r.day : -1;
   };
-
-  const hoverTargets = todayGroup
-    ? [...meshes, ...todayGroup.children.filter((m) => m.isMesh)]
-    : meshes;
   rig.renderer.domElement.addEventListener('pointermove', (ev) => {
     const r = rig.renderer.domElement.getBoundingClientRect();
     pointer.set(((ev.clientX - r.left) / r.width) * 2 - 1, -((ev.clientY - r.top) / r.height) * 2 + 1);
     raycaster.setFromCamera(pointer, rig.camera);
-    const hit = raycaster.intersectObjects(hoverTargets, false)[0];
-    let cell = null;
-    if (hit) {
-      cell = hit.object.userData.cell ||
-        cellAtVertex(hit.object.userData.ranges || [], hit.faceIndex * 3);
-    }
-    if (cell) {
-      tip.textContent = describe(cell);
-      tip.style.left = ev.clientX - r.left + 12 + 'px';
-      tip.style.top = ev.clientY - r.top + 12 + 'px';
-      tip.hidden = false;
+    const hit = raycaster.intersectObjects(meshes, false)[0];
+    const day = hit ? dayAtVertex(hit.object.userData.ranges || [], hit.faceIndex * 3) : -1;
+    if (day >= 0) {
+      tipEl.textContent = describe(day);
+      tipEl.style.left = ev.clientX - r.left + 12 + 'px';
+      tipEl.style.top = ev.clientY - r.top + 12 + 'px';
+      tipEl.hidden = false;
     } else {
-      tip.hidden = true;
+      tipEl.hidden = true;
     }
   });
-  rig.renderer.domElement.addEventListener('pointerleave', () => { tip.hidden = true; });
+  rig.renderer.domElement.addEventListener('pointerleave', () => { tipEl.hidden = true; });
 
   // ── animation ────────────────────────────────────────────────────────────
-  // Accretion: the whole archive stacks in day order over ~3s. Every merged
-  // buffer keeps day order, so the reveal is growing draw ranges sweeping
-  // along the row in step (cells landed whole: prints, skirts, and backs
-  // together); then today's sheet lands with its accent rim and a very
-  // slight breathing pulse. Sheets never rebuild — geometry is static after
-  // the reveal; only the draw ranges move. Instead of the plate's full
-  // turntable — which would put a row this wide end-on — the camera sways
-  // gently about its azimuth. Reduced motion renders the final state.
-  const total = ord;
+  // The reveal: the worldline writes itself from day 0 to today over ~3s —
+  // every buffer keeps day order, so growth is advancing draw ranges (the
+  // back mesh shares each geometry, so it grows in step for free). Then the
+  // tip lands with its pulse and the slow undulation keeps the cloth alive.
+  // Geometry is static throughout. Reduced motion renders the finished form.
+  const total = N - 1;
   const drawnEnd = (marks, shown) => {
     let lo = 0;
     let hi = marks.length;
@@ -377,52 +412,27 @@ async function enhance(plate) {
     }
     return lo === 0 ? 0 : marks[lo - 1].end;
   };
-  const accretionMs = 3000;
   const t0 = performance.now();
   if (!still) {
-    for (const m of meshes) {
-      m.geometry.setDrawRange(0, 0);
-      m.visible = false;
-    }
-    if (todayGroup) todayGroup.visible = false;
+    for (const m of meshes) m.geometry.setDrawRange(0, 0);
+    tip.visible = false;
   }
 
   rig.start((now) => {
     if (still) return;
-    // One-sided ~8° sway, phase-biased so the camera only swings toward
-    // the spread side of the rest pose and back: swinging past it toward
-    // the procession axis would pile the line up behind the massif and
-    // tuck today's rim behind the mid-line stacks.
-    rig.controls.autoRotateSpeed = -0.10 * Math.sin((now - t0) / 6500);
-    const t = now - t0;
-    const k = Math.min(1, t / accretionMs);
-    const shown = Math.floor(k * total);
+    uTime.value = now * 0.0009;
+    const k = Math.min(1, (now - t0) / REVEAL_MS);
+    const shown = Math.ceil(k * total);
     for (const m of meshes) {
-      const end = drawnEnd(m.userData.marks, shown);
-      m.geometry.setDrawRange(0, end);
-      m.visible = end > 0;
+      m.geometry.setDrawRange(0, drawnEnd(m.userData.marks, shown));
     }
-    if (todayGroup) {
-      todayGroup.visible = k >= 1;
-      const s = 1 + 0.02 * Math.sin((now - t0) / 700); // subtle instrument pulse
-      todayGroup.scale.setScalar(s);
-    }
+    tip.visible = k >= 1;
+    tipMat.opacity = 0.62 + 0.3 * Math.sin((now - t0) / 900);
   });
 
   let tris = 0;
   for (const m of meshes) tris += m.geometry.attributes.position.count / 3;
-  if (todayGroup) {
-    for (const m of todayGroup.children) {
-      if (m.isMesh) tris += m.geometry.attributes.position.count / 3;
-    }
-  }
-  console.log('[structure] three r' + THREE.REVISION + ' · ' + slices.length +
-    ' volumes · ' + all.length + ' cells · ' + Math.round(tris / 1000) +
-    'k tris · ' + atlases.size + ' glyph atlases');
-}
-
-// atlasOrdered yields a Map's entries in ascending-key order — a stable
-// biome→mesh order, so draw order never depends on first-touch order.
-function atlasOrdered(map) {
-  return [...map.entries()].sort((a, b) => a[0] - b[0]);
+  console.log('[structure] three r' + THREE.REVISION + ' · worldline · ' + N +
+    ' days · ' + meshes.length + ' biome meshes · ' + Math.round(tris / 1000) +
+    'k tris ×2 sides · ' + atlases.size + ' glyph atlases');
 }

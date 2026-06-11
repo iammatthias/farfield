@@ -461,6 +461,128 @@ func TestArtStructureAPIFull(t *testing.T) {
 	}
 }
 
+// TestArtPathAPI: the worldline JSON carries every day since the epoch in
+// curve order — each with its 4-D coordinate, biome, and terrain tile —
+// with consecutive days lattice neighbors (the Hilbert walk the ribbon
+// renders), a content-CID ETag, public caching, and a raw size within the
+// viewer's budget.
+func TestArtPathAPI(t *testing.T) {
+	s := testServer(t)
+	h := s.routes()
+
+	get := func(etag string) *httptest.ResponseRecorder {
+		req := httptest.NewRequest("GET", "/api/art/path", nil)
+		if etag != "" {
+			req.Header.Set("If-None-Match", etag)
+		}
+		req.Header.Set("Accept-Encoding", "identity")
+		rec := httptest.NewRecorder()
+		h.ServeHTTP(rec, req)
+		return rec
+	}
+
+	rec := get("")
+	if rec.Code != 200 {
+		t.Fatalf("/api/art/path = %d", rec.Code)
+	}
+	if cc := rec.Header().Get("Cache-Control"); !strings.Contains(cc, "public") {
+		t.Errorf("cache-control = %q, want public", cc)
+	}
+	etag := rec.Header().Get("ETag")
+	if etag == "" {
+		t.Fatal("path JSON must carry an ETag")
+	}
+	if size := rec.Body.Len(); size > 700*1024 {
+		t.Errorf("raw payload = %d bytes, want ≤ 700KB", size)
+	}
+
+	var body struct {
+		Date    string `json:"date"`
+		Epoch   string `json:"epoch"`
+		N       uint64 `json:"n"`
+		Side    int    `json:"side"`
+		Bands   int    `json:"bands"`
+		HFBands int    `json:"hfBands"`
+		Days    []struct {
+			I     uint64 `json:"i"`
+			Coord []int  `json:"coord"`
+			Biome int    `json:"biome"`
+			HF    []int  `json:"hf"`
+		} `json:"days"`
+		Biomes []struct {
+			Name   string   `json:"name"`
+			Colors []string `json:"colors"`
+		} `json:"biomes"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if body.Date != todayUTC() || body.Epoch != artifactEpoch {
+		t.Errorf("date/epoch = %q/%q", body.Date, body.Epoch)
+	}
+	if body.Side != artSide || body.Bands != structAgeBands || body.HFBands != len(biomes[0].Ramp) {
+		t.Errorf("side/bands/hfBands = %d/%d/%d", body.Side, body.Bands, body.HFBands)
+	}
+	if len(body.Biomes) != len(biomes) {
+		t.Fatalf("biomes = %d, want %d", len(body.Biomes), len(biomes))
+	}
+	for i, b := range body.Biomes {
+		if b.Name != biomes[i].Name || len(b.Colors) != 3 {
+			t.Errorf("biome %d = %+v", i, b)
+		}
+	}
+	// Every day from the epoch through today, in order, no gaps, no trims.
+	if want := int(body.N) + 1; len(body.Days) != want {
+		t.Fatalf("days = %d, want %d (every day since the epoch)", len(body.Days), want)
+	}
+	var prev []int
+	for k, d := range body.Days {
+		if d.I != uint64(k) {
+			t.Fatalf("day %d carries index %d — days must arrive in curve order", k, d.I)
+		}
+		if len(d.Coord) != 4 {
+			t.Fatalf("day %d coord = %v, want 4 axes", k, d.Coord)
+		}
+		for _, c := range d.Coord {
+			if c < 0 || c >= artSide {
+				t.Fatalf("day %d coord %v off the lattice", k, d.Coord)
+			}
+		}
+		if d.Biome < 0 || d.Biome >= len(biomes) {
+			t.Fatalf("day %d biome %d out of range", k, d.Biome)
+		}
+		if len(d.HF) != structTileGrid*structTileGrid {
+			t.Fatalf("day %d hf len = %d, want %d — every day keeps its terrain", k, len(d.HF), structTileGrid*structTileGrid)
+		}
+		for _, lv := range d.HF {
+			if lv < 0 || lv >= body.HFBands {
+				t.Fatalf("day %d tile level %d out of [0,%d)", k, lv, body.HFBands)
+			}
+		}
+		// Consecutive days are 4-D lattice neighbors: exactly one axis
+		// changes, by exactly 1 — the continuity the ribbon depends on.
+		if prev != nil {
+			diff := 0
+			for a := 0; a < 4; a++ {
+				step := d.Coord[a] - prev[a]
+				if step < 0 {
+					step = -step
+				}
+				diff += step
+			}
+			if diff != 1 {
+				t.Fatalf("days %d→%d are not lattice neighbors: %v → %v", k-1, k, prev, d.Coord)
+			}
+		}
+		prev = d.Coord
+	}
+
+	// The ETag revalidates.
+	if rec := get(etag); rec.Code != 304 {
+		t.Errorf("revalidation = %d, want 304", rec.Code)
+	}
+}
+
 // TestArtTerrainAPI: the terrain JSON carries the day's full quantized
 // heightfield — server-canonical, so the plate viewer never re-derives
 // noise — plus the biome inks, with the plate CID as ETag, cached like
@@ -590,8 +712,9 @@ func TestStructureViewerAssets(t *testing.T) {
 		"/static/vendor/three.module.min.js?v=" + threeJSVer,
 		"/static/vendor/OrbitControls.js?v=" + orbitJSVer,
 		`id="structure-plate"`,
-		`data-api="/api/art/structure"`,
-		"Grown one cell per day since " + artifactEpoch,
+		`data-api="/api/art/path"`,
+		"One continuous line · grown one cell per day since " + artifactEpoch,
+		"today at the tip",
 	} {
 		if !strings.Contains(body, want) {
 			t.Errorf("structure page missing %q", want)

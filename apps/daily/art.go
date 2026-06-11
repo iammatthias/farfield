@@ -288,7 +288,83 @@ func (s *Server) writeArtTerrainJSON(w http.ResponseWriter, r *http.Request, dat
 	})
 }
 
+// ── worldline path JSON API ────────────────────────────────────────────────
+
+// pathDay is one day of the worldline response: where the Hilbert walk put
+// it, which biome inked it, and its terrain miniature. Every day keeps its
+// heightfield — nothing on a ribbon is ever buried.
+type pathDay struct {
+	I     uint64 `json:"i"`
+	Coord [4]int `json:"coord"`
+	Biome int    `json:"biome"`
+	HF    []int  `json:"hf"`
+}
+
+// handleAPIArtPath emits the whole worldline for the structure viewer: every
+// day from the epoch through today, in curve order. Consecutive days are 4-D
+// lattice neighbors — the sequence is one continuous path through 16⁴, which
+// the viewer renders as a single ribbon. Like the other today-rolling reads
+// it caches publicly for minutes, with its content CID as ETag.
+func (s *Server) handleAPIArtPath(w http.ResponseWriter, r *http.Request) {
+	today := todayUTC()
+	n, ok := artDayIndex(today)
+	if !ok {
+		web.WriteError(w, http.StatusNotFound, "no path today") // unreachable until ~2199
+		return
+	}
+	days := make([]pathDay, 0, n+1)
+	for i := uint64(0); i <= n; i++ {
+		x, y, z, cw := hilbert4d(i, artOrder)
+		bi := biomeIndexAt(x, y, z, cw)
+		hf := heightfield(newRNG(domainArt, addDays(artifactEpoch, int(i))), biomes[bi].Terrain, plotSize, len(biomes[bi].Ramp))
+		days = append(days, pathDay{
+			I: i, Coord: [4]int{x, y, z, cw},
+			Biome: bi,
+			HF:    tileLevels(hf, structTileGrid),
+		})
+	}
+	body, err := json.Marshal(map[string]any{
+		"date":    today,
+		"epoch":   artifactEpoch,
+		"n":       n,
+		"side":    artSide,
+		"bands":   structAgeBands,
+		"hfBands": len(biomes[0].Ramp), // every ramp quantizes to the same level count
+		"biomes":  apiBiomeTable(),
+		"days":    days,
+	})
+	if err != nil {
+		web.WriteError(w, http.StatusInternalServerError, "could not encode path")
+		return
+	}
+	etag := cid.Of(body)
+	cacheFor(w, todayMaxAge)
+	w.Header().Set("ETag", `"`+etag+`"`)
+	if web.ETagMatch(r, etag) {
+		w.WriteHeader(http.StatusNotModified)
+		return
+	}
+	w.Header().Set("Content-Type", "application/json; charset=utf-8")
+	_, _ = w.Write(body)
+}
+
 // ── structure JSON API ─────────────────────────────────────────────────────
+
+// apiBiome is the biome table entry the viewer APIs carry — the name keys
+// the client's glyph ramp, the colors are the elevation inks.
+type apiBiome struct {
+	Name   string   `json:"name"`
+	Colors []string `json:"colors"`
+}
+
+// apiBiomeTable lists all eight biomes in index order.
+func apiBiomeTable() []apiBiome {
+	bs := make([]apiBiome, len(biomes))
+	for i, b := range biomes {
+		bs[i] = apiBiome{Name: b.Name, Colors: b.Palette[:]}
+	}
+	return bs
+}
 
 // structAPICell is one occupied cell as the structure API emits it.
 type structAPICell struct {
@@ -420,15 +496,7 @@ func (s *Server) handleAPIArtStructure(w http.ResponseWriter, r *http.Request) {
 	} else {
 		payload["slices"] = structureSlices(n)
 	}
-	type apiBiome struct {
-		Name   string   `json:"name"`
-		Colors []string `json:"colors"`
-	}
-	bs := make([]apiBiome, len(biomes))
-	for i, b := range biomes {
-		bs[i] = apiBiome{Name: b.Name, Colors: b.Palette[:]}
-	}
-	payload["biomes"] = bs
+	payload["biomes"] = apiBiomeTable()
 
 	body, err := json.Marshal(payload)
 	if err != nil {

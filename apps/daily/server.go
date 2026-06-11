@@ -157,8 +157,10 @@ func (s *Server) routes() http.Handler {
 	mux.HandleFunc("GET /api/photo/{date}", s.handleAPIDay)
 	mux.HandleFunc("GET /api/photos", s.handleAPIPhotos)
 	mux.HandleFunc("GET /api/art", s.handleAPIArtToday)
-	// The literal /structure and /terrain segments win over the {date} wildcard.
+	// The literal /structure, /path, and /terrain segments win over the
+	// {date} wildcard.
 	mux.HandleFunc("GET /api/art/structure", s.handleAPIArtStructure)
+	mux.HandleFunc("GET /api/art/path", s.handleAPIArtPath)
 	mux.HandleFunc("GET /api/art/terrain", s.handleAPIArtTerrainToday)
 	mux.HandleFunc("GET /api/art/terrain/{date}", s.handleAPIArtTerrainDay)
 	mux.HandleFunc("GET /api/art/{date}", s.handleAPIArtDay)
