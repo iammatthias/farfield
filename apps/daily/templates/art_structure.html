@@ -1,0 +1,59 @@
+{{define "title"}}art · structure · w={{.W}} · farfield · daily{{end}}
+
+{{define "head"}}
+  <style>
+    /* structure — one w-slice of the hyperstructure cube */
+    .art-plate { border: 1px solid var(--ink); }
+    .art-plate svg { width: 100%; height: auto; }
+    .art-plate figcaption {
+      display: flex; justify-content: space-between; gap: 1rem;
+      padding: 0.55rem 0.8rem; border-top: 1px solid var(--ink);
+      font: 500 0.7rem/1 var(--font-mono);
+      text-transform: uppercase; letter-spacing: 0.07em;
+    }
+    .scrub {
+      display: flex; flex-wrap: wrap; gap: 0.4rem; margin-top: 1.25rem;
+      font-family: var(--font-mono); font-size: 0.8rem;
+    }
+    .scrub a, .scrub span.current {
+      display: block; min-width: 2.2rem; padding: 0.3rem 0; text-align: center;
+      border: 1px solid var(--ink); text-decoration: none;
+    }
+    .scrub a:hover { background: var(--ink); color: var(--surface); }
+    .scrub span.current { background: var(--ink); color: var(--surface); }
+    .scrub-label { margin-top: 1.5rem; }
+  </style>
+{{end}}
+
+{{define "content"}}
+  <header class="bar">
+    <h1><a href="/art">farfield · daily</a></h1>
+    <nav>
+      <a href="/art">Today</a>
+      <a href="/api/art">JSON</a>
+    </nav>
+  </header>
+
+  <p class="label source-eyebrow">ART · STRUCTURE · W-SLICE {{.W}} OF 16</p>
+
+  <figure class="art-plate">
+    {{.SVG}}
+    <figcaption>
+      <span>{{.Date}} · DAY {{.N}}</span>
+      <span class="muted">{{if .OnW}}TODAY'S CELL ON THIS SLICE{{else}}TODAY AT W={{.TodayW}}{{end}}</span>
+    </figcaption>
+  </figure>
+
+  <p class="label scrub-label">W-axis scrubber</p>
+  <nav class="scrub">
+    {{range .Slices}}
+      {{if .Current}}<span class="current">{{.W}}</span>
+      {{else}}<a href="{{.URL}}">{{.W}}</a>{{end}}
+    {{end}}
+  </nav>
+
+  <footer class="cal-foot">
+    <span>farfield · daily · art</span>
+    <span>16×16×16 cells per slice · filled as the curve passes</span>
+  </footer>
+{{end}}

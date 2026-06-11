@@ -122,11 +122,21 @@ func (s *Server) routes() http.Handler {
 		http.Redirect(w, r, "/photo/"+r.PathValue("date"), http.StatusMovedPermanently)
 	})
 
+	// The art artifact — a deterministic generative terrain accreting one
+	// cell per day along a 4-D Hilbert curve. Everything derives from the
+	// date; nothing is stored. /art/{date} also serves /art/{date}.svg.
+	mux.HandleFunc("GET /art", s.handleArtToday)
+	mux.HandleFunc("GET /art.svg", s.handleArtSVGToday)
+	mux.HandleFunc("GET /art/structure", s.handleArtStructure)
+	mux.HandleFunc("GET /art/{date}", s.handleArtDay)
+
 	// Public JSON API — the photo and photos reads are cacheable for a day.
 	mux.HandleFunc("GET /status", s.handleStatus)
 	mux.HandleFunc("GET /api/photo", s.handleAPIToday)
 	mux.HandleFunc("GET /api/photo/{date}", s.handleAPIDay)
 	mux.HandleFunc("GET /api/photos", s.handleAPIPhotos)
+	mux.HandleFunc("GET /api/art", s.handleAPIArtToday)
+	mux.HandleFunc("GET /api/art/{date}", s.handleAPIArtDay)
 
 	// Shared theme stylesheet.
 	mux.HandleFunc("GET /static/styles.css", theme.CSSHandler())
