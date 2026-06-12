@@ -40,7 +40,7 @@ func artDayIndex(date string) (uint64, bool) {
 	return uint64(n), true
 }
 
-// artPlot is one fully derived day: cell, biome, heightfield, rendered
+// artPlot is one fully derived day: cell, biome, zone, heightfield, rendered
 // plate, identity.
 type artPlot struct {
 	Date     string
@@ -48,21 +48,27 @@ type artPlot struct {
 	Coord    [4]int
 	BiomeIdx int
 	Biome    Biome
+	ZoneIdx  int
+	Zone     Zone
 	HF       [][]int
 	SVG      []byte
 	CID      string
 }
 
 // artPlotFor derives the complete plot for a day index — pure, no storage.
+// The biome (a neighborhood property of the cell) shapes the terrain and
+// picks the glyphs; the zone (a property of the date) supplies the inks.
 func artPlotFor(date string, n uint64) artPlot {
 	x, y, z, w := hilbert4d(n, artOrder)
 	bi := biomeIndexAt(x, y, z, w)
 	b := biomes[bi]
+	zi := zoneIndexFor(date)
 	hf := heightfield(newRNG(domainArt, date), b.Terrain, plotSize, len(b.Ramp))
-	svg := renderPlotSVG(date, b, hf)
+	svg := renderPlotSVG(date, b, zones[zi], hf)
 	return artPlot{
 		Date: date, N: n, Coord: [4]int{x, y, z, w},
-		BiomeIdx: bi, Biome: b, HF: hf, SVG: svg, CID: cid.Of(svg),
+		BiomeIdx: bi, Biome: b, ZoneIdx: zi, Zone: zones[zi],
+		HF: hf, SVG: svg, CID: cid.Of(svg),
 	}
 }
 
@@ -117,6 +123,7 @@ func (s *Server) renderArtPage(w http.ResponseWriter, r *http.Request, date stri
 		"Date":       p.Date,
 		"N":          p.N,
 		"Biome":      p.Biome.Name,
+		"Zone":       p.Zone.Name,
 		"SVG":        template.HTML(p.SVG),
 		"SVGURL":     svgURL,
 		"JSONURL":    jsonURL,
@@ -253,9 +260,9 @@ func (s *Server) handleAPIArtTerrainDay(w http.ResponseWriter, r *http.Request) 
 
 // writeArtTerrainJSON emits one day's quantized heightfield — the plate's
 // server-canonical terrain, so the client never re-derives noise — plus the
-// biome inks to draw it in. Cached like /api/art, with the plate CID as
-// ETag: the levels and the SVG derive from the same stream, so the CID
-// versions both.
+// day's zone inks to draw it in (the biome stays for the glyph ramp). Cached
+// like /api/art, with the plate CID as ETag: the levels and the SVG derive
+// from the same stream, so the CID versions both.
 func (s *Server) writeArtTerrainJSON(w http.ResponseWriter, r *http.Request, date string, maxAge int) {
 	n, ok := artDayIndex(date)
 	if !ok {
@@ -283,6 +290,7 @@ func (s *Server) writeArtTerrainJSON(w http.ResponseWriter, r *http.Request, dat
 			"name":   p.Biome.Name,
 			"colors": p.Biome.Palette[:],
 		},
+		"zone":   zoneJSON(p.ZoneIdx),
 		"levels": levels,
 		"cid":    p.CID,
 	})
@@ -291,12 +299,13 @@ func (s *Server) writeArtTerrainJSON(w http.ResponseWriter, r *http.Request, dat
 // ── worldline path JSON API ────────────────────────────────────────────────
 
 // pathDay is one day of the worldline response: where the Hilbert walk put
-// it, which biome inked it, and its terrain miniature. Every day keeps its
-// heightfield — nothing on a ribbon is ever buried.
+// it, which biome shaped it, which zone inked it, and its terrain miniature.
+// Every day keeps its heightfield — nothing on a ribbon is ever buried.
 type pathDay struct {
 	I     uint64 `json:"i"`
 	Coord [4]int `json:"coord"`
 	Biome int    `json:"biome"`
+	Zone  int    `json:"zone"`
 	HF    []int  `json:"hf"`
 }
 
@@ -316,10 +325,12 @@ func (s *Server) handleAPIArtPath(w http.ResponseWriter, r *http.Request) {
 	for i := uint64(0); i <= n; i++ {
 		x, y, z, cw := hilbert4d(i, artOrder)
 		bi := biomeIndexAt(x, y, z, cw)
-		hf := heightfield(newRNG(domainArt, addDays(artifactEpoch, int(i))), biomes[bi].Terrain, plotSize, len(biomes[bi].Ramp))
+		date := addDays(artifactEpoch, int(i))
+		hf := heightfield(newRNG(domainArt, date), biomes[bi].Terrain, plotSize, len(biomes[bi].Ramp))
 		days = append(days, pathDay{
 			I: i, Coord: [4]int{x, y, z, cw},
 			Biome: bi,
+			Zone:  zoneIndexFor(date),
 			HF:    tileLevels(hf, structTileGrid),
 		})
 	}
@@ -331,6 +342,7 @@ func (s *Server) handleAPIArtPath(w http.ResponseWriter, r *http.Request) {
 		"bands":   structAgeBands,
 		"hfBands": len(biomes[0].Ramp), // every ramp quantizes to the same level count
 		"biomes":  apiBiomeTable(),
+		"zones":   apiZoneTable(),
 		"days":    days,
 	})
 	if err != nil {
@@ -351,7 +363,8 @@ func (s *Server) handleAPIArtPath(w http.ResponseWriter, r *http.Request) {
 // ── structure JSON API ─────────────────────────────────────────────────────
 
 // apiBiome is the biome table entry the viewer APIs carry — the name keys
-// the client's glyph ramp, the colors are the elevation inks.
+// the client's glyph ramp; the colors stay for back-compat, though the
+// day's zone now supplies the inks.
 type apiBiome struct {
 	Name   string   `json:"name"`
 	Colors []string `json:"colors"`
@@ -366,6 +379,34 @@ func apiBiomeTable() []apiBiome {
 	return bs
 }
 
+// apiZone is the zone table entry the viewer APIs carry — the day's full
+// ink palette, low → high band, plus its paper wash.
+type apiZone struct {
+	Name   string   `json:"name"`
+	Colors []string `json:"colors"`
+	Wash   string   `json:"wash"`
+}
+
+// apiZoneTable lists all sixteen zones in index order.
+func apiZoneTable() []apiZone {
+	zs := make([]apiZone, len(zones))
+	for i, z := range zones {
+		zs[i] = apiZone{Name: z.Name, Colors: z.Inks[:], Wash: z.Wash}
+	}
+	return zs
+}
+
+// zoneJSON is one day's zone as the single-day APIs emit it.
+func zoneJSON(zi int) map[string]any {
+	z := zones[zi]
+	return map[string]any{
+		"index":  zi,
+		"name":   z.Name,
+		"colors": z.Inks[:],
+		"wash":   z.Wash,
+	}
+}
+
 // structAPICell is one occupied cell as the structure API emits it.
 type structAPICell struct {
 	I     uint64 `json:"i"`
@@ -373,6 +414,7 @@ type structAPICell struct {
 	Y     int    `json:"y"`
 	Z     int    `json:"z"`
 	Biome int    `json:"biome"`
+	Zone  int    `json:"zone"`
 	Age   int    `json:"age"` // age band, 0 = newest ink … bands-1 = oldest
 	Today bool   `json:"today"`
 	HF    []int  `json:"hf"` // tile levels, row-major, side = √len; empty = buried
@@ -396,10 +438,12 @@ func structCellAt(i, n uint64, x, y, z, w int) structAPICell {
 	if i == n {
 		grid = structTodayTileGrid
 	}
-	hf := heightfield(newRNG(domainArt, addDays(artifactEpoch, int(i))), b.Terrain, plotSize, len(b.Ramp))
+	date := addDays(artifactEpoch, int(i))
+	hf := heightfield(newRNG(domainArt, date), b.Terrain, plotSize, len(b.Ramp))
 	return structAPICell{
 		I: i, X: x, Y: y, Z: z,
 		Biome: bi,
+		Zone:  zoneIndexFor(date),
 		Age:   ageBand(i, n),
 		Today: i == n,
 		HF:    tileLevels(hf, grid),
@@ -497,6 +541,7 @@ func (s *Server) handleAPIArtStructure(w http.ResponseWriter, r *http.Request) {
 		payload["slices"] = structureSlices(n)
 	}
 	payload["biomes"] = apiBiomeTable()
+	payload["zones"] = apiZoneTable()
 
 	body, err := json.Marshal(payload)
 	if err != nil {
@@ -560,8 +605,8 @@ func (s *Server) handleAPIArtDay(w http.ResponseWriter, r *http.Request) {
 	s.writeArtJSON(w, r, date, maxAge)
 }
 
-// writeArtJSON emits one day's derivation — date, cell, biome, and the CID of
-// its plate SVG — with the CID as ETag.
+// writeArtJSON emits one day's derivation — date, cell, biome, zone, and the
+// CID of its plate SVG — with the CID as ETag.
 func (s *Server) writeArtJSON(w http.ResponseWriter, r *http.Request, date string, maxAge int) {
 	n, ok := artDayIndex(date)
 	if !ok {
@@ -579,6 +624,7 @@ func (s *Server) writeArtJSON(w http.ResponseWriter, r *http.Request, date strin
 		"date":  p.Date,
 		"coord": p.Coord[:],
 		"biome": p.Biome.Name,
+		"zone":  zoneJSON(p.ZoneIdx),
 		"cid":   p.CID,
 	})
 }

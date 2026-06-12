@@ -2,9 +2,11 @@ package main
 
 import (
 	"bytes"
+	"crypto/sha256"
 	"encoding/json"
 	"net/http/httptest"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -21,6 +23,56 @@ func TestSeedDeterminismAndDomainSeparation(t *testing.T) {
 	}
 	if seed("art", "2024-03-15") == seed("art", "2024-03-16") {
 		t.Error("different dates must yield different seeds for one domain")
+	}
+}
+
+// TestZoneDeterminismAndDomainSeparation: the day's zone — its ink palette —
+// must be a pure function of the date, drawn from its own hash domain so it
+// is independent of the art seed (terrain) and the biome stream, with every
+// index in range and the whole palette table exercised over a year.
+func TestZoneDeterminismAndDomainSeparation(t *testing.T) {
+	seen := map[int]bool{}
+	for i := 0; i < 365; i++ {
+		d := addDays(artifactEpoch, i)
+		zi := zoneIndexFor(d)
+		if zi != zoneIndexFor(d) {
+			t.Fatalf("zone for %s is not deterministic", d)
+		}
+		if zi < 0 || zi >= len(zones) {
+			t.Fatalf("zone for %s = %d, out of [0,%d)", d, zi, len(zones))
+		}
+		seen[zi] = true
+	}
+	if len(seen) != len(zones) {
+		t.Errorf("a year exercises %d of %d zones — distribution looks broken", len(seen), len(zones))
+	}
+	// Domain separation: the zone stream must come from "art-zone:", not
+	// from the art seed's domain — the prefix has to matter.
+	differs := false
+	for i := 0; i < 64 && !differs; i++ {
+		d := addDays(artifactEpoch, i)
+		h := sha256.Sum256([]byte(domainArt + ":" + d))
+		differs = zoneIndexFor(d) != int(h[0])%len(zones)
+	}
+	if !differs {
+		t.Error("zone indices mirror the art seed stream — domain separation is broken")
+	}
+	// The plate must carry the date's zone — same date, same zone, everywhere.
+	n, _ := artDayIndex("2024-03-15")
+	p := artPlotFor("2024-03-15", n)
+	if p.ZoneIdx != zoneIndexFor("2024-03-15") || p.Zone.Name != zones[p.ZoneIdx].Name {
+		t.Errorf("plot zone = %d %q, want %d", p.ZoneIdx, p.Zone.Name, zoneIndexFor("2024-03-15"))
+	}
+	// And every zone's ink set is complete.
+	for i, z := range zones {
+		if z.Name == "" || z.Wash == "" {
+			t.Errorf("zone %d is missing a name or wash", i)
+		}
+		for _, ink := range z.Inks {
+			if len(ink) != 7 || ink[0] != '#' {
+				t.Errorf("zone %q has a malformed ink %q", z.Name, ink)
+			}
+		}
 	}
 }
 
@@ -193,10 +245,21 @@ func TestArtEndpoints(t *testing.T) {
 		t.Errorf("/art/structure?w=16 = %d, want 200 (query ignored)", rec.Code)
 	}
 
-	// JSON carries coord and cid.
+	// JSON carries coord, cid, and the day's zone.
 	if rec := get("/api/art", ""); rec.Code != 200 ||
-		!strings.Contains(rec.Body.String(), `"coord"`) || !strings.Contains(rec.Body.String(), `"cid"`) {
+		!strings.Contains(rec.Body.String(), `"coord"`) || !strings.Contains(rec.Body.String(), `"cid"`) ||
+		!strings.Contains(rec.Body.String(), `"zone"`) {
 		t.Errorf("/api/art = %d body %s", rec.Code, rec.Body.String())
+	}
+
+	// The page caption carries the zone name alongside the biome.
+	if n, ok := artDayIndex("2024-03-15"); ok {
+		p := artPlotFor("2024-03-15", n)
+		page := get("/art/2024-03-15", "")
+		want := "2024-03-15 · day " + strconv.FormatUint(p.N, 10) + " · " + p.Biome.Name + " · " + p.Zone.Name
+		if !strings.Contains(page.Body.String(), want) {
+			t.Errorf("art page caption missing %q", want)
+		}
 	}
 
 	// The plate is pure artwork — no annotation text baked into the bytes.
@@ -255,6 +318,7 @@ func TestArtStructureAPI(t *testing.T) {
 			Y     int    `json:"y"`
 			Z     int    `json:"z"`
 			Biome int    `json:"biome"`
+			Zone  int    `json:"zone"`
 			Age   int    `json:"age"`
 			Today bool   `json:"today"`
 			HF    []int  `json:"hf"`
@@ -263,6 +327,11 @@ func TestArtStructureAPI(t *testing.T) {
 			Name   string   `json:"name"`
 			Colors []string `json:"colors"`
 		} `json:"biomes"`
+		Zones []struct {
+			Name   string   `json:"name"`
+			Colors []string `json:"colors"`
+			Wash   string   `json:"wash"`
+		} `json:"zones"`
 	}
 	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
 		t.Fatalf("unmarshal: %v", err)
@@ -284,6 +353,14 @@ func TestArtStructureAPI(t *testing.T) {
 			t.Errorf("biome %d = %+v", i, b)
 		}
 	}
+	if len(body.Zones) != len(zones) {
+		t.Fatalf("zones = %d, want %d", len(body.Zones), len(zones))
+	}
+	for i, z := range body.Zones {
+		if z.Name != zones[i].Name || len(z.Colors) != 4 || z.Wash == "" {
+			t.Errorf("zone %d = %+v", i, z)
+		}
+	}
 	prev := int64(-1)
 	for _, c := range body.Cells {
 		if c.X < 0 || c.X >= artSide || c.Y < 0 || c.Y >= artSide || c.Z < 0 || c.Z >= artSide {
@@ -291,6 +368,9 @@ func TestArtStructureAPI(t *testing.T) {
 		}
 		if c.Biome < 0 || c.Biome >= len(biomes) || c.Age < 0 || c.Age >= structAgeBands {
 			t.Fatalf("cell %d bad biome/age: %+v", c.I, c)
+		}
+		if c.Zone != zoneIndexFor(addDays(artifactEpoch, int(c.I))) {
+			t.Fatalf("cell %d zone = %d, want its date's zone", c.I, c.Zone)
 		}
 		if int64(c.I) <= prev {
 			t.Fatal("cells must arrive in ascending day order")
@@ -372,6 +452,7 @@ func TestArtStructureAPIFull(t *testing.T) {
 				Y     int    `json:"y"`
 				Z     int    `json:"z"`
 				Biome int    `json:"biome"`
+				Zone  int    `json:"zone"`
 				Age   int    `json:"age"`
 				Today bool   `json:"today"`
 				HF    []int  `json:"hf"`
@@ -381,6 +462,11 @@ func TestArtStructureAPIFull(t *testing.T) {
 			Name   string   `json:"name"`
 			Colors []string `json:"colors"`
 		} `json:"biomes"`
+		Zones []struct {
+			Name   string   `json:"name"`
+			Colors []string `json:"colors"`
+			Wash   string   `json:"wash"`
+		} `json:"zones"`
 	}
 	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
 		t.Fatalf("unmarshal: %v", err)
@@ -393,6 +479,9 @@ func TestArtStructureAPIFull(t *testing.T) {
 	}
 	if len(body.Biomes) != len(biomes) {
 		t.Fatalf("biomes = %d, want %d", len(body.Biomes), len(biomes))
+	}
+	if len(body.Zones) != len(zones) {
+		t.Fatalf("zones = %d, want %d", len(body.Zones), len(zones))
 	}
 	if len(body.Slices) == 0 {
 		t.Fatal("full structure must carry at least one slice")
@@ -417,6 +506,9 @@ func TestArtStructureAPIFull(t *testing.T) {
 			}
 			if c.Biome < 0 || c.Biome >= len(biomes) || c.Age < 0 || c.Age >= structAgeBands {
 				t.Fatalf("cell %d bad biome/age: %+v", c.I, c)
+			}
+			if c.Zone < 0 || c.Zone >= len(zones) {
+				t.Fatalf("cell %d zone %d out of range", c.I, c.Zone)
 			}
 			if int64(c.I) <= prev {
 				t.Fatalf("slice w=%d cells must arrive in ascending day order", sl.W)
@@ -507,12 +599,18 @@ func TestArtPathAPI(t *testing.T) {
 			I     uint64 `json:"i"`
 			Coord []int  `json:"coord"`
 			Biome int    `json:"biome"`
+			Zone  int    `json:"zone"`
 			HF    []int  `json:"hf"`
 		} `json:"days"`
 		Biomes []struct {
 			Name   string   `json:"name"`
 			Colors []string `json:"colors"`
 		} `json:"biomes"`
+		Zones []struct {
+			Name   string   `json:"name"`
+			Colors []string `json:"colors"`
+			Wash   string   `json:"wash"`
+		} `json:"zones"`
 	}
 	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
 		t.Fatalf("unmarshal: %v", err)
@@ -529,6 +627,14 @@ func TestArtPathAPI(t *testing.T) {
 	for i, b := range body.Biomes {
 		if b.Name != biomes[i].Name || len(b.Colors) != 3 {
 			t.Errorf("biome %d = %+v", i, b)
+		}
+	}
+	if len(body.Zones) != len(zones) {
+		t.Fatalf("zones = %d, want %d", len(body.Zones), len(zones))
+	}
+	for i, z := range body.Zones {
+		if z.Name != zones[i].Name || len(z.Colors) != 4 || z.Wash != zones[i].Wash {
+			t.Errorf("zone %d = %+v", i, z)
 		}
 	}
 	// Every day from the epoch through today, in order, no gaps, no trims.
@@ -550,6 +656,9 @@ func TestArtPathAPI(t *testing.T) {
 		}
 		if d.Biome < 0 || d.Biome >= len(biomes) {
 			t.Fatalf("day %d biome %d out of range", k, d.Biome)
+		}
+		if d.Zone != zoneIndexFor(addDays(artifactEpoch, k)) {
+			t.Fatalf("day %d zone = %d, want its date's zone", k, d.Zone)
 		}
 		if len(d.HF) != structTileGrid*structTileGrid {
 			t.Fatalf("day %d hf len = %d, want %d — every day keeps its terrain", k, len(d.HF), structTileGrid*structTileGrid)
@@ -620,6 +729,12 @@ func TestArtTerrainAPI(t *testing.T) {
 				Name   string   `json:"name"`
 				Colors []string `json:"colors"`
 			} `json:"biome"`
+			Zone struct {
+				Index  int      `json:"index"`
+				Name   string   `json:"name"`
+				Colors []string `json:"colors"`
+				Wash   string   `json:"wash"`
+			} `json:"zone"`
 			Levels []int  `json:"levels"`
 			CID    string `json:"cid"`
 		}
@@ -631,6 +746,10 @@ func TestArtTerrainAPI(t *testing.T) {
 		}
 		if body.Bands != len(biomes[body.Biome.Index].Ramp) || len(body.Biome.Colors) != 3 {
 			t.Errorf("%s bands/colors = %d/%d", path, body.Bands, len(body.Biome.Colors))
+		}
+		if body.Zone.Index != zoneIndexFor(body.Date) || body.Zone.Name != zones[body.Zone.Index].Name ||
+			len(body.Zone.Colors) != 4 || body.Zone.Wash != zones[body.Zone.Index].Wash {
+			t.Errorf("%s zone = %+v, want the date's zone", path, body.Zone)
 		}
 		for i, lv := range body.Levels {
 			if lv < 0 || lv >= body.Bands {

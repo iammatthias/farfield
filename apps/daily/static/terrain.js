@@ -5,8 +5,9 @@
 // (smoothstep-bilinear between samples — cloth flexing and folding, never
 // stairs) and the surface carries the day's actual ramp glyphs as printed
 // ink, the same chars, the same band→ink mapping the SVG plate uses
-// (palette[⌊lv·3/bands⌋]). Age fades every ink toward the page surface,
-// like the SVG's opacity bands. The plate page is one sheet up close; the
+// (zone inks[⌊lv·len/bands⌋] — the biome gives the glyphs, the day's zone
+// gives every color). Age fades every ink toward the page surface, like
+// the SVG's opacity bands. The plate page is one sheet up close; the
 // structure is the archive of all of them, stacked into the curve — the
 // same cloth at two zooms.
 
@@ -112,11 +113,20 @@ export function fabricTexture(renderer, canvas) {
   return tex;
 }
 
+// coverageTexture wraps a NEUTRAL atlas canvas — an ink-coverage mask, not
+// a picture — so no color-space decode bends the stored intensities.
+export function coverageTexture(renderer, canvas) {
+  const tex = new THREE.CanvasTexture(canvas);
+  tex.colorSpace = THREE.NoColorSpace;
+  tex.anisotropy = renderer.capabilities.getMaxAnisotropy();
+  return tex;
+}
+
 // plateCanvas prints one full day onto cloth: the 24×24 glyph field, one
-// ramp glyph per cell in its band ink on a faint band wash — the SVG plate's
-// exact language, rasterized as the fabric's print. 24 cells × 64 px =
-// a 1536² canvas.
-export function plateCanvas({ levels, bands, ramp, palette, surface, cellPx = 64 }) {
+// ramp glyph per cell in its zone band ink on a faint band wash over the
+// zone's paper tint — the SVG plate's exact language, rasterized as the
+// fabric's print. 24 cells × 64 px = a 1536² canvas.
+export function plateCanvas({ levels, bands, ramp, palette, surface, wash, cellPx = 64 }) {
   const g = Math.round(Math.sqrt(levels.length));
   const canvas = makeCanvas(g * cellPx, g * cellPx);
   const ctx = canvas.getContext('2d');
@@ -124,12 +134,13 @@ export function plateCanvas({ levels, bands, ramp, palette, surface, cellPx = 64
   ctx.font = Math.round(cellPx * 0.78) + 'px ' + MONO;
   ctx.textAlign = 'center';
   ctx.textBaseline = 'middle';
+  const paper = wash || surface;
   const inks = [];
   const washes = [];
   for (let b = 0; b < bands; b++) {
     const ink = palette[Math.floor((b * palette.length) / bands)];
     inks.push(css(ink));
-    washes.push(css(surface.clone().lerp(ink, 0.05 + (0.08 * b) / Math.max(bands - 1, 1))));
+    washes.push(css(paper.clone().lerp(ink, 0.05 + (0.08 * b) / Math.max(bands - 1, 1))));
   }
   for (let j = 0; j < g; j++) {
     for (let i = 0; i < g; i++) {
@@ -143,36 +154,214 @@ export function plateCanvas({ levels, bands, ramp, palette, surface, cellPx = 64
   return canvas;
 }
 
-// glyphAtlas prints one biome's whole vocabulary: a bands × ageBands grid of
-// tiles, each tile one ramp glyph in its band ink at one age's fade. Every
-// structure sheet UV-maps its cells into this atlas — eight biomes, eight
-// textures, never one per day. uvFor insets the rect slightly so mip
-// filtering never bleeds a neighboring tile in.
-export function glyphAtlas({ ramp, palette, surface, bands, ages, fade, tilePx = 192 }) {
-  const canvas = makeCanvas(bands * tilePx, ages * tilePx);
+// ── animated plate print ───────────────────────────────────────────────────
+
+// seedHash folds the day's seed material (its date string) into a uint32 —
+// FNV-1a. Same date, same hash, same animation personality.
+export function seedHash(str) {
+  let h = 0x811c9dc5;
+  for (let i = 0; i < str.length; i++) {
+    h ^= str.charCodeAt(i);
+    h = Math.imul(h, 0x01000193);
+  }
+  return h >>> 0;
+}
+
+// mulberry32 — a tiny deterministic PRNG, only for deriving the day's
+// animation parameters (tempo, direction, pulse interval) from its seed.
+function mulberry32(a) {
+  return () => {
+    a = (a + 0x6d2b79f5) >>> 0;
+    let t = a;
+    t = Math.imul(t ^ (t >>> 15), t | 1);
+    t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
+}
+
+// plateAnimation is plateCanvas made to live: the same 24×24 print, but
+// paint(t) redraws every cell for time t so the characters course through
+// the landform. The motion is elevation-driven:
+//
+//   · a primary wave travels through ELEVATION — each cell's phase is its
+//     normalized height ×2.2 (plus a tiny spatial jitter), so the character
+//     cycling (base band ±1 step along the ramp) sweeps coherently from the
+//     peaks down through the valleys, or upward — the day's seed decides.
+//   · troughs FLOW — cells in the lowest two bands take an extra per-row
+//     phase term advancing with t, so basins read as a lateral current.
+//   · a PULSE every 8–14 s (seed-derived) — a ring radiating outward from
+//     the highest cell over ~2 s, brightening ink ~25% and pushing the glyph
+//     one step up the ramp as it passes.
+//   · the ink BREATHES — per-cell opacity rides the same wave ±12%, so the
+//     light moves with the characters. Washes stay put: stable ground under
+//     a moving print.
+//
+// Everything per-cell is precomputed (layout, phases, ink strings); paint
+// allocates nothing. The day's seed sets ω (tempo), wave direction, trough
+// current, and pulse interval — each date animates with its own character,
+// and the same date always animates the same way.
+export function plateAnimation({ levels, bands, ramp, palette, surface, wash, seed, cellPx = 64 }) {
+  const g = Math.round(Math.sqrt(levels.length));
+  const canvas = makeCanvas(g * cellPx, g * cellPx);
+  const ctx = canvas.getContext('2d');
+  const glyphs = [...ramp];
+  const font = Math.round(cellPx * 0.78) + 'px ' + MONO;
+  const paper = wash || surface;
+  const inks = [];
+  const washes = [];
+  for (let b = 0; b < bands; b++) {
+    const ink = palette[Math.floor((b * palette.length) / bands)];
+    inks.push(css(ink));
+    washes.push(css(paper.clone().lerp(ink, 0.05 + (0.08 * b) / Math.max(bands - 1, 1))));
+  }
+
+  // The day's animation personality, drawn deterministically from the seed.
+  const rng = mulberry32(seed >>> 0);
+  const omega = 0.55 + rng() * 0.4;                       // tempo, rad/s (T ≈ 7–11 s)
+  const dir = rng() < 0.5 ? 1 : -1;                       // wave: peaks→valleys or back
+  const pulseEveryMs = 8000 + rng() * 6000;               // a pulse every 8–14 s
+  const flow = (0.9 + rng() * 0.7) * (rng() < 0.5 ? 1 : -1); // trough current, rad/s
+  const tickMs = 90 + Math.round(rng() * 40);             // deliberate cadence, 90–130 ms
+  const pulseMs = 2000;
+
+  // Per-cell precompute: phase from elevation (+ tiny jitter), trough flag,
+  // distance from the day's peak (highest band, nearest center on ties).
+  const TAU = Math.PI * 2;
+  const n = g * g;
+  const phase = new Float32Array(n);
+  const low = new Uint8Array(n);
+  const distPeak = new Float32Array(n);
+  let peakI = 0;
+  let peakJ = 0;
+  let peakScore = -Infinity;
+  for (let j = 0; j < g; j++) {
+    for (let i = 0; i < g; i++) {
+      const c = j * g + i;
+      const lv = levels[c];
+      const h = Math.imul((seed ^ Math.imul(i, 73856093) ^ Math.imul(j, 19349663)) | 0, 2654435761);
+      const jitter = (((h >>> 16) & 1023) / 1023 - 0.5) * 0.1; // ±0.05
+      phase[c] = (lv / Math.max(bands - 1, 1)) * 2.2 * TAU + jitter * TAU;
+      low[c] = lv < 2 ? 1 : 0;
+      const score = lv * 1e6 - Math.hypot(i - (g - 1) / 2, j - (g - 1) / 2);
+      if (score > peakScore) {
+        peakScore = score;
+        peakI = i;
+        peakJ = j;
+      }
+    }
+  }
+  let ringSpan = 0;
+  for (let j = 0; j < g; j++) {
+    for (let i = 0; i < g; i++) {
+      const d = Math.hypot(i - peakI, j - peakJ);
+      distPeak[j * g + i] = d;
+      if (d > ringSpan) ringSpan = d;
+    }
+  }
+  ringSpan += 2; // the ring fully exits the field before the next pulse
+
+  // paint redraws the whole field at time tMs. 576 fillRect + fillText at
+  // ~10 Hz; no allocation in here.
+  const paint = (tMs) => {
+    const t = tMs / 1000;
+    const pt = tMs % pulseEveryMs;
+    const ringR = pt < pulseMs ? (pt / pulseMs) * ringSpan : -1e9;
+    ctx.font = font;
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    for (let j = 0; j < g; j++) {
+      for (let i = 0; i < g; i++) {
+        const c = j * g + i;
+        const lv = levels[c];
+        let arg = t * omega * dir - phase[c];
+        if (low[c]) arg += i * 0.85 + j * 0.4 - t * flow;
+        const active = Math.sin(arg);
+        let idx = lv + Math.round(active * 1.4);
+        let alpha = 0.85 * (1 + 0.12 * active);
+        const d = Math.abs(distPeak[c] - ringR);
+        if (d < 1.6) {
+          const k = 1 - d / 1.6;
+          if (k > 0.4) idx += 1;
+          alpha += 0.25 * k;
+        }
+        if (idx < 0) idx = 0;
+        else if (idx >= bands) idx = bands - 1;
+        ctx.globalAlpha = 1;
+        ctx.fillStyle = washes[lv];
+        ctx.fillRect(i * cellPx, j * cellPx, cellPx, cellPx);
+        ctx.globalAlpha = alpha > 1 ? 1 : alpha;
+        ctx.fillStyle = inks[idx];
+        ctx.fillText(glyphs[idx], (i + 0.5) * cellPx, (j + 0.5) * cellPx);
+      }
+    }
+    ctx.globalAlpha = 1;
+  };
+
+  return { canvas, paint, tickMs, omega, pulseEveryMs };
+}
+
+// glyphAtlas prints one biome's whole vocabulary as a NEUTRAL coverage
+// mask: one row of bands tiles, each tile its ramp glyph at a per-band ink
+// intensity over a faint per-band wash intensity. The texel's green channel
+// is ink coverage — zonedMaterial mixes the page surface toward each
+// vertex's zone ink by it — so eight biome atlases serve all sixteen zones
+// (color lives per vertex, age fade folded in there too), never biome ×
+// zone textures. uvFor insets the rect slightly so mip filtering never
+// bleeds a neighboring tile in.
+export function glyphAtlas({ ramp, bands, tilePx = 192 }) {
+  const canvas = makeCanvas(bands * tilePx, tilePx);
   const ctx = canvas.getContext('2d');
   const glyphs = [...ramp];
   ctx.font = Math.round(tilePx * 0.94) + 'px ' + MONO;
   ctx.textAlign = 'center';
   ctx.textBaseline = 'middle';
-  for (let a = 0; a < ages; a++) {
-    const f = fade(a);
-    for (let b = 0; b < bands; b++) {
-      const ink = palette[Math.floor((b * palette.length) / bands)];
-      ctx.fillStyle = css(surface.clone().lerp(ink, (0.08 + (0.1 * b) / Math.max(bands - 1, 1)) * f));
-      ctx.fillRect(b * tilePx, a * tilePx, tilePx, tilePx);
-      ctx.fillStyle = css(surface.clone().lerp(ink, f));
-      ctx.fillText(glyphs[b], (b + 0.5) * tilePx, (a + 0.5) * tilePx);
-    }
+  const gray = (v) => {
+    const b = Math.round(v * 255);
+    return 'rgb(' + b + ',' + b + ',' + b + ')';
+  };
+  for (let b = 0; b < bands; b++) {
+    const t = b / Math.max(bands - 1, 1);
+    // The band wash runs a touch stronger than the old painted atlases so
+    // each plate carries its zone tint even where mips average the print.
+    ctx.fillStyle = gray(0.12 + 0.14 * t);
+    ctx.fillRect(b * tilePx, 0, tilePx, tilePx);
+    ctx.fillStyle = gray(0.82 + 0.18 * t); // per-band glyph intensity
+    ctx.fillText(glyphs[b], (b + 0.5) * tilePx, 0.5 * tilePx);
   }
   const inset = 0.08;
-  const uvFor = (b, a) => ({
+  const uvFor = (b) => ({
     u0: (b + inset) / bands,
     u1: (b + 1 - inset) / bands,
-    vLo: (ages - 1 - a + inset) / ages,
-    vHi: (ages - a - inset) / ages,
+    vLo: inset,
+    vHi: 1 - inset,
   });
   return { canvas, uvFor };
+}
+
+// zonedMaterial draws geometry printed from a neutral glyphAtlas: the map's
+// green channel is ink coverage, the vertex color is the cell's zone ink
+// (age fade already folded in), and the fragment mixes the page surface
+// toward that ink by the coverage — band intensity × zone ink. The material
+// color still multiplies the result, so the dark back-side trick works
+// unchanged. patchVertex lets a scene add its motion shader on top; pass a
+// distinct cacheKey per patch shape so three never shares programs across
+// different patches.
+export function zonedMaterial({ map, surface, back = false, patchVertex = null, cacheKey = '' }) {
+  const mat = new THREE.MeshLambertMaterial(back
+    ? { map, vertexColors: true, side: THREE.BackSide, color: new THREE.Color(0.42, 0.42, 0.4) }
+    : { map, vertexColors: true });
+  mat.onBeforeCompile = (sh) => {
+    sh.uniforms.uSurface = { value: surface };
+    sh.fragmentShader = sh.fragmentShader
+      .replace('#include <common>', '#include <common>\nuniform vec3 uSurface;')
+      .replace('#include <map_fragment>', '')
+      .replace('#include <color_fragment>',
+        'vec4 inkTexel = texture2D( map, vMapUv );\n' +
+        'diffuseColor.rgb *= mix( uSurface, vColor, inkTexel.g );');
+    if (patchVertex) patchVertex(sh);
+  };
+  mat.customProgramCacheKey = () => 'zoned:' + cacheKey;
+  return mat;
 }
 
 // ── fabric sheet geometry ──────────────────────────────────────────────────

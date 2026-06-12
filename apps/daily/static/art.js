@@ -3,7 +3,9 @@
 // printed on cloth, the cloth flexing and folding into the day's terrain.
 // The heightfield the SVG quantizes into glyphs displaces a high-segment
 // plane smoothly (smoothstep-bilinear — drape, not stairs); the print is
-// the same chars in the same biome inks. The SVG stays the canonical
+// the same chars in the same biome inks, and the print itself is alive —
+// the characters course, pulse, and flow through the hills and troughs on
+// a deliberate ~10 Hz cadence (see plateAnimation). The SVG stays the canonical
 // deterministic artifact (its bytes and CID never change) and the no-JS /
 // no-WebGL fallback; if anything here fails, the SVG stays put.
 //
@@ -15,7 +17,7 @@
 import * as THREE from 'three';
 import {
   readTheme, reduceMotion, createRig,
-  RAMPS, levelSampler, plateCanvas, fabricTexture,
+  RAMPS, levelSampler, plateCanvas, plateAnimation, fabricTexture, seedHash,
 } from 'terrain';
 
 const plate = document.getElementById('plate-canvas');
@@ -38,9 +40,15 @@ async function enhance(plate) {
   if (!res.ok) throw new Error('terrain API ' + res.status);
   const data = await res.json();
 
-  const palette = (data.biome.colors || []).map((c) => new THREE.Color(c));
+  // The day's zone supplies every ink; the biome supplies the glyph ramp.
+  const zone = data.zone || { name: 'graphite', colors: data.biome.colors };
+  const palette = (zone.colors || []).map((c) => new THREE.Color(c));
+  const wash = zone.wash ? new THREE.Color(zone.wash) : theme.surface;
   const bands = data.bands || 6;
   const ramp = RAMPS[data.biome.name] || RAMPS.basin;
+
+  // The scene sits on the zone's paper tint, matching the SVG plate's wash.
+  rig.scene.background = wash;
 
   // Drape proportions — judged against the SVG plate: enough relief that
   // the folds read as terrain, shallow enough that the cloth stays a survey
@@ -48,10 +56,18 @@ async function enhance(plate) {
   const relief = size * 0.24;
   const baseY = -relief / 2 + size * 0.02;
 
-  // The print: the day's full 24×24 glyph field on a 1536² canvas.
-  const map = fabricTexture(rig.renderer, plateCanvas({
-    levels: data.levels, bands, ramp, palette, surface: theme.surface,
-  }));
+  const still = reduceMotion();
+
+  // The print: the day's full 24×24 glyph field on a 1536² canvas. With
+  // motion allowed it's a living print — plateAnimation recomputes every
+  // cell's glyph and ink on a deliberate cadence so the characters course
+  // and pulse through the hills and troughs (seeded by the date: each day
+  // moves with its own character). Reduced motion keeps the static baked
+  // print exactly as before, never touched again.
+  const print = { levels: data.levels, bands, ramp, palette, surface: theme.surface, wash };
+  const anim = still ? null : plateAnimation({ ...print, seed: seedHash(data.date) });
+  if (anim) anim.paint(0);
+  const map = fabricTexture(rig.renderer, anim ? anim.canvas : plateCanvas(print));
 
   // The cloth: a 96×96-segment plane, vertices displaced by the smoothly
   // interpolated heightfield. UVs map the whole print across the sheet
@@ -74,8 +90,6 @@ async function enhance(plate) {
     base[i] = ((sample(u, v) + 1) / bands) * relief;
     uvAttr.setXY(i, u, 1 - v);
   }
-
-  const still = reduceMotion();
 
   // Living motion: a very subtle traveling undulation under the drape —
   // the sheet never quite settles, like cloth in still air. Reduced motion
@@ -122,14 +136,27 @@ async function enhance(plate) {
   // drape immediately and never mutates it again.
   const settleMs = 1000;
   const t0 = performance.now();
+  let lastInk = 0;
 
   rig.start((now) => {
     if (still) return;
     const k = Math.min(1, (now - t0) / settleMs);
     shape(1 - Math.pow(1 - k, 3), now);
+    // The print ticks on its own deliberate cadence (~10 Hz), apart from
+    // the per-frame fabric undulation: glyphs course through the landform,
+    // troughs flow, and a ring pulses out from the peak every so often.
+    if (anim && now - lastInk >= anim.tickMs) {
+      anim.paint(now);
+      map.needsUpdate = true;
+      lastInk = now;
+    }
   });
 
   console.log('[art] three r' + THREE.REVISION + ' · ' + data.date +
-    ' · ' + data.biome.name + ' · glyph fabric · ' +
-    seg * seg * 2 + ' tris ×2 sides · ' + map.image.width + 'px print');
+    ' · ' + data.biome.name + ' · ' + zone.name + ' · glyph fabric · ' +
+    seg * seg * 2 + ' tris ×2 sides · ' + map.image.width + 'px print' +
+    (anim
+      ? ' · live ink @' + anim.tickMs + 'ms, ω=' + anim.omega.toFixed(2) +
+        ', pulse ' + (anim.pulseEveryMs / 1000).toFixed(1) + 's'
+      : ' · static print (reduced motion)'));
 }

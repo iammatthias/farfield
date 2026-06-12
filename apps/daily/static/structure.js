@@ -6,7 +6,9 @@
 //
 // The default scene (enhanceCastle) is a floating field of plates: each
 // day's 6×6 heightfield draped gently over a small horizontal sheet,
-// printed from the shared per-biome glyph atlases, with air on every side.
+// printed from the shared neutral per-biome glyph atlases and inked in the
+// day's own zone palette — the castle is quietly polychrome, zone color
+// identifying each day — with air on every side.
 // The lattice z axis becomes the vertical, stretched so the z-levels read
 // as floors of one airy castle; the w axis is a gentle diagonal offset, so
 // the four w-generations of a floor interleave instead of colliding. A
@@ -21,7 +23,7 @@
 import * as THREE from 'three';
 import {
   readTheme, reduceMotion, createRig,
-  RAMPS, glyphAtlas, fabricTexture, drapeHeights,
+  RAMPS, glyphAtlas, coverageTexture, zonedMaterial, drapeHeights,
 } from 'terrain';
 
 const plate = document.getElementById('structure-plate');
@@ -90,13 +92,36 @@ async function enhanceCastle(plate) {
   // into the paper, light passes through the gaps.
   rig.scene.fog = new THREE.Fog(theme.surface, radius * 1.5, radius * 4.4);
 
-  // ── ink: age fade, biome palettes, per-biome glyph atlases ──────────────
+  // ── ink: age fade, zone palettes, per-biome NEUTRAL glyph atlases ────────
   // Oldest plates faintest, floored at 0.55 of full ink, same as everywhere.
+  // The atlases are coverage masks (biome glyphs at per-band intensity); the
+  // color is per vertex — each plate's day picks a zone, the zone ink for
+  // its band is lerped from the surface by the age fade, and zonedMaterial
+  // multiplies coverage × ink. Eight atlases serve all sixteen zones.
   const fade = (band) => 1 - (band / Math.max(ageBands - 1, 1)) * 0.45;
   const ageOf = (i) => Math.min(ageBands - 1, Math.floor(((n - i) * ageBands) / (n + 1)));
-  const palettes = (data.biomes || []).map((b) => b.colors.map((c) => new THREE.Color(c)));
+  const zoneInks = (data.zones || []).map((z) => z.colors.map((c) => new THREE.Color(c)));
 
-  // One glyph atlas per biome, built on first use — never one per day.
+  // inkFor caches the per-band vertex inks for one (zone, age) pair.
+  const inkCache = new Map();
+  const inkFor = (zi, age) => {
+    const key = zi * ageBands + age;
+    let inks = inkCache.get(key);
+    if (!inks) {
+      const f = fade(age);
+      const palette = zoneInks[zi] || [theme.ink];
+      inks = [];
+      for (let b = 0; b < hfBands; b++) {
+        const ink = palette[Math.floor((b * palette.length) / hfBands)];
+        inks.push(theme.surface.clone().lerp(ink, f));
+      }
+      inkCache.set(key, inks);
+    }
+    return inks;
+  };
+
+  // One neutral glyph atlas per biome, built on first use — never one per
+  // day, never one per zone.
   const atlases = new Map();
   const atlasFor = (bi) => {
     let a = atlases.get(bi);
@@ -104,13 +129,9 @@ async function enhanceCastle(plate) {
       const biome = data.biomes[bi] || { name: 'basin' };
       const made = glyphAtlas({
         ramp: RAMPS[biome.name] || RAMPS.basin,
-        palette: palettes[bi] || [theme.ink, theme.ink, theme.ink],
-        surface: theme.surface,
         bands: hfBands,
-        ages: ageBands,
-        fade,
       });
-      a = { uvFor: made.uvFor, texture: fabricTexture(rig.renderer, made.canvas) };
+      a = { uvFor: made.uvFor, texture: coverageTexture(rig.renderer, made.canvas) };
       atlases.set(bi, a);
     }
     return a;
@@ -121,12 +142,14 @@ async function enhanceCastle(plate) {
   // in day order, so the assembly reveal is advancing draw ranges and a
   // raycast hit maps back to its day through recorded vertex ranges. The
   // `phase` attribute (one constant per plate) drives the independent bob
-  // in the vertex shader — geometry never updates after the build.
+  // in the vertex shader; the `color` attribute carries each cell's zone
+  // ink — geometry never updates after the build.
   class PlateBuilder {
     constructor() {
       this.pos = [];
       this.nrm = [];
       this.uv = [];
+      this.col = [];
       this.phase = [];
       this.marks = []; // { ord, end } per day, for the reveal
       this.ranges = []; // { start, end, day } per day, for hover
@@ -137,8 +160,9 @@ async function enhanceCastle(plate) {
     }
 
     // sheet drapes one day's 6×6 band field over a small horizontal plate
-    // centered on c — the FabricBuilder sheet, with the bob phase attached.
-    sheet({ levels, c, uvFor, age, ph }) {
+    // centered on c — the FabricBuilder sheet, with the bob phase attached
+    // and each cell colored in its band's zone ink.
+    sheet({ levels, c, uvFor, inks, ph }) {
       const { g, H } = drapeHeights(levels, hfBands, RELIEF, 0);
       const cs = PLATE / g;
       const x0 = c.x - PLATE / 2;
@@ -155,15 +179,18 @@ async function enhanceCastle(plate) {
         const inv = 1 / Math.hypot(dx, 1, dz);
         return [-dx * inv, inv, -dz * inv];
       };
-      const vert = (p, nv, u, v) => {
+      const vert = (p, nv, u, v, ink) => {
         this.pos.push(p[0], p[1], p[2]);
         this.nrm.push(nv[0], nv[1], nv[2]);
         this.uv.push(u, v);
+        this.col.push(ink.r, ink.g, ink.b);
         this.phase.push(ph);
       };
       for (let j = 0; j < g; j++) {
         for (let i = 0; i < g; i++) {
-          const r = uvFor(levels[j * g + i], age);
+          const band = levels[j * g + i];
+          const r = uvFor(band);
+          const ink = inks[band];
           const xa = x0 + i * cs;
           const xb = xa + cs;
           const za = z0 + j * cs;
@@ -172,12 +199,12 @@ async function enhanceCastle(plate) {
           const p01 = [xa, y + hAt(i, j + 1), zb];
           const p11 = [xb, y + hAt(i + 1, j + 1), zb];
           const p10 = [xb, y + hAt(i + 1, j), za];
-          vert(p00, nAt(i, j), r.u0, r.vHi);
-          vert(p01, nAt(i, j + 1), r.u0, r.vLo);
-          vert(p11, nAt(i + 1, j + 1), r.u1, r.vLo);
-          vert(p00, nAt(i, j), r.u0, r.vHi);
-          vert(p11, nAt(i + 1, j + 1), r.u1, r.vLo);
-          vert(p10, nAt(i + 1, j), r.u1, r.vHi);
+          vert(p00, nAt(i, j), r.u0, r.vHi, ink);
+          vert(p01, nAt(i, j + 1), r.u0, r.vLo, ink);
+          vert(p11, nAt(i + 1, j + 1), r.u1, r.vLo, ink);
+          vert(p00, nAt(i, j), r.u0, r.vHi, ink);
+          vert(p11, nAt(i + 1, j + 1), r.u1, r.vLo, ink);
+          vert(p10, nAt(i + 1, j), r.u1, r.vHi, ink);
         }
       }
     }
@@ -187,6 +214,7 @@ async function enhanceCastle(plate) {
       geo.setAttribute('position', new THREE.Float32BufferAttribute(this.pos, 3));
       geo.setAttribute('normal', new THREE.Float32BufferAttribute(this.nrm, 3));
       geo.setAttribute('uv', new THREE.Float32BufferAttribute(this.uv, 2));
+      geo.setAttribute('color', new THREE.Float32BufferAttribute(this.col, 3));
       geo.setAttribute('phase', new THREE.Float32BufferAttribute(this.phase, 1));
       return geo;
     }
@@ -205,7 +233,7 @@ async function enhanceCastle(plate) {
       levels: days[i].hf,
       c: centers[i],
       uvFor: atlasFor(bi).uvFor,
-      age: ageOf(i),
+      inks: inkFor(days[i].zone || 0, ageOf(i)),
       ph: (i * 2.399963) % (Math.PI * 2), // golden-angle phases — no beats
     });
     b.marks.push({ ord: i, end: b.vertexCount });
@@ -215,37 +243,35 @@ async function enhanceCastle(plate) {
   // The almost-imperceptible float: each plate bobs ±1% of its own size
   // with its own phase, in the vertex shader — geometry stays static. uBob
   // eases the float in only after the assembly settles; reduced motion
-  // never installs the shader at all.
+  // never installs the patch at all.
   const uTime = { value: 0 };
   const uBob = { value: 0 };
   const bobAmp = (PLATE * 0.01).toFixed(5);
-  const breathe = (mat) => {
-    if (still) return mat;
-    mat.onBeforeCompile = (sh) => {
-      sh.uniforms.uTime = uTime;
-      sh.uniforms.uBob = uBob;
-      sh.vertexShader = sh.vertexShader
-        .replace('#include <common>',
-          '#include <common>\nattribute float phase;\nuniform float uTime;\nuniform float uBob;')
-        .replace('#include <begin_vertex>',
-          '#include <begin_vertex>\ntransformed.y += uBob * ' + bobAmp + ' * sin(uTime + phase);');
-    };
-    return mat;
+  const bobPatch = still ? null : (sh) => {
+    sh.uniforms.uTime = uTime;
+    sh.uniforms.uBob = uBob;
+    sh.vertexShader = sh.vertexShader
+      .replace('#include <common>',
+        '#include <common>\nattribute float phase;\nuniform float uTime;\nuniform float uBob;')
+      .replace('#include <begin_vertex>',
+        '#include <begin_vertex>\ntransformed.y += uBob * ' + bobAmp + ' * sin(uTime + phase);');
   };
+  const bobKey = still ? 'castle' : 'castle-bob';
 
   // Front: the printed face. Back: the same sheet seen from below — shared
   // geometry redrawn dark, so a plate overhead reads as a plate, not a hole.
+  // Both are zonedMaterials: neutral atlas coverage × per-vertex zone ink.
   const meshes = []; // front meshes — raycast targets, reveal owners
   for (const [bi, b] of [...builders.entries()].sort((x, y) => x[0] - y[0])) {
     const geo = b.geometry();
-    const front = new THREE.Mesh(geo, breathe(new THREE.MeshLambertMaterial({
-      map: atlasFor(bi).texture,
-    })));
-    const back = new THREE.Mesh(geo, breathe(new THREE.MeshLambertMaterial({
-      map: atlasFor(bi).texture,
-      side: THREE.BackSide,
-      color: new THREE.Color(0.42, 0.42, 0.4),
-    })));
+    const front = new THREE.Mesh(geo, zonedMaterial({
+      map: atlasFor(bi).texture, surface: theme.surface,
+      patchVertex: bobPatch, cacheKey: bobKey,
+    }));
+    const back = new THREE.Mesh(geo, zonedMaterial({
+      map: atlasFor(bi).texture, surface: theme.surface, back: true,
+      patchVertex: bobPatch, cacheKey: bobKey,
+    }));
     front.userData = { marks: b.marks, ranges: b.ranges };
     rig.scene.add(front, back);
     meshes.push(front);
@@ -305,7 +331,7 @@ async function enhanceCastle(plate) {
   // ── swap the SVG for the canvas ──────────────────────────────────────────
   rig.mount();
 
-  // ── hover tooltip: DAY n · date · biome, via raycast → vertex → day ──────
+  // ── hover tooltip: DAY n · date · biome · zone, raycast → vertex → day ───
   const tipEl = document.createElement('div');
   tipEl.className = 'structure-tip';
   tipEl.hidden = true;
@@ -318,7 +344,10 @@ async function enhanceCastle(plate) {
   const dateOf = (i) => new Date(epochMs + i * 86400000).toISOString().slice(0, 10);
   const describe = (i) => {
     const biome = data.biomes[days[i].biome];
-    return 'DAY ' + i + ' · ' + dateOf(i) + ' · ' + (biome ? biome.name.toUpperCase() : '');
+    const zone = (data.zones || [])[days[i].zone];
+    return 'DAY ' + i + ' · ' + dateOf(i) +
+      ' · ' + (biome ? biome.name.toUpperCase() : '') +
+      (zone ? ' · ' + zone.name.toUpperCase() : '');
   };
   const dayAtVertex = (ranges, v) => {
     let lo = 0;
@@ -393,7 +422,8 @@ async function enhanceCastle(plate) {
   for (const m of meshes) tris += m.geometry.attributes.position.count / 3;
   console.log('[structure] three r' + THREE.REVISION + ' · castle · ' + N +
     ' plates · ' + meshes.length + ' biome meshes · ' + Math.round(tris / 1000) +
-    'k tris ×2 sides · ' + atlases.size + ' glyph atlases');
+    'k tris ×2 sides · ' + atlases.size + ' neutral glyph atlases · ' +
+    zoneInks.length + ' zones in vertex ink');
 }
 
 // ═══ the worldline: one continuous ribbon (?view=line) ═════════════════════
@@ -408,9 +438,10 @@ async function enhanceCastle(plate) {
 // surface flexes with each day's own terrain (the server's downsampled
 // heightfields read as one continuous strip — the plate's smoothstep
 // drape, never stairs) and carries each day's ramp glyphs as printed ink
-// from the shared per-biome atlases. Biomes drift in weeks-long stretches
-// of shared ink, age fades the print toward the oldest end, and today is
-// the ribbon's living tip — an accent cap on the open end, pulsing slowly.
+// from the shared neutral per-biome atlases, colored per day by its zone.
+// Biomes drift in weeks-long stretches of shared glyphs while the zone
+// inks turn day by day, age fades the print toward the oldest end, and
+// today is the ribbon's living tip — an accent cap, pulsing slowly.
 
 // ── tuning ──────────────────────────────────────────────────────────────────
 // The 4-D → 3-D projection: p = SCALE · ((x, z, y) + w·DIAG). Every Hilbert
@@ -559,18 +590,39 @@ async function enhanceLine(plate) {
     }
   }
 
-  // ── ink: age fade, biome palettes, per-biome glyph atlases ───────────────
+  // ── ink: age fade, zone palettes, per-biome NEUTRAL glyph atlases ────────
   // Oldest end faintest, floored at 0.55 of full ink — the same compression
-  // the SVG plates use, so the 2020 end stays clearly written.
+  // the SVG plates use, so the 2020 end stays clearly written. The atlases
+  // are coverage masks; each day's zone ink rides the vertex colors and
+  // zonedMaterial mixes surface → ink by coverage.
   const fade = (band) => 1 - (band / Math.max(ageBands - 1, 1)) * 0.45;
   const ageOf = (i) => Math.min(ageBands - 1, Math.floor(((n - i) * ageBands) / (n + 1)));
-  const palettes = (data.biomes || []).map((b) => b.colors.map((c) => new THREE.Color(c)));
+  const zoneInks = (data.zones || []).map((z) => z.colors.map((c) => new THREE.Color(c)));
+
+  // inkFor caches the per-band vertex inks for one (zone, age) pair.
+  const inkCache = new Map();
+  const inkFor = (zi, age) => {
+    const key = zi * ageBands + age;
+    let inks = inkCache.get(key);
+    if (!inks) {
+      const f = fade(age);
+      const palette = zoneInks[zi] || [theme.ink];
+      inks = [];
+      for (let b = 0; b < hfBands; b++) {
+        const ink = palette[Math.floor((b * palette.length) / hfBands)];
+        inks.push(theme.surface.clone().lerp(ink, f));
+      }
+      inkCache.set(key, inks);
+    }
+    return inks;
+  };
 
   const radius = box.getSize(new THREE.Vector3()).length() / 2 + WIDTH;
   const rig = createRig(plate, { theme, viewSize: radius, aspect: 16 / 10, camDist: 2.2 });
   rig.controls.minDistance = radius * 0.22; // close enough to read the print
 
-  // One glyph atlas per biome, built on first use — never one per day.
+  // One neutral glyph atlas per biome, built on first use — never one per
+  // day, never one per zone.
   const atlases = new Map();
   const atlasFor = (bi) => {
     let a = atlases.get(bi);
@@ -578,13 +630,9 @@ async function enhanceLine(plate) {
       const biome = data.biomes[bi] || { name: 'basin' };
       const made = glyphAtlas({
         ramp: RAMPS[biome.name] || RAMPS.basin,
-        palette: palettes[bi] || [theme.ink, theme.ink, theme.ink],
-        surface: theme.surface,
         bands: hfBands,
-        ages: ageBands,
-        fade,
       });
-      a = { uvFor: made.uvFor, texture: fabricTexture(rig.renderer, made.canvas) };
+      a = { uvFor: made.uvFor, texture: coverageTexture(rig.renderer, made.canvas) };
       atlases.set(bi, a);
     }
     return a;
@@ -595,12 +643,14 @@ async function enhanceLine(plate) {
   // order, so the growth reveal is just advancing draw ranges, and a raycast
   // hit maps back to its day through recorded vertex ranges. The `along`
   // attribute (continuous day coordinate) drives the traveling undulation
-  // in the vertex shader — geometry never updates after the reveal.
+  // in the vertex shader; the `color` attribute carries each day's zone
+  // ink — geometry never updates after the reveal.
   class RibbonBuilder {
     constructor() {
       this.pos = [];
       this.nrm = [];
       this.uv = [];
+      this.col = [];
       this.along = [];
       this.marks = []; // { ord, end } per day, for the reveal
       this.ranges = []; // { start, end, day } per day, for hover
@@ -610,10 +660,11 @@ async function enhanceLine(plate) {
       return this.pos.length / 3;
     }
 
-    vert(o, u, v, a) {
+    vert(o, u, v, a, ink) {
       this.pos.push(GP[o], GP[o + 1], GP[o + 2]);
       this.nrm.push(GN[o], GN[o + 1], GN[o + 2]);
       this.uv.push(u, v);
+      this.col.push(ink.r, ink.g, ink.b);
       this.along.push(a);
     }
 
@@ -622,6 +673,7 @@ async function enhanceLine(plate) {
       geo.setAttribute('position', new THREE.Float32BufferAttribute(this.pos, 3));
       geo.setAttribute('normal', new THREE.Float32BufferAttribute(this.nrm, 3));
       geo.setAttribute('uv', new THREE.Float32BufferAttribute(this.uv, 2));
+      geo.setAttribute('color', new THREE.Float32BufferAttribute(this.col, 3));
       geo.setAttribute('along', new THREE.Float32BufferAttribute(this.along, 1));
       return geo;
     }
@@ -636,7 +688,7 @@ async function enhanceLine(plate) {
       builders.set(bi, b);
     }
     const start = b.vertexCount;
-    const age = ageOf(i);
+    const inks = inkFor(days[i].zone || 0, ageOf(i));
     const { uvFor } = atlasFor(bi);
     for (let s = i * SPD; s < (i + 1) * SPD; s++) {
       const aMid = stripA(s + 0.5);
@@ -646,17 +698,18 @@ async function enhanceLine(plate) {
         const band = THREE.MathUtils.clamp(
           Math.round(stripSample(aMid, (j + 0.5) / WSEG)), 0, hfBands - 1,
         );
-        const r = uvFor(band, age);
+        const r = uvFor(band);
+        const ink = inks[band];
         const o00 = (s * cols + j) * 3;
         const o01 = (s * cols + j + 1) * 3;
         const o10 = ((s + 1) * cols + j) * 3;
         const o11 = ((s + 1) * cols + j + 1) * 3;
-        b.vert(o00, r.u0, r.vLo, a0);
-        b.vert(o01, r.u1, r.vLo, a0);
-        b.vert(o11, r.u1, r.vHi, a1);
-        b.vert(o00, r.u0, r.vLo, a0);
-        b.vert(o11, r.u1, r.vHi, a1);
-        b.vert(o10, r.u0, r.vHi, a1);
+        b.vert(o00, r.u0, r.vLo, a0, ink);
+        b.vert(o01, r.u1, r.vLo, a0, ink);
+        b.vert(o11, r.u1, r.vHi, a1, ink);
+        b.vert(o00, r.u0, r.vLo, a0, ink);
+        b.vert(o11, r.u1, r.vHi, a1, ink);
+        b.vert(o10, r.u0, r.vHi, a1, ink);
       }
     }
     b.marks.push({ ord: i, end: b.vertexCount });
@@ -667,31 +720,29 @@ async function enhanceLine(plate) {
   // along the day coordinate — about a 12-day wavelength crawling slowly
   // toward the tip. Skipped wholesale under reduced motion.
   const uTime = { value: 0 };
-  const breathe = (mat) => {
-    if (still) return mat;
-    mat.onBeforeCompile = (sh) => {
-      sh.uniforms.uTime = uTime;
-      sh.vertexShader = sh.vertexShader
-        .replace('#include <common>', '#include <common>\nattribute float along;\nuniform float uTime;')
-        .replace('#include <begin_vertex>',
-          '#include <begin_vertex>\ntransformed += normal * 0.045 * sin(along * 0.53 - uTime);');
-    };
-    return mat;
+  const ripplePatch = still ? null : (sh) => {
+    sh.uniforms.uTime = uTime;
+    sh.vertexShader = sh.vertexShader
+      .replace('#include <common>', '#include <common>\nattribute float along;\nuniform float uTime;')
+      .replace('#include <begin_vertex>',
+        '#include <begin_vertex>\ntransformed += normal * 0.045 * sin(along * 0.53 - uTime);');
   };
+  const rippleKey = still ? 'line' : 'line-ripple';
 
   // Front: the printed face. Back: the same cloth seen from behind —
-  // shared geometry redrawn dark, the plate fabric's underside.
+  // shared geometry redrawn dark, the plate fabric's underside. Both are
+  // zonedMaterials: neutral atlas coverage × per-vertex zone ink.
   const meshes = []; // front meshes — raycast targets, reveal owners
   for (const [bi, b] of [...builders.entries()].sort((x, y) => x[0] - y[0])) {
     const geo = b.geometry();
-    const front = new THREE.Mesh(geo, breathe(new THREE.MeshLambertMaterial({
-      map: atlasFor(bi).texture,
-    })));
-    const back = new THREE.Mesh(geo, breathe(new THREE.MeshLambertMaterial({
-      map: atlasFor(bi).texture,
-      side: THREE.BackSide,
-      color: new THREE.Color(0.42, 0.42, 0.4),
-    })));
+    const front = new THREE.Mesh(geo, zonedMaterial({
+      map: atlasFor(bi).texture, surface: theme.surface,
+      patchVertex: ripplePatch, cacheKey: rippleKey,
+    }));
+    const back = new THREE.Mesh(geo, zonedMaterial({
+      map: atlasFor(bi).texture, surface: theme.surface, back: true,
+      patchVertex: ripplePatch, cacheKey: rippleKey,
+    }));
     front.userData = { marks: b.marks, ranges: b.ranges };
     rig.scene.add(front, back);
     meshes.push(front);
@@ -730,7 +781,7 @@ async function enhanceLine(plate) {
   // ── swap the SVG for the canvas ──────────────────────────────────────────
   rig.mount();
 
-  // ── hover tooltip: DAY n · date · biome, via raycast → vertex → day ──────
+  // ── hover tooltip: DAY n · date · biome · zone, raycast → vertex → day ───
   const tipEl = document.createElement('div');
   tipEl.className = 'structure-tip';
   tipEl.hidden = true;
@@ -743,7 +794,10 @@ async function enhanceLine(plate) {
   const dateOf = (i) => new Date(epochMs + i * 86400000).toISOString().slice(0, 10);
   const describe = (i) => {
     const biome = data.biomes[days[i].biome];
-    return 'DAY ' + i + ' · ' + dateOf(i) + ' · ' + (biome ? biome.name.toUpperCase() : '');
+    const zone = (data.zones || [])[days[i].zone];
+    return 'DAY ' + i + ' · ' + dateOf(i) +
+      ' · ' + (biome ? biome.name.toUpperCase() : '') +
+      (zone ? ' · ' + zone.name.toUpperCase() : '');
   };
   const dayAtVertex = (ranges, v) => {
     let lo = 0;
@@ -812,5 +866,6 @@ async function enhanceLine(plate) {
   for (const m of meshes) tris += m.geometry.attributes.position.count / 3;
   console.log('[structure] three r' + THREE.REVISION + ' · worldline · ' + N +
     ' days · ' + meshes.length + ' biome meshes · ' + Math.round(tris / 1000) +
-    'k tris ×2 sides · ' + atlases.size + ' glyph atlases');
+    'k tris ×2 sides · ' + atlases.size + ' neutral glyph atlases · ' +
+    zoneInks.length + ' zones in vertex ink');
 }

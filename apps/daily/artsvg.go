@@ -35,11 +35,13 @@ const (
 )
 
 // renderPlotSVG draws one day's plate: the heightfield as an isometric
-// character-grid terrain, glyph and ink chosen by elevation band. No text
+// character-grid terrain, glyph chosen by elevation band from the biome's
+// ramp, ink from the day's zone palette, on the zone's paper wash. No text
 // beyond the terrain glyphs — the artifact is the artwork alone.
-func renderPlotSVG(date string, b Biome, hf [][]int) []byte {
+func renderPlotSVG(date string, b Biome, zn Zone, hf [][]int) []byte {
 	var buf bytes.Buffer
 	buf.WriteString(`<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 500 310" role="img" aria-label="Generative terrain plate for ` + date + `">` + "\n")
+	buf.WriteString(`<rect width="500" height="310" fill="` + zn.Wash + `"/>` + "\n")
 
 	// Terrain glyphs, row-major — a fixed order, so the bytes are stable.
 	levels := len(b.Ramp)
@@ -49,7 +51,7 @@ func renderPlotSVG(date string, b Biome, hf [][]int) []byte {
 			lv := hf[row][col]
 			x := plotOX + (col-row)*plotDX
 			y := plotOY + (col+row)*plotDY - lv*plotDZ
-			ink := b.Palette[lv*len(b.Palette)/levels]
+			ink := zn.Inks[lv*len(zn.Inks)/levels]
 			fmt.Fprintf(&buf, `<text x="%d" y="%d" fill="%s">%s</text>`+"\n",
 				x, y, ink, string(b.Ramp[lv]))
 		}
@@ -93,11 +95,12 @@ func statusAt(x, y, z, w int, todayN uint64) cellStatus {
 }
 
 // structCell is one occupied cell of a w-slice, ready to draw: its lattice
-// position, biome, day index along the curve, and its age band (0 = newest
-// ink, structAgeBands-1 = oldest, faintest).
+// position, biome (glyphs), zone (inks), day index along the curve, and its
+// age band (0 = newest ink, structAgeBands-1 = oldest, faintest).
 type structCell struct {
 	x, y, z int
 	biome   int
+	zone    int
 	idx     uint64
 	band    int
 	today   bool
@@ -160,14 +163,14 @@ func q8(n int) string {
 //   - Every exposed top face carries that day's own terrain — the cell's date
 //     comes back from the inverse Hilbert mapping, its heightfield is grown
 //     exactly as the plate grows it, sampled on a coarse grid, and the biome's
-//     ramp glyphs are placed at the projected sample centers in the plate's
-//     elevation inks, lifted slightly by elevation. The roof of the structure
-//     is terrain.
-//   - Exposed side faces are stratified: <pattern> hatching in the biome inks,
-//     denser on the left plane than the right so the two planes read apart,
-//     like the plate's stacked levels.
-//   - Every face is hairline-stroked in the biome's darkest ink, so adjacent
-//     same-biome cells never merge into one blob — the mass stays visibly
+//     ramp glyphs are placed at the projected sample centers in the day's
+//     zone elevation inks, lifted slightly by elevation. The roof of the
+//     structure is terrain.
+//   - Exposed side faces are stratified: <pattern> hatching in the day's zone
+//     inks, denser on the left plane than the right so the two planes read
+//     apart, like the plate's stacked levels.
+//   - Every face is hairline-stroked in the zone's darkest ink, so adjacent
+//     same-zone cells never merge into one blob — the mass stays visibly
 //     accreted from unit cells.
 //   - All inks fade with age (see ageBand): faint = oldest, full = newest,
 //     accent outline = today.
@@ -203,6 +206,7 @@ func renderStructureSVG(wSlice int, todayN uint64) []byte {
 				cells = append(cells, structCell{
 					x: x, y: y, z: z,
 					biome: biomeIndexAt(x, y, z, wSlice),
+					zone:  zoneIndexFor(addDays(artifactEpoch, int(idx))),
 					idx:   idx,
 					band:  ageBand(idx, todayN),
 					today: st == cellToday,
@@ -239,23 +243,23 @@ func renderStructureSVG(wSlice int, todayN uint64) []byte {
 	var buf bytes.Buffer
 	fmt.Fprintf(&buf, `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 40 400 244" role="img" aria-label="Hyperstructure w-slice %d" font-family="%s">`+"\n", wSlice, svgFont)
 
-	// Strata patterns — one per biome × side × age band actually used, keyed
-	// stably as s{biome}{L|R}{band}. The left plane hatches denser (every 2px)
+	// Strata patterns — one per zone × side × age band actually used, keyed
+	// stably as s{zone}{L|R}{band}. The left plane hatches denser (every 2px)
 	// than the right (every 3px), so the two side planes of the mass read
 	// differently, and the lines run in global pattern space, so strata
 	// continue across neighboring cells like beds in a cut bank.
 	type patKey struct {
-		biome int
-		left  bool
-		band  int
+		zone int
+		left bool
+		band int
 	}
 	used := map[patKey]bool{}
 	for _, c := range cells {
 		if leftExposed(c) {
-			used[patKey{c.biome, true, c.band}] = true
+			used[patKey{c.zone, true, c.band}] = true
 		}
 		if rightExposed(c) {
-			used[patKey{c.biome, false, c.band}] = true
+			used[patKey{c.zone, false, c.band}] = true
 		}
 	}
 	keys := make([]patKey, 0, len(used))
@@ -264,8 +268,8 @@ func renderStructureSVG(wSlice int, todayN uint64) []byte {
 	}
 	sort.Slice(keys, func(i, j int) bool {
 		a, b := keys[i], keys[j]
-		if a.biome != b.biome {
-			return a.biome < b.biome
+		if a.zone != b.zone {
+			return a.zone < b.zone
 		}
 		if a.left != b.left {
 			return a.left
@@ -274,12 +278,12 @@ func renderStructureSVG(wSlice int, todayN uint64) []byte {
 	})
 	buf.WriteString("<defs>\n")
 	for _, k := range keys {
-		p := biomes[k.biome].Palette
-		side, spacing, base, line := "R", 3, p[1], p[2]
+		p := zones[k.zone].Inks
+		side, spacing, base, line := "R", 3, p[2], p[3]
 		if k.left {
-			side, spacing, base, line = "L", 2, p[2], p[0]
+			side, spacing, base, line = "L", 2, p[3], p[0]
 		}
-		fmt.Fprintf(&buf, `<pattern id="s%d%s%d" width="4" height="%d" patternUnits="userSpaceOnUse">`, k.biome, side, k.band, spacing)
+		fmt.Fprintf(&buf, `<pattern id="s%d%s%d" width="4" height="%d" patternUnits="userSpaceOnUse">`, k.zone, side, k.band, spacing)
 		fmt.Fprintf(&buf, `<rect width="4" height="%d" fill="%s" fill-opacity="%s"/>`, spacing, base, structSideOp[k.band])
 		fmt.Fprintf(&buf, `<line x1="0" y1="0.5" x2="4" y2="0.5" stroke="%s" stroke-opacity="%s" stroke-width="0.5"/>`, line, structLineOp[k.band])
 		buf.WriteString("</pattern>\n")
@@ -339,10 +343,10 @@ func renderStructureSVG(wSlice int, todayN uint64) []byte {
 	buf.WriteString("</g>\n")
 
 	// Occupied cells as miniature day-plates, painter's order. Per cell: the
-	// exposed faces (top washed in the lightest ink, sides in their strata
-	// patterns), each hairline-stroked in the darkest ink so cells never
-	// merge; then the day's own terrain glyphs on an exposed top. Fully
-	// buried cells draw nothing.
+	// exposed faces (top washed in the zone's lightest ink, sides in their
+	// zone strata patterns), each hairline-stroked in the zone's darkest ink
+	// so cells never merge; then the day's own terrain glyphs on an exposed
+	// top. Fully buried cells draw nothing.
 	for _, c := range cells {
 		top, left, right := topExposed(c), leftExposed(c), rightExposed(c)
 		if !top && !left && !right {
@@ -351,8 +355,8 @@ func renderStructureSVG(wSlice int, todayN uint64) []byte {
 		cx := structOX + (c.x-c.y)*structDX
 		cy := structOY + (c.x+c.y)*structDY - c.z*structDZ
 		b := biomes[c.biome]
-		p := b.Palette
-		stroke := fmt.Sprintf(` stroke="%s" stroke-opacity="0.25" stroke-width="0.5"`, p[2])
+		p := zones[c.zone].Inks
+		stroke := fmt.Sprintf(` stroke="%s" stroke-opacity="0.25" stroke-width="0.5"`, p[3])
 		if c.today {
 			stroke = ` stroke="#d93a00" stroke-width="1"`
 		}
@@ -364,12 +368,12 @@ func renderStructureSVG(wSlice int, todayN uint64) []byte {
 		if left {
 			fmt.Fprintf(&buf, `<polygon points="%d,%d %d,%d %d,%d %d,%d" fill="url(#s%dL%d)"%s/>`+"\n",
 				cx-structDX, cy, cx, cy+structDY, cx, cy+structDY+structDZ, cx-structDX, cy+structDZ,
-				c.biome, c.band, stroke)
+				c.zone, c.band, stroke)
 		}
 		if right {
 			fmt.Fprintf(&buf, `<polygon points="%d,%d %d,%d %d,%d %d,%d" fill="url(#s%dR%d)"%s/>`+"\n",
 				cx+structDX, cy, cx, cy+structDY, cx, cy+structDY+structDZ, cx+structDX, cy+structDZ,
-				c.biome, c.band, stroke)
+				c.zone, c.band, stroke)
 		}
 		if !top {
 			continue
@@ -378,7 +382,7 @@ func renderStructureSVG(wSlice int, todayN uint64) []byte {
 		// its day index; its heightfield is the plate's own (same seed, same
 		// size, same quantization), sampled structTopGrid² times at the cell
 		// centers of a coarse grid. Each sample renders the biome's ramp
-		// glyph for its elevation, in the plate's elevation ink, at the
+		// glyph for its elevation, in the day's zone elevation ink, at the
 		// iso-projected sample center, lifted half a pixel per level — the
 		// plate's relief at 1/20 scale. Coordinates are eighths of a pixel.
 		hf := heightfield(newRNG(domainArt, addDays(artifactEpoch, int(c.idx))), b.Terrain, plotSize, len(b.Ramp))
