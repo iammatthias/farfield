@@ -4,6 +4,18 @@
 // privacy-preserving request logs that sibling apps write via lib/pulse into
 // daily aggregates. One session-gated console shows both. The only public
 // surface is GET /status, which exposes nothing beyond a target count.
+//
+// Failure handling is two-stage so transient flakes (the Cloudflare-tunnel
+// hairpin drops single probes regularly) do not page as incidents:
+//
+//  1. A failed probe is retried once after a short pause and only the
+//     retry's outcome is recorded — a recorded fail means two consecutive
+//     misses seconds apart.
+//  2. An incident opens only after PULSE_FAIL_THRESHOLD consecutive
+//     recorded fails (default 2; set 1 for open-on-first-fail). The fails
+//     themselves are always recorded, so uptime percentages are unaffected;
+//     only the incident transition debounces. Recovery closes the incident
+//     on the first ok check, undebounced.
 package main
 
 import (

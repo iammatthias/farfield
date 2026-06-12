@@ -242,27 +242,36 @@ type checkResult struct {
 }
 
 // recordCheck appends a checks row and applies the incident state machine in
-// one transaction:
+// one transaction. Every probe outcome is recorded honestly — the checks
+// table and the uptime percentages always reflect the raw results — but the
+// open transition is debounced: an incident opens only once failThreshold
+// CONSECUTIVE checks (the one being recorded included) have failed. With the
+// default threshold of 2, a single flaked probe still shows as a failed
+// check, yet never becomes an incident; production sees regular one-probe
+// "context deadline exceeded" blips on the Cloudflare-tunnel hairpin path
+// that are not real outages.
 //
-//	prev ok   → fail : open an incident
-//	prev fail → fail : refresh the open incident's last_err
-//	prev fail → ok   : close the open incident
+//	fail, incident open   : refresh its last_err
+//	fail, no incident     : open one iff the newest failThreshold checks
+//	                        (this one included) all failed
+//	ok,   incident open   : close it — recovery is never debounced
+//	ok,   no incident     : nothing
 //
-// A target with no prior checks counts as previously-ok, so a first-ever
-// failing check opens an incident immediately.
-func recordCheck(db *sql.DB, targetID int64, res checkResult) error {
+// With failThreshold = 1 this is the original behavior: a first-ever failing
+// check opens an incident immediately. The consecutive-fail window is read
+// back from the checks table itself (one LIMIT-K read on the
+// (target_id, id DESC) index, and only on failed probes that have no open
+// incident), so the debounce state survives restarts instead of living in
+// checker memory.
+func recordCheck(db *sql.DB, targetID int64, res checkResult, failThreshold int) error {
+	if failThreshold < 1 {
+		failThreshold = 1
+	}
 	tx, err := db.Begin()
 	if err != nil {
 		return err
 	}
 	defer tx.Rollback()
-
-	prevOK := 1
-	err = tx.QueryRow(`SELECT ok FROM checks WHERE target_id = ?
-		ORDER BY id DESC LIMIT 1`, targetID).Scan(&prevOK)
-	if err != nil && !errors.Is(err, sql.ErrNoRows) {
-		return err
-	}
 
 	now := store.NowRFC3339()
 	if _, err := tx.Exec(`INSERT INTO checks
@@ -272,23 +281,42 @@ func recordCheck(db *sql.DB, targetID int64, res checkResult) error {
 		return err
 	}
 
-	switch {
-	case prevOK == 1 && !res.OK:
-		if _, err := tx.Exec(`INSERT INTO incidents
-			(target_id, opened_at, last_err) VALUES (?, ?, ?)`,
-			targetID, now, res.Err); err != nil {
-			return err
-		}
-	case prevOK == 0 && !res.OK:
-		if _, err := tx.Exec(`UPDATE incidents SET last_err = ?
-			WHERE target_id = ? AND closed_at = ''`,
-			res.Err, targetID); err != nil {
-			return err
-		}
-	case prevOK == 0 && res.OK:
+	if res.OK {
+		// First good check closes any open incident.
 		if _, err := tx.Exec(`UPDATE incidents SET closed_at = ?
 			WHERE target_id = ? AND closed_at = ''`,
 			now, targetID); err != nil {
+			return err
+		}
+		return tx.Commit()
+	}
+
+	// Failed check: keep an already-open incident's last_err current…
+	upd, err := tx.Exec(`UPDATE incidents SET last_err = ?
+		WHERE target_id = ? AND closed_at = ''`,
+		res.Err, targetID)
+	if err != nil {
+		return err
+	}
+	if n, err := upd.RowsAffected(); err != nil {
+		return err
+	} else if n > 0 {
+		return tx.Commit()
+	}
+
+	// …or open one once the newest failThreshold checks all failed. fails
+	// can only equal failThreshold when at least that many checks exist.
+	var fails int
+	if err := tx.QueryRow(`SELECT COUNT(*) FROM (
+			SELECT ok FROM checks WHERE target_id = ?
+			ORDER BY id DESC LIMIT ?) WHERE ok = 0`,
+		targetID, failThreshold).Scan(&fails); err != nil {
+		return err
+	}
+	if fails >= failThreshold {
+		if _, err := tx.Exec(`INSERT INTO incidents
+			(target_id, opened_at, last_err) VALUES (?, ?, ?)`,
+			targetID, now, res.Err); err != nil {
 			return err
 		}
 	}

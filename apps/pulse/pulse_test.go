@@ -67,29 +67,36 @@ func TestSchemaSelfMigrates(t *testing.T) {
 	db2.Close()
 }
 
-// TestCheckerIncidentTransitions drives ok→fail→fail→ok against a stub HTTP
-// server and asserts the incident state machine: exactly one incident opens
-// on the first failure, consecutive failures update its last_err, and
-// recovery closes it.
-func TestCheckerIncidentTransitions(t *testing.T) {
-	db := newTestDB(t, t.TempDir(), "pulse.sqlite")
-
+// stubTarget spins up a stub HTTP server whose status is swapped via the
+// returned atomic, plus a registered target pointing at it.
+func stubTarget(t *testing.T, db *sql.DB) (*Target, *atomic.Int64) {
+	t.Helper()
 	var status atomic.Int64
 	status.Store(200)
 	stub := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(int(status.Load()))
 	}))
-	defer stub.Close()
+	t.Cleanup(stub.Close)
 
 	target := &Target{Name: "stub", URL: stub.URL, Method: "GET",
 		ExpectedStatus: 200, IntervalS: 60, Enabled: true}
 	if err := insertTarget(db, target); err != nil {
 		t.Fatalf("insertTarget: %v", err)
 	}
+	return target, &status
+}
+
+// TestCheckerIncidentTransitions drives ok→fail→fail→ok at threshold 1 (the
+// PULSE_FAIL_THRESHOLD=1 / original behavior) and asserts the incident state
+// machine: exactly one incident opens on the first failure, consecutive
+// failures update its last_err, and recovery closes it.
+func TestCheckerIncidentTransitions(t *testing.T) {
+	db := newTestDB(t, t.TempDir(), "pulse.sqlite")
+	target, status := stubTarget(t, db)
 	client := &http.Client{Timeout: 2 * time.Second}
 	probe := func() {
 		t.Helper()
-		if err := recordCheck(db, target.ID, performCheck(client, *target)); err != nil {
+		if err := recordCheck(db, target.ID, performCheck(client, *target), 1); err != nil {
 			t.Fatalf("recordCheck: %v", err)
 		}
 	}
@@ -107,7 +114,7 @@ func TestCheckerIncidentTransitions(t *testing.T) {
 	}
 
 	status.Store(503)
-	probe() // ok → fail: opens exactly one incident
+	probe() // ok → fail: at threshold 1, opens exactly one incident
 	if n := countRows(t, db, `SELECT COUNT(*) FROM incidents WHERE closed_at = ''`); n != 1 {
 		t.Fatalf("open incidents after first fail = %d, want 1", n)
 	}
@@ -136,6 +143,180 @@ func TestCheckerIncidentTransitions(t *testing.T) {
 	}
 	if pct != 50 { // 2 of 4 checks ok
 		t.Fatalf("uptime = %.2f, want 50.00", pct)
+	}
+}
+
+// TestIncidentDebounce exercises the default threshold of 2: a single flaked
+// check never opens an incident, two consecutive fails open exactly one, its
+// last_err keeps updating while open, and the first ok closes it. The flaked
+// and failed checks are still recorded, so uptime reflects them.
+func TestIncidentDebounce(t *testing.T) {
+	db := newTestDB(t, t.TempDir(), "pulse.sqlite")
+	target, status := stubTarget(t, db)
+	client := &http.Client{Timeout: 2 * time.Second}
+	probe := func() {
+		t.Helper()
+		if err := recordCheck(db, target.ID, performCheck(client, *target), 2); err != nil {
+			t.Fatalf("recordCheck: %v", err)
+		}
+	}
+
+	// Single flake: fail then ok — recorded, but no incident.
+	probe() // ok
+	status.Store(503)
+	probe() // fail #1: below threshold
+	if n := countRows(t, db, `SELECT COUNT(*) FROM incidents`); n != 0 {
+		t.Fatalf("incidents after single fail = %d, want 0", n)
+	}
+	status.Store(200)
+	probe() // ok again: streak reset, still nothing
+	if n := countRows(t, db, `SELECT COUNT(*) FROM incidents`); n != 0 {
+		t.Fatalf("incidents after flake recovery = %d, want 0", n)
+	}
+
+	// Real outage: two consecutive fails open exactly one incident.
+	status.Store(503)
+	probe() // fail #1
+	if n := countRows(t, db, `SELECT COUNT(*) FROM incidents`); n != 0 {
+		t.Fatalf("incidents one fail into outage = %d, want 0", n)
+	}
+	status.Store(500)
+	probe() // fail #2: opens
+	if n := countRows(t, db, `SELECT COUNT(*) FROM incidents WHERE closed_at = ''`); n != 1 {
+		t.Fatalf("open incidents after two fails = %d, want 1", n)
+	}
+
+	probe() // fail #3: same incident, no new row
+	if n := countRows(t, db, `SELECT COUNT(*) FROM incidents`); n != 1 {
+		t.Fatalf("incidents after third fail = %d, want 1", n)
+	}
+
+	status.Store(200)
+	probe() // first ok closes it, undebounced
+	if n := countRows(t, db, `SELECT COUNT(*) FROM incidents WHERE closed_at = ''`); n != 0 {
+		t.Fatalf("open incidents after recovery = %d, want 0", n)
+	}
+	if n := countRows(t, db, `SELECT COUNT(*) FROM incidents`); n != 1 {
+		t.Fatalf("total incidents = %d, want 1", n)
+	}
+
+	// All seven checks recorded honestly: 3 ok, 4 fail.
+	if n := countRows(t, db, `SELECT COUNT(*) FROM checks`); n != 7 {
+		t.Fatalf("checks = %d, want 7", n)
+	}
+	pct, ok, err := uptime(db, target.ID, 24*time.Hour)
+	if err != nil || !ok {
+		t.Fatalf("uptime: ok=%v err=%v", ok, err)
+	}
+	if want := 100 * 3.0 / 7.0; pct < want-0.01 || pct > want+0.01 {
+		t.Fatalf("uptime = %.2f, want %.2f", pct, want)
+	}
+}
+
+// TestDebouncedIncidentLastErr: while below threshold no incident exists to
+// refresh, and once open the incident's last_err tracks the newest failure.
+func TestDebouncedIncidentLastErr(t *testing.T) {
+	db := newTestDB(t, t.TempDir(), "pulse.sqlite")
+	target := &Target{Name: "synthetic", URL: "http://127.0.0.1:1/x", Method: "GET",
+		ExpectedStatus: 200, IntervalS: 60, Enabled: true}
+	if err := insertTarget(db, target); err != nil {
+		t.Fatalf("insertTarget: %v", err)
+	}
+	fail := func(msg string) {
+		t.Helper()
+		if err := recordCheck(db, target.ID, checkResult{Err: msg}, 2); err != nil {
+			t.Fatalf("recordCheck: %v", err)
+		}
+	}
+
+	fail("first miss")
+	fail("second miss") // opens with this err
+	fail("third miss")  // refreshes last_err
+	inc, err := openIncident(db, target.ID)
+	if err != nil || inc == nil {
+		t.Fatalf("openIncident: %v, %v", inc, err)
+	}
+	if inc.LastErr != "third miss" {
+		t.Fatalf("last_err = %q, want %q", inc.LastErr, "third miss")
+	}
+	if inc.OpenedAt == "" {
+		t.Fatal("opened_at empty")
+	}
+	if n := countRows(t, db, `SELECT COUNT(*) FROM incidents`); n != 1 {
+		t.Fatalf("incidents = %d, want 1", n)
+	}
+}
+
+// TestFailThresholdEnv: PULSE_FAIL_THRESHOLD honors explicit values
+// (1 restores the original behavior) and falls back to the default of 2
+// when unset or nonsense.
+func TestFailThresholdEnv(t *testing.T) {
+	for _, tc := range []struct {
+		raw  string
+		want int
+	}{
+		{"", 2}, {"1", 1}, {"3", 3}, {"0", 2}, {"-1", 2}, {"two", 2},
+	} {
+		t.Setenv("PULSE_FAIL_THRESHOLD", tc.raw)
+		if got := failThreshold(); got != tc.want {
+			t.Errorf("failThreshold(%q) = %d, want %d", tc.raw, got, tc.want)
+		}
+	}
+}
+
+// TestProbeRetry: a probe that fails once and succeeds on the in-probe retry
+// is recorded as a single ok check — no fail row, no incident. A probe that
+// fails twice is recorded as one fail.
+func TestProbeRetry(t *testing.T) {
+	saved := retryDelay
+	retryDelay = 10 * time.Millisecond
+	t.Cleanup(func() { retryDelay = saved })
+
+	db := newTestDB(t, t.TempDir(), "pulse.sqlite")
+	var calls atomic.Int64
+	stub := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if calls.Add(1) == 1 {
+			w.WriteHeader(503) // flake on the first hit only
+			return
+		}
+		w.WriteHeader(200)
+	}))
+	defer stub.Close()
+
+	target := &Target{Name: "flaky", URL: stub.URL, Method: "GET",
+		ExpectedStatus: 200, IntervalS: 60, Enabled: true}
+	if err := insertTarget(db, target); err != nil {
+		t.Fatalf("insertTarget: %v", err)
+	}
+	client := &http.Client{Timeout: 2 * time.Second}
+
+	res := probeTarget(client, *target)
+	if !res.OK {
+		t.Fatalf("probeTarget after flake: ok=false (status %d, err %q)", res.StatusCode, res.Err)
+	}
+	if n := calls.Load(); n != 2 {
+		t.Fatalf("stub hits = %d, want 2 (fail + retry)", n)
+	}
+	if err := recordCheck(db, target.ID, res, 2); err != nil {
+		t.Fatalf("recordCheck: %v", err)
+	}
+	if n := countRows(t, db, `SELECT COUNT(*) FROM checks WHERE ok = 1`); n != 1 {
+		t.Fatalf("ok checks = %d, want 1", n)
+	}
+	if n := countRows(t, db, `SELECT COUNT(*) FROM checks WHERE ok = 0`); n != 0 {
+		t.Fatalf("failed checks = %d, want 0", n)
+	}
+	if n := countRows(t, db, `SELECT COUNT(*) FROM incidents`); n != 0 {
+		t.Fatalf("incidents = %d, want 0", n)
+	}
+
+	// Persistent failure: both attempts miss → one recorded fail.
+	dead := *target
+	dead.URL = "http://127.0.0.1:1/x"
+	calls.Store(0)
+	res = probeTarget(client, dead)
+	if res.OK || res.Err == "" {
+		t.Fatalf("probeTarget on dead target: ok=%v err=%q", res.OK, res.Err)
 	}
 }
 
