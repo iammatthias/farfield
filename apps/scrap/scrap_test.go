@@ -9,6 +9,7 @@ import (
 	"net/http/httptest"
 	"net/url"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"testing"
 	"time"
@@ -477,6 +478,126 @@ func TestUnlockViaHeaderQueryAndForm(t *testing.T) {
 	}
 }
 
+// browserCreate posts the compose form with a logged-in session and returns
+// the un-followed response.
+func browserCreate(t *testing.T, ts *httptest.Server, cookies []*http.Cookie, form url.Values) (*http.Response, string) {
+	t.Helper()
+	req, err := http.NewRequest("POST", ts.URL+"/pastes",
+		strings.NewReader(form.Encode()))
+	if err != nil {
+		t.Fatalf("new request: %v", err)
+	}
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	for _, c := range cookies {
+		req.AddCookie(c)
+	}
+	resp, err := noRedirectClient().Do(req)
+	if err != nil {
+		t.Fatalf("browser create: %v", err)
+	}
+	defer resp.Body.Close()
+	b, _ := io.ReadAll(resp.Body)
+	return resp, string(b)
+}
+
+// confirmationID pulls the paste id out of the created.html confirmation.
+var confirmationID = regexp.MustCompile(`https://scrap\.test/([a-z2-7]{16})`)
+
+func TestBrowserCreateWithTokenShowsSecretOnce(t *testing.T) {
+	_, ts := newTestServer(t)
+	cookies := loginSession(t, ts)
+
+	// A typed passphrase with a space: the raw secret must appear exactly
+	// once (the bare token row); the magic link carries the %20-escaped form.
+	secret := "open sesame pass"
+	resp, html := browserCreate(t, ts, cookies, url.Values{
+		"body":  {"browser locked body"},
+		"token": {secret},
+	})
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d, want 200 confirmation", resp.StatusCode)
+	}
+	if n := strings.Count(html, secret); n != 1 {
+		t.Fatalf("raw secret appears %d times, want exactly 1", n)
+	}
+	if !strings.Contains(html, "#t=open%20sesame%20pass") {
+		t.Error("confirmation missing the escaped magic link")
+	}
+	if !strings.Contains(html, "cannot be recovered") {
+		t.Error("confirmation missing the shown-once warning")
+	}
+	m := confirmationID.FindStringSubmatch(html)
+	if m == nil {
+		t.Fatal("confirmation does not show the paste URL")
+	}
+	id := m[1]
+	if !strings.Contains(html, `href="/`+id+`"`) {
+		t.Error("confirmation has no proceed link to the paste")
+	}
+
+	// The secret is never shown again: the authed view renders without it.
+	code, viewHTML := authedGet(t, ts, cookies, "/"+id)
+	if code != http.StatusOK {
+		t.Fatalf("authed view: %d, want 200", code)
+	}
+	if strings.Contains(viewHTML, secret) {
+		t.Error("paste view re-exposes the secret")
+	}
+
+	// And the typed token really unlocks the paste for strangers.
+	resp2, raw := get(t, ts.URL+"/"+id+"/raw",
+		map[string]string{"X-Scrap-Token": secret})
+	if resp2.StatusCode != http.StatusOK || raw != "browser locked body" {
+		t.Fatalf("token unlock: %d %q", resp2.StatusCode, raw)
+	}
+}
+
+func TestBrowserCreateGeneratedTokenShown(t *testing.T) {
+	_, ts := newTestServer(t)
+	cookies := loginSession(t, ts)
+
+	resp, html := browserCreate(t, ts, cookies, url.Values{
+		"body":           {"generated token body"},
+		"token_generate": {"on"},
+	})
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d, want 200 confirmation", resp.StatusCode)
+	}
+	m := regexp.MustCompile(`#t=([A-Z2-7]{26})`).FindStringSubmatch(html)
+	if m == nil {
+		t.Fatal("confirmation has no magic link with a generated token")
+	}
+	secret := m[1]
+	if !strings.Contains(html, ">"+secret+"<") {
+		t.Error("confirmation does not show the bare token by itself")
+	}
+	id := confirmationID.FindStringSubmatch(html)
+	if id == nil {
+		t.Fatal("confirmation does not show the paste URL")
+	}
+	resp2, raw := get(t, ts.URL+"/"+id[1]+"/raw",
+		map[string]string{"X-Scrap-Token": secret})
+	if resp2.StatusCode != http.StatusOK || raw != "generated token body" {
+		t.Fatalf("generated token unlock: %d %q", resp2.StatusCode, raw)
+	}
+}
+
+func TestBrowserCreateWithoutTokenRedirects(t *testing.T) {
+	_, ts := newTestServer(t)
+	cookies := loginSession(t, ts)
+
+	resp, _ := browserCreate(t, ts, cookies, url.Values{
+		"body": {"plain open paste"},
+	})
+	if resp.StatusCode != http.StatusSeeOther {
+		t.Fatalf("status = %d, want 303", resp.StatusCode)
+	}
+	loc := resp.Header.Get("Location")
+	if !regexp.MustCompile(`^/[a-z2-7]{16}$`).MatchString(loc) {
+		t.Fatalf("redirect = %q, want a bare /{id} with no fragment", loc)
+	}
+}
+
 func TestWrongTokenIs403ThenRateLimited(t *testing.T) {
 	_, ts := newTestServer(t)
 	_, out := apiCreate(t, ts, "rate limited paste", "?token=opensesame")
@@ -513,6 +634,268 @@ func TestTokenForcesUnlisted(t *testing.T) {
 	_, html := get(t, ts.URL+"/pastes", nil)
 	if strings.Contains(html, "locked-public") {
 		t.Error("token-locked paste leaked onto the public index")
+	}
+}
+
+// ── token lifecycle ────────────────────────────────────────────────────────
+
+// authedPost sends a POST with the session cookies and returns the
+// un-followed response plus body.
+func authedPost(t *testing.T, ts *httptest.Server, cookies []*http.Cookie, path string) (*http.Response, string) {
+	t.Helper()
+	req, _ := http.NewRequest("POST", ts.URL+path, nil)
+	for _, c := range cookies {
+		req.AddCookie(c)
+	}
+	resp, err := noRedirectClient().Do(req)
+	if err != nil {
+		t.Fatalf("post %s: %v", path, err)
+	}
+	defer resp.Body.Close()
+	b, _ := io.ReadAll(resp.Body)
+	return resp, string(b)
+}
+
+// confirmationSecret pulls the generated 26-char secret out of a
+// confirmation page's magic link.
+var confirmationSecret = regexp.MustCompile(`#t=([A-Z2-7]{26})`)
+
+func TestTokenRollInvalidatesOldSecret(t *testing.T) {
+	_, ts := newTestServer(t)
+	cookies := loginSession(t, ts)
+	body := "roll my token"
+	_, out := apiCreate(t, ts, body, "?token=oldsecret")
+	id := createdID(t, out)
+
+	resp, html := authedPost(t, ts, cookies, "/pastes/"+id+"/token/roll")
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("roll status = %d, want 200 confirmation", resp.StatusCode)
+	}
+	if !strings.Contains(html, "Token rolled") {
+		t.Error("confirmation does not carry the TOKEN ROLLED label")
+	}
+	if !strings.Contains(html, "cannot be recovered") {
+		t.Error("confirmation missing the shown-once warning")
+	}
+	m := confirmationSecret.FindStringSubmatch(html)
+	if m == nil {
+		t.Fatal("confirmation has no magic link with the fresh secret")
+	}
+	secret := m[1]
+	if !strings.Contains(html, ">"+secret+"<") {
+		t.Error("confirmation does not show the bare token")
+	}
+
+	// Old secret stops working immediately; the fresh one unlocks.
+	respOld, _ := get(t, ts.URL+"/"+id+"/raw",
+		map[string]string{"X-Scrap-Token": "oldsecret"})
+	if respOld.StatusCode != http.StatusForbidden {
+		t.Fatalf("old secret: %d, want 403", respOld.StatusCode)
+	}
+	respNew, raw := get(t, ts.URL+"/"+id+"/raw",
+		map[string]string{"X-Scrap-Token": secret})
+	if respNew.StatusCode != http.StatusOK || raw != body {
+		t.Fatalf("new secret: %d %q, want 200 + body", respNew.StatusCode, raw)
+	}
+
+	// Rolling a token-less paste is a 409.
+	_, out2 := apiCreate(t, ts, "no token here", "")
+	resp409, _ := authedPost(t, ts, cookies, "/pastes/"+createdID(t, out2)+"/token/roll")
+	if resp409.StatusCode != http.StatusConflict {
+		t.Fatalf("roll without token: %d, want 409", resp409.StatusCode)
+	}
+}
+
+func TestTokenSetForcesUnlistedAndUnlocks(t *testing.T) {
+	s, ts := newTestServer(t)
+	cookies := loginSession(t, ts)
+	body := "public until locked"
+	_, out := apiCreate(t, ts, body, "?visibility=public&title=set-me")
+	id := createdID(t, out)
+
+	resp, html := authedPost(t, ts, cookies, "/pastes/"+id+"/token/set")
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("set status = %d, want 200 confirmation", resp.StatusCode)
+	}
+	if !strings.Contains(html, "Token set") {
+		t.Error("confirmation does not carry the TOKEN SET label")
+	}
+	m := confirmationSecret.FindStringSubmatch(html)
+	if m == nil {
+		t.Fatal("confirmation has no magic link with the fresh secret")
+	}
+	secret := m[1]
+
+	// Visibility is forced down to unlisted, off the public index.
+	p, err := getPaste(s.db, id)
+	if err != nil || p == nil {
+		t.Fatalf("getPaste: %v, %v", p, err)
+	}
+	if p.Visibility != VisUnlisted {
+		t.Fatalf("visibility = %q, want unlisted (token-forced)", p.Visibility)
+	}
+	_, idx := get(t, ts.URL+"/pastes", nil)
+	if strings.Contains(idx, "set-me") {
+		t.Error("token-locked paste still on the public index")
+	}
+
+	// Locked without the secret, open with it.
+	respNo, _ := get(t, ts.URL+"/"+id+"/raw", nil)
+	if respNo.StatusCode != http.StatusUnauthorized {
+		t.Fatalf("no token: %d, want 401", respNo.StatusCode)
+	}
+	respYes, raw := get(t, ts.URL+"/"+id+"/raw",
+		map[string]string{"X-Scrap-Token": secret})
+	if respYes.StatusCode != http.StatusOK || raw != body {
+		t.Fatalf("with token: %d %q, want 200 + body", respYes.StatusCode, raw)
+	}
+
+	// Setting when a token already exists is a 409.
+	resp409, _ := authedPost(t, ts, cookies, "/pastes/"+id+"/token/set")
+	if resp409.StatusCode != http.StatusConflict {
+		t.Fatalf("set with token: %d, want 409", resp409.StatusCode)
+	}
+}
+
+func TestTokenRemoveOpensPaste(t *testing.T) {
+	_, ts := newTestServer(t)
+	cookies := loginSession(t, ts)
+	body := "locked then open"
+	_, out := apiCreate(t, ts, body, "?token=opensesame")
+	id := createdID(t, out)
+
+	resp, _ := authedPost(t, ts, cookies, "/pastes/"+id+"/token/remove")
+	if resp.StatusCode != http.StatusSeeOther ||
+		resp.Header.Get("Location") != "/manage" {
+		t.Fatalf("remove: status %d loc %q, want 303 /manage",
+			resp.StatusCode, resp.Header.Get("Location"))
+	}
+	resp2, raw := get(t, ts.URL+"/"+id+"/raw", nil)
+	if resp2.StatusCode != http.StatusOK || raw != body {
+		t.Fatalf("after remove: %d %q, want 200 + body", resp2.StatusCode, raw)
+	}
+}
+
+// apiTokenReq sends a token-lifecycle API request with the API key.
+func apiTokenReq(t *testing.T, ts *httptest.Server, method, path string) (int, string) {
+	t.Helper()
+	req, _ := http.NewRequest(method, ts.URL+path, nil)
+	req.Header.Set("X-API-Key", "k1")
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("%s %s: %v", method, path, err)
+	}
+	defer resp.Body.Close()
+	b, _ := io.ReadAll(resp.Body)
+	return resp.StatusCode, string(b)
+}
+
+func TestAPITokenRollPrintsSecret(t *testing.T) {
+	_, ts := newTestServer(t)
+	body := "api rolled"
+	_, out := apiCreate(t, ts, body, "?token=oldsecret")
+	id := createdID(t, out)
+
+	status, text := apiTokenReq(t, ts, "POST", "/api/pastes/"+id+"/token/roll")
+	if status != http.StatusOK {
+		t.Fatalf("status = %d, want 200", status)
+	}
+	if !strings.HasPrefix(text, "token: ") || !strings.HasSuffix(text, "\n") {
+		t.Fatalf("body = %q, want %q line", text, "token: <secret>")
+	}
+	secret := strings.TrimSpace(strings.TrimPrefix(text, "token: "))
+	if len(secret) != 26 {
+		t.Fatalf("secret %q, want 26 chars", secret)
+	}
+
+	respOld, _ := get(t, ts.URL+"/"+id+"/raw",
+		map[string]string{"X-Scrap-Token": "oldsecret"})
+	if respOld.StatusCode != http.StatusForbidden {
+		t.Fatalf("old secret: %d, want 403", respOld.StatusCode)
+	}
+	respNew, raw := get(t, ts.URL+"/"+id+"/raw",
+		map[string]string{"X-Scrap-Token": secret})
+	if respNew.StatusCode != http.StatusOK || raw != body {
+		t.Fatalf("new secret: %d %q, want 200 + body", respNew.StatusCode, raw)
+	}
+
+	// 404 for a missing paste; 409 for a token-less one.
+	if status, _ := apiTokenReq(t, ts, "POST",
+		"/api/pastes/b234567abcdefghi/token/roll"); status != http.StatusNotFound {
+		t.Fatalf("missing paste: %d, want 404", status)
+	}
+	_, out2 := apiCreate(t, ts, "open paste no token", "")
+	if status, _ := apiTokenReq(t, ts, "POST",
+		"/api/pastes/"+createdID(t, out2)+"/token/roll"); status != http.StatusConflict {
+		t.Fatalf("token-less roll: %d, want 409", status)
+	}
+}
+
+func TestAPITokenRemove(t *testing.T) {
+	_, ts := newTestServer(t)
+	body := "api removed"
+	_, out := apiCreate(t, ts, body, "?token=opensesame")
+	id := createdID(t, out)
+
+	status, _ := apiTokenReq(t, ts, "DELETE", "/api/pastes/"+id+"/token")
+	if status != http.StatusOK {
+		t.Fatalf("status = %d, want 200", status)
+	}
+	resp, raw := get(t, ts.URL+"/"+id+"/raw", nil)
+	if resp.StatusCode != http.StatusOK || raw != body {
+		t.Fatalf("after remove: %d %q, want 200 + body", resp.StatusCode, raw)
+	}
+	// A second remove finds no token: 404.
+	if status, _ := apiTokenReq(t, ts, "DELETE",
+		"/api/pastes/"+id+"/token"); status != http.StatusNotFound {
+		t.Fatalf("second remove: %d, want 404", status)
+	}
+}
+
+func TestTokenLifecycleRequiresAuth(t *testing.T) {
+	_, ts := newTestServer(t)
+	_, out := apiCreate(t, ts, "auth gated ops", "?token=opensesame")
+	id := createdID(t, out)
+
+	// Web endpoints without a session redirect to login.
+	for _, path := range []string{
+		"/pastes/" + id + "/token/roll",
+		"/pastes/" + id + "/token/set",
+		"/pastes/" + id + "/token/remove",
+	} {
+		resp, err := noRedirectClient().Post(ts.URL+path, "", nil)
+		if err != nil {
+			t.Fatalf("post %s: %v", path, err)
+		}
+		resp.Body.Close()
+		if resp.StatusCode != http.StatusSeeOther ||
+			resp.Header.Get("Location") != "/login" {
+			t.Errorf("%s: status %d loc %q, want 303 /login",
+				path, resp.StatusCode, resp.Header.Get("Location"))
+		}
+	}
+
+	// API endpoints without a key are 401.
+	for _, c := range []struct{ method, path string }{
+		{"POST", "/api/pastes/" + id + "/token/roll"},
+		{"DELETE", "/api/pastes/" + id + "/token"},
+	} {
+		req, _ := http.NewRequest(c.method, ts.URL+c.path, nil)
+		resp, err := http.DefaultClient.Do(req)
+		if err != nil {
+			t.Fatalf("%s %s: %v", c.method, c.path, err)
+		}
+		resp.Body.Close()
+		if resp.StatusCode != http.StatusUnauthorized {
+			t.Errorf("%s %s: status %d, want 401", c.method, c.path, resp.StatusCode)
+		}
+	}
+
+	// The token still works — nothing rolled or removed.
+	resp, _ := get(t, ts.URL+"/"+id+"/raw",
+		map[string]string{"X-Scrap-Token": "opensesame"})
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("token after unauthed ops: %d, want 200", resp.StatusCode)
 	}
 }
 

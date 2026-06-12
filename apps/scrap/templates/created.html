@@ -1,0 +1,42 @@
+{{define "title"}}{{if .Label}}{{.Label}}{{else}}Created{{end}} · farfield scrap{{end}}
+{{define "content"}}
+  {{template "topbar" .}}
+  <section class="created">
+    <p class="label">{{if .Label}}{{.Label}}{{else}}Paste created{{end}}</p>
+    <h1>{{if .Title}}{{.Title}}{{else}}<span class="mono">{{.ID}}</span>{{end}}</h1>
+    <p class="warn">Shown once — the token is stored hashed and cannot be recovered.</p>
+    <div class="share-row">
+      <span class="label">Paste URL</span>
+      <code id="share-url">{{.PasteURL}}</code>
+      <button class="linklike copy" type="button" data-copy="share-url">Copy</button>
+    </div>
+    <div class="share-row">
+      <span class="label">Magic link</span>
+      <code id="share-magic">{{.MagicLink}}</code>
+      <button class="linklike copy" type="button" data-copy="share-magic">Copy</button>
+    </div>
+    <div class="share-row">
+      <span class="label">Token</span>
+      <code id="share-token">{{.Token}}</code>
+      <button class="linklike copy" type="button" data-copy="share-token">Copy</button>
+    </div>
+    <div class="actions">
+      <a href="/{{.ID}}">View the paste →</a>
+    </div>
+  </section>
+  <script>
+  // Clipboard convenience only — every string above is selectable text, so
+  // the page works (and copies) without JS.
+  document.querySelectorAll("button.copy").forEach(function (btn) {
+    btn.addEventListener("click", function () {
+      var el = document.getElementById(btn.dataset.copy);
+      navigator.clipboard.writeText(el.textContent)
+        .then(function () {
+          btn.textContent = "Copied";
+          setTimeout(function () { btn.textContent = "Copy"; }, 1500);
+        })
+        .catch(function () { btn.textContent = "Copy failed"; });
+    });
+  });
+  </script>
+{{end}}

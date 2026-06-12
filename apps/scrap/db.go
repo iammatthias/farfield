@@ -316,6 +316,24 @@ func setToken(db *sql.DB, pasteID, secret, name string) error {
 	return err
 }
 
+// deleteTokens removes every token row for a paste — the paste serves per its
+// plain visibility again. Reports whether any token existed.
+func deleteTokens(db *sql.DB, pasteID string) (bool, error) {
+	res, err := db.Exec(`DELETE FROM tokens WHERE paste_id = ?`, pasteID)
+	if err != nil {
+		return false, err
+	}
+	n, _ := res.RowsAffected()
+	return n > 0, nil
+}
+
+// setVisibility updates a paste's visibility in place.
+func setVisibility(db *sql.DB, id, visibility string) error {
+	_, err := db.Exec(`UPDATE pastes SET visibility = ? WHERE id = ?`,
+		visibility, id)
+	return err
+}
+
 // verifyToken checks a presented secret against the paste's stored hashes in
 // constant time. A match updates last_used and the use counter.
 func verifyToken(db *sql.DB, pasteID, secret string) (bool, error) {

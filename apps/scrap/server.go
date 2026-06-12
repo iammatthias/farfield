@@ -113,6 +113,12 @@ func (s *Server) routes() http.Handler {
 	mux.HandleFunc("POST /pastes/{id}/delete", s.auth.RequireSession(s.handleDelete))
 	mux.HandleFunc("POST /pastes/expired/delete", s.auth.RequireSession(s.handleDeleteExpired))
 
+	// Token lifecycle — roll replaces, set attaches, remove deletes. Roll and
+	// set surface the fresh secret on the shown-once confirmation page.
+	mux.HandleFunc("POST /pastes/{id}/token/roll", s.auth.RequireSession(s.handleTokenRoll))
+	mux.HandleFunc("POST /pastes/{id}/token/set", s.auth.RequireSession(s.handleTokenSet))
+	mux.HandleFunc("POST /pastes/{id}/token/remove", s.auth.RequireSession(s.handleTokenRemove))
+
 	// Login.
 	mux.HandleFunc("GET /login", s.handleLoginForm)
 	mux.HandleFunc("POST /login", s.auth.HandleLogin)
@@ -128,6 +134,8 @@ func (s *Server) routes() http.Handler {
 	// Terminal API — raw text in, a URL out.
 	mux.HandleFunc("POST /api/pastes", s.auth.RequireAPIKey(s.handleAPICreate))
 	mux.HandleFunc("DELETE /api/pastes/{id}", s.auth.RequireAPIKey(s.handleAPIDelete))
+	mux.HandleFunc("POST /api/pastes/{id}/token/roll", s.auth.RequireAPIKey(s.handleAPITokenRoll))
+	mux.HandleFunc("DELETE /api/pastes/{id}/token", s.auth.RequireAPIKey(s.handleAPITokenRemove))
 
 	mux.HandleFunc("GET /status", s.handleStatus)
 	mux.HandleFunc("GET /static/styles.css", theme.CSSHandler())
@@ -483,8 +491,7 @@ func (s *Server) handleCreate(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	tokenSecret := strings.TrimSpace(r.FormValue("token"))
-	generated := r.FormValue("token_generate") == "on"
-	if generated {
+	if r.FormValue("token_generate") == "on" {
 		tokenSecret = auth.NewSessionToken()
 	}
 	p, err := s.createPaste(body, form["Title"].(string), form["Lang"].(string),
@@ -494,12 +501,29 @@ func (s *Server) handleCreate(w http.ResponseWriter, r *http.Request) {
 		s.renderCompose(w, http.StatusBadRequest, form)
 		return
 	}
-	dest := "/" + p.ID
-	if generated {
-		// Surface the secret exactly once, as the shareable magic link.
-		dest += "#t=" + url.QueryEscape(tokenSecret)
+	if tokenSecret != "" {
+		// The token is hashed at rest and unrecoverable, and the author's
+		// session bypasses the gate on /{id} — a redirect would render the
+		// paste normally and the secret would be gone. Surface it exactly
+		// once, on a server-rendered confirmation, before sending them on.
+		s.rd.Render(w, "created.html", map[string]any{
+			"ID":        p.ID,
+			"Title":     p.Title,
+			"PasteURL":  s.publicURL + "/" + p.ID,
+			"MagicLink": s.magicLink(p.ID, tokenSecret),
+			"Token":     tokenSecret,
+		})
+		return
 	}
-	http.Redirect(w, r, dest, http.StatusSeeOther)
+	http.Redirect(w, r, "/"+p.ID, http.StatusSeeOther)
+}
+
+// magicLink builds the shareable unlock URL. The secret rides the fragment so
+// it never reaches server logs; PathEscape (never QueryEscape, whose "+" for
+// space survives decodeURIComponent as a literal plus) keeps the unlock
+// shell's decode exact for typed passphrases.
+func (s *Server) magicLink(id, secret string) string {
+	return s.publicURL + "/" + id + "#t=" + url.PathEscape(secret)
 }
 
 // createPaste normalizes, upserts, and applies token + visibility rules —
@@ -606,6 +630,121 @@ func (s *Server) handleDeleteExpired(w http.ResponseWriter, r *http.Request) {
 	http.Redirect(w, r, "/manage", http.StatusSeeOther)
 }
 
+// ── token lifecycle ────────────────────────────────────────────────────────
+
+// livePaste loads an unexpired paste for a token-lifecycle handler, or
+// returns nil after writing the 404/410. Errors are JSON (web.WriteError) on
+// both surfaces — these are POST/DELETE endpoints, not pages.
+func (s *Server) livePaste(w http.ResponseWriter, id string) *Paste {
+	if !validID(id) {
+		web.WriteError(w, http.StatusNotFound, "paste not found")
+		return nil
+	}
+	p, err := getPaste(s.db, id)
+	if err != nil {
+		slog.Error("get paste", "err", err)
+		web.WriteError(w, http.StatusInternalServerError, "internal error")
+		return nil
+	}
+	if p == nil {
+		web.WriteError(w, http.StatusNotFound, "paste not found")
+		return nil
+	}
+	if expired(p) {
+		if _, err := deletePaste(s.db, p.ID); err != nil {
+			slog.Warn("could not delete expired paste", "id", p.ID, "err", err)
+		}
+		web.WriteError(w, http.StatusGone, "paste expired")
+		return nil
+	}
+	return p
+}
+
+// freshToken generates a new 26-char secret and installs it as the paste's
+// one token (cap-1 set semantics — any previous secret stops working
+// immediately). A public paste is forced down to unlisted, same as create.
+func (s *Server) freshToken(p *Paste) (string, error) {
+	if p.Visibility == VisPublic {
+		if err := setVisibility(s.db, p.ID, VisUnlisted); err != nil {
+			return "", err
+		}
+		p.Visibility = VisUnlisted
+	}
+	secret := auth.NewSessionToken()
+	if err := setToken(s.db, p.ID, secret, ""); err != nil {
+		return "", err
+	}
+	p.HasToken = true
+	return secret, nil
+}
+
+// renderTokenConfirmation reuses the shown-once create confirmation for a
+// rolled/set token — the secret is hashed at rest, so this page is the only
+// time it is ever visible.
+func (s *Server) renderTokenConfirmation(w http.ResponseWriter, p *Paste, label, secret string) {
+	s.rd.Render(w, "created.html", map[string]any{
+		"Label":     label,
+		"ID":        p.ID,
+		"Title":     p.Title,
+		"PasteURL":  s.publicURL + "/" + p.ID,
+		"MagicLink": s.magicLink(p.ID, secret),
+		"Token":     secret,
+	})
+}
+
+// handleTokenRoll replaces an existing token with a fresh secret.
+func (s *Server) handleTokenRoll(w http.ResponseWriter, r *http.Request) {
+	p := s.livePaste(w, r.PathValue("id"))
+	if p == nil {
+		return
+	}
+	if !p.HasToken {
+		web.WriteError(w, http.StatusConflict, "no token set — add one instead")
+		return
+	}
+	secret, err := s.freshToken(p)
+	if err != nil {
+		slog.Error("roll token", "err", err)
+		web.WriteError(w, http.StatusInternalServerError, "could not roll token")
+		return
+	}
+	s.renderTokenConfirmation(w, p, "Token rolled", secret)
+}
+
+// handleTokenSet attaches a token to a paste that has none.
+func (s *Server) handleTokenSet(w http.ResponseWriter, r *http.Request) {
+	p := s.livePaste(w, r.PathValue("id"))
+	if p == nil {
+		return
+	}
+	if p.HasToken {
+		web.WriteError(w, http.StatusConflict, "token already set — roll it instead")
+		return
+	}
+	secret, err := s.freshToken(p)
+	if err != nil {
+		slog.Error("set token", "err", err)
+		web.WriteError(w, http.StatusInternalServerError, "could not set token")
+		return
+	}
+	s.renderTokenConfirmation(w, p, "Token set", secret)
+}
+
+// handleTokenRemove deletes the token row(s); the paste serves per its
+// visibility again.
+func (s *Server) handleTokenRemove(w http.ResponseWriter, r *http.Request) {
+	p := s.livePaste(w, r.PathValue("id"))
+	if p == nil {
+		return
+	}
+	if _, err := deleteTokens(s.db, p.ID); err != nil {
+		slog.Error("remove token", "err", err)
+		web.WriteError(w, http.StatusInternalServerError, "could not remove token")
+		return
+	}
+	http.Redirect(w, r, "/manage", http.StatusSeeOther)
+}
+
 func (s *Server) handleLoginForm(w http.ResponseWriter, r *http.Request) {
 	s.rd.Render(w, "login.html", map[string]any{"Error": r.URL.Query().Get("error")})
 }
@@ -666,6 +805,46 @@ func (s *Server) handleAPIDelete(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	web.WriteJSON(w, http.StatusOK, map[string]any{"deleted": id})
+}
+
+// handleAPITokenRoll is the terminal twin of the manage-view roll: replace
+// the existing token and print the fresh secret, pipe-clean.
+func (s *Server) handleAPITokenRoll(w http.ResponseWriter, r *http.Request) {
+	p := s.livePaste(w, r.PathValue("id"))
+	if p == nil {
+		return
+	}
+	if !p.HasToken {
+		web.WriteError(w, http.StatusConflict, "no token set")
+		return
+	}
+	secret, err := s.freshToken(p)
+	if err != nil {
+		slog.Error("roll token", "err", err)
+		web.WriteError(w, http.StatusInternalServerError, "could not roll token")
+		return
+	}
+	w.Header().Set("Content-Type", "text/plain; charset=utf-8")
+	fmt.Fprintln(w, "token: "+secret)
+}
+
+// handleAPITokenRemove deletes a paste's token(s) over the terminal API.
+func (s *Server) handleAPITokenRemove(w http.ResponseWriter, r *http.Request) {
+	p := s.livePaste(w, r.PathValue("id"))
+	if p == nil {
+		return
+	}
+	existed, err := deleteTokens(s.db, p.ID)
+	if err != nil {
+		slog.Error("remove token", "err", err)
+		web.WriteError(w, http.StatusInternalServerError, "could not remove token")
+		return
+	}
+	if !existed {
+		web.WriteError(w, http.StatusNotFound, "no token set")
+		return
+	}
+	web.WriteJSON(w, http.StatusOK, map[string]any{"tokenRemoved": p.ID})
 }
 
 func (s *Server) handleStatus(w http.ResponseWriter, r *http.Request) {

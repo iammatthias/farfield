@@ -55,7 +55,22 @@
               </td>
               <td class="num nowrap">{{.Views}}</td>
               <td class="num nowrap">{{with ttl .ExpiresAt}}{{.}}{{else}}<span class="muted">never</span>{{end}}</td>
-              <td>{{if .HasToken}}<span class="badge live">token</span>{{else}}<span class="muted">—</span>{{end}}</td>
+              <td class="actions">
+                {{if .HasToken}}
+                  <form method="post" action="/pastes/{{.ID}}/token/roll"
+                        onsubmit="return confirm('Roll the token? This invalidates the current secret.')">
+                    <button type="submit">Roll</button>
+                  </form>
+                  <form method="post" action="/pastes/{{.ID}}/token/remove"
+                        onsubmit="return confirm('Remove the token? This invalidates the current secret.')">
+                    <button type="submit">Remove</button>
+                  </form>
+                {{else}}
+                  <form method="post" action="/pastes/{{.ID}}/token/set">
+                    <button type="submit">Add token</button>
+                  </form>
+                {{end}}
+              </td>
               <td class="actions">
                 <form method="post" action="/pastes/{{.ID}}/delete"
                       onsubmit="return confirm('Delete this paste?')">

@@ -20,6 +20,24 @@
       {{with ttl .Paste.ExpiresAt}}<span class="ttl">{{.}}</span>{{end}}
       {{if .Paste.HasToken}}<span class="badge live">token</span>{{end}}
     </p>
+    {{if .Authed}}
+      <div class="token-controls">
+        {{if .Paste.HasToken}}
+          <form method="post" action="/pastes/{{.Paste.ID}}/token/roll"
+                onsubmit="return confirm('Roll the token? This invalidates the current secret.')">
+            <button class="linklike" type="submit">Roll token</button>
+          </form>
+          <form method="post" action="/pastes/{{.Paste.ID}}/token/remove"
+                onsubmit="return confirm('Remove the token? This invalidates the current secret.')">
+            <button class="linklike" type="submit">Remove token</button>
+          </form>
+        {{else}}
+          <form method="post" action="/pastes/{{.Paste.ID}}/token/set">
+            <button class="linklike" type="submit">Add token</button>
+          </form>
+        {{end}}
+      </div>
+    {{end}}
   </section>
 
   <style>{{.ChromaCSS}}</style>
