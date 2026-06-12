@@ -1,0 +1,68 @@
+{{define "title"}}Compose · farfield scrap{{end}}
+{{define "content"}}
+  {{template "topbar" .}}
+  <section class="compose">
+    {{with .Error}}<p class="error">{{.}}</p>{{end}}
+    <form method="post" action="/pastes">
+      <div class="field">
+        <label for="body">Body</label>
+        <textarea id="body" name="body" autofocus
+                  placeholder="paste text here">{{.Body}}</textarea>
+      </div>
+      <div class="controls">
+        <div class="field">
+          <label for="title">Title <span class="muted">(optional)</span></label>
+          <input type="text" id="title" name="title" value="{{.Title}}">
+        </div>
+        <div class="field">
+          <label for="lang">Language</label>
+          <select id="lang" name="lang">
+            <option value="">plain</option>
+            {{$sel := .Lang}}
+            {{range .Langs}}
+              <option value="{{.}}"{{if eq . $sel}} selected{{end}}>{{.}}</option>
+            {{end}}
+          </select>
+        </div>
+        <div class="field">
+          <label for="expires">Expiry</label>
+          <select id="expires" name="expires">
+            {{$exp := .Expires}}
+            {{range .Expiries}}
+              <option value="{{.}}"{{if eq . $exp}} selected{{end}}>{{.}}</option>
+            {{end}}
+          </select>
+        </div>
+      </div>
+      <fieldset>
+        <legend>Visibility</legend>
+        <div class="radio-row">
+          {{$vis := .Visibility}}
+          <label><input type="radio" name="visibility" value="public"
+            {{if eq $vis "public"}}checked{{end}}> public</label>
+          <label><input type="radio" name="visibility" value="unlisted"
+            {{if or (eq $vis "unlisted") (eq $vis "")}}checked{{end}}> unlisted</label>
+          <label><input type="radio" name="visibility" value="private"
+            {{if eq $vis "private"}}checked{{end}}> private</label>
+        </div>
+        <p class="hint">A view token forces public down to unlisted.</p>
+      </fieldset>
+      <div class="field">
+        <label for="token">View token <span class="muted">(optional)</span></label>
+        <input type="text" id="token" name="token" autocomplete="off"
+               placeholder="blank = no token, or type a passphrase">
+        <div class="check" style="margin-top:0.45rem">
+          <input type="checkbox" id="token_generate" name="token_generate">
+          <label for="token_generate">generate a random token instead</label>
+        </div>
+        <p class="hint">Token-locked pastes require it for every view — shared
+          via the <span class="mono">#t=…</span> magic link, the unlock prompt,
+          or the <span class="mono">X-Scrap-Token</span> header.</p>
+      </div>
+      <div class="actions">
+        <button type="submit">Save paste</button>
+        <a href="/manage">Manage existing</a>
+      </div>
+    </form>
+  </section>
+{{end}}

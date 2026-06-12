@@ -1,0 +1,25 @@
+# Local-dev compose for the scrap app. Run from the repo root so Compose
+# interpolates ${...} from the root .env:
+#   docker compose -f apps/scrap/docker-compose.yml up --build
+services:
+  scrap:
+    build:
+      context: ../..
+      args: { APP: scrap }
+    image: farfield-scrap
+    ports:
+      - "${SCRAP_PORT:-8799}:8799"
+    environment:
+      - HOST=0.0.0.0
+      - SCRAP_PORT=8799
+      - SCRAP_DB_PATH=/data/scrap.sqlite
+      - SCRAP_API_KEY=${SCRAP_API_KEY:-}
+      - SCRAP_PUBLIC_URL=${SCRAP_PUBLIC_URL:-http://localhost:8799}
+      - PASSWORD=${PASSWORD:-changeme}
+      - COOKIE_SECURE=false
+    volumes:
+      - scrap-data:/data
+    restart: unless-stopped
+
+volumes:
+  scrap-data:

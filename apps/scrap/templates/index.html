@@ -1,0 +1,30 @@
+{{define "title"}}Public pastes · farfield scrap{{end}}
+{{define "content"}}
+  <header class="bar">
+    <h1><a href="/pastes">farfield · scrap</a></h1>
+    <nav>
+      {{if .Authed}}<a href="/">Compose</a><a href="/manage">Manage</a>{{end}}
+    </nav>
+  </header>
+  <p class="label">Public pastes</p>
+  {{if .Pastes}}
+    <div class="table-wrap" style="margin-top:0.75rem">
+      <table>
+        <thead>
+          <tr><th>Title</th><th>Lang</th><th class="nowrap">Age</th></tr>
+        </thead>
+        <tbody>
+          {{range .Pastes}}
+            <tr>
+              <td><a href="/{{.ID}}">{{if .Title}}{{.Title}}{{else}}<span class="mono">{{.ID}}</span>{{end}}</a></td>
+              <td class="mono">{{if .Lang}}{{.Lang}}{{else}}<span class="muted">plain</span>{{end}}</td>
+              <td class="mono nowrap">{{relAge .CreatedAt}}</td>
+            </tr>
+          {{end}}
+        </tbody>
+      </table>
+    </div>
+  {{else}}
+    <p class="muted" style="margin-top:0.75rem">Nothing public yet.</p>
+  {{end}}
+{{end}}

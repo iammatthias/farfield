@@ -11,7 +11,9 @@
 /apps/dead-presidents/dead-presidents
 /apps/feed/feed
 /apps/library/library
+/apps/pulse/pulse
 /apps/qr/qr
+/apps/scrap/scrap
 
 # Compiled iOS Shortcuts — source of truth is the .cherri files.
 /shortcuts/*.shortcut

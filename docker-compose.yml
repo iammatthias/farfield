@@ -236,6 +236,25 @@ services:
     volumes:
       - ./data:/data
 
+  scrap:
+    <<: *defaults
+    build:
+      context: .
+      args: { APP: scrap }
+    image: farfield-scrap
+    ports:
+      - "${SCRAP_PORT:-8799}:8799"
+    environment:
+      - HOST=0.0.0.0
+      - SCRAP_PORT=8799
+      - SCRAP_DB_PATH=/data/scrap.sqlite
+      - SCRAP_API_KEY=${SCRAP_API_KEY:-}
+      - SCRAP_PUBLIC_URL=${SCRAP_PUBLIC_URL:-https://scrap.farfield.systems}
+      - PASSWORD=${PASSWORD:-changeme}
+      - COOKIE_SECURE=true
+    volumes:
+      - ./data:/data
+
   backup:
     <<: *defaults
     build:

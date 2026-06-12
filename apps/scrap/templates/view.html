@@ -1,0 +1,68 @@
+{{define "title"}}{{if .Paste.Title}}{{.Paste.Title}}{{else}}{{.Paste.ID}}{{end}} · farfield scrap{{end}}
+{{define "content"}}
+  <header class="bar">
+    <h1><a href="/pastes">farfield · scrap</a></h1>
+    <nav>
+      {{if .Authed}}<a href="/manage">Manage</a>{{end}}
+      <a id="rawlink" href="/{{.Paste.ID}}/raw">Raw</a>
+      <button class="linklike" id="copy" type="button">Copy</button>
+    </nav>
+  </header>
+
+  <section>
+    <h2>{{if .Paste.Title}}{{.Paste.Title}}{{else}}<span class="mono">{{.Paste.ID}}</span>{{end}}</h2>
+    <p class="meta">
+      <span>{{.Paste.ID}}</span>
+      <span>{{.Lang}}</span>
+      <span>{{sizeText .Paste.Size}}</span>
+      <span>{{relAge .Paste.CreatedAt}}</span>
+      <span>{{.Paste.Views}} views</span>
+      {{with ttl .Paste.ExpiresAt}}<span class="ttl">{{.}}</span>{{end}}
+      {{if .Paste.HasToken}}<span class="badge live">token</span>{{end}}
+    </p>
+  </section>
+
+  <style>{{.ChromaCSS}}</style>
+  <div class="code-wrap">{{.Code}}</div>
+
+  <script>
+  // Copy-all: fetch the raw body (carrying any ?t= token through) and put it
+  // on the clipboard. Reading the page never needs this.
+  document.getElementById("copy").addEventListener("click", function () {
+    var btn = this;
+    var u = new URL(document.getElementById("rawlink").href);
+    var t = new URLSearchParams(location.search).get("t");
+    if (t) u.searchParams.set("t", t);
+    fetch(u, { credentials: "same-origin" })
+      .then(function (r) { return r.text(); })
+      .then(function (text) { return navigator.clipboard.writeText(text); })
+      .then(function () {
+        btn.textContent = "Copied";
+        setTimeout(function () { btn.textContent = "Copy"; }, 1500);
+      })
+      .catch(function () { btn.textContent = "Copy failed"; });
+  });
+
+  // #L10-L20 range highlight — single-line #L10 works with CSS :target alone.
+  (function () {
+    function mark() {
+      document.querySelectorAll(".chroma .line.hl").forEach(function (el) {
+        el.classList.remove("hl");
+      });
+      var m = location.hash.match(/^#L(\d+)-L?(\d+)$/);
+      if (!m) return;
+      var a = +m[1], b = +m[2];
+      if (b < a) { var sw = a; a = b; b = sw; }
+      for (var i = a; i <= b; i++) {
+        var n = document.getElementById("L" + i);
+        var line = n && n.closest(".line");
+        if (line) line.classList.add("hl");
+      }
+      var first = document.getElementById("L" + a);
+      if (first) first.scrollIntoView();
+    }
+    window.addEventListener("hashchange", mark);
+    mark();
+  })();
+  </script>
+{{end}}

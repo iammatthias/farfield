@@ -1,0 +1,30 @@
+{{define "title"}}Locked · farfield scrap{{end}}
+{{define "content"}}
+  <section class="locked">
+    <p class="label">Locked</p>
+    <h1>This paste requires a token</h1>
+    {{with .Error}}<p class="error">{{.}}</p>{{end}}
+    <form class="unlock" method="post" action="/{{.ID}}/unlock">
+      <div class="field">
+        <label for="token">Token</label>
+        <input type="password" id="token" name="token" required
+               autocomplete="off" {{if not .Error}}autofocus{{end}}>
+      </div>
+      <div class="actions"><button type="submit">Unlock</button></div>
+    </form>
+  </section>
+  {{if not .Error}}
+  <script>
+  // Magic link: /{id}#t=SECRET — the fragment never reaches the server, so
+  // this shell posts it through the unlock form. Skipped after a failed
+  // attempt so a wrong magic link cannot loop.
+  (function () {
+    var m = location.hash.match(/^#t=(.+)$/);
+    if (!m) return;
+    var f = document.querySelector("form.unlock");
+    f.token.value = decodeURIComponent(m[1]);
+    f.submit();
+  })();
+  </script>
+  {{end}}
+{{end}}

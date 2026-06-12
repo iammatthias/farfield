@@ -13,6 +13,7 @@ use (
 	./apps/library
 	./apps/pulse
 	./apps/qr
+	./apps/scrap
 	./lib/auth
 	./lib/backup
 	./lib/cid

@@ -1,0 +1,79 @@
+{{define "title"}}Manage · farfield scrap{{end}}
+{{define "content"}}
+  {{template "topbar" .}}
+  <p class="summary">
+    <span>Total {{.Total}}</span>
+    <span>Shown {{.Shown}}</span>
+  </p>
+  <form class="filter-bar" method="get" action="/manage">
+    <span class="label">Filter</span>
+    <select name="visibility">
+      <option value="">all visibility</option>
+      {{$vis := .Visibility}}
+      <option value="public"{{if eq $vis "public"}} selected{{end}}>public</option>
+      <option value="unlisted"{{if eq $vis "unlisted"}} selected{{end}}>unlisted</option>
+      <option value="private"{{if eq $vis "private"}} selected{{end}}>private</option>
+    </select>
+    <select name="lang">
+      <option value="">all langs</option>
+      {{$lang := .Lang}}
+      {{range .Langs}}
+        <option value="{{.}}"{{if eq . $lang}} selected{{end}}>{{.}}</option>
+      {{end}}
+    </select>
+    <input type="search" name="q" value="{{.Q}}" placeholder="search title + body">
+    <button type="submit">Apply</button>
+    {{if or .Visibility .Lang .Q}}<a href="/manage">clear</a>{{end}}
+  </form>
+  {{if .Pastes}}
+    <div class="table-wrap">
+      <table class="admin">
+        <thead>
+          <tr>
+            <th>Title / ID</th>
+            <th>Lang</th>
+            <th class="nowrap">Age</th>
+            <th>Visibility</th>
+            <th class="nowrap">Views</th>
+            <th class="nowrap">Expiry</th>
+            <th>Token</th>
+            <th>Actions</th>
+          </tr>
+        </thead>
+        <tbody>
+          {{range .Pastes}}
+            <tr>
+              <td class="title">
+                <a href="/{{.ID}}">{{if .Title}}{{.Title}}{{else}}<span class="mono">{{.ID}}</span>{{end}}</a>
+              </td>
+              <td class="lang">{{if .Lang}}{{.Lang}}{{else}}<span class="muted">—</span>{{end}}</td>
+              <td class="num nowrap">{{relAge .CreatedAt}}</td>
+              <td>
+                {{if eq .Visibility "public"}}<span class="badge live">Public</span>
+                {{else if eq .Visibility "private"}}<span class="badge draft">Private</span>
+                {{else}}<span class="badge draft">Unlisted</span>{{end}}
+              </td>
+              <td class="num nowrap">{{.Views}}</td>
+              <td class="num nowrap">{{with ttl .ExpiresAt}}{{.}}{{else}}<span class="muted">never</span>{{end}}</td>
+              <td>{{if .HasToken}}<span class="badge live">token</span>{{else}}<span class="muted">—</span>{{end}}</td>
+              <td class="actions">
+                <form method="post" action="/pastes/{{.ID}}/delete"
+                      onsubmit="return confirm('Delete this paste?')">
+                  <button type="submit">Delete</button>
+                </form>
+              </td>
+            </tr>
+          {{end}}
+        </tbody>
+      </table>
+    </div>
+  {{else}}
+    <p class="muted">No pastes match. <a href="/">Compose one.</a></p>
+  {{end}}
+  <div class="actions">
+    <form method="post" action="/pastes/expired/delete"
+          onsubmit="return confirm('Delete every expired paste?')">
+      <button class="danger" type="submit">Delete expired</button>
+    </form>
+  </div>
+{{end}}
