@@ -7,8 +7,9 @@
 // The default scene (enhanceCastle) is a floating field of plates: each
 // day's 6×6 heightfield draped gently over a small horizontal sheet,
 // printed from the shared neutral per-biome glyph atlases and inked in the
-// day's own zone palette — the castle is quietly polychrome, zone color
-// identifying each day — with air on every side.
+// day's own generated zone palette (every day carries its own inks in the
+// payload — there is no zone table) — the castle is quietly polychrome,
+// zone color identifying each day — with air on every side.
 // The lattice z axis becomes the vertical, stretched so the z-levels read
 // as floors of one airy castle; the w axis is a gentle diagonal offset, so
 // the four w-generations of a floor interleave instead of colliding. A
@@ -92,30 +93,31 @@ async function enhanceCastle(plate) {
   // into the paper, light passes through the gaps.
   rig.scene.fog = new THREE.Fog(theme.surface, radius * 1.5, radius * 4.4);
 
-  // ── ink: age fade, zone palettes, per-biome NEUTRAL glyph atlases ────────
+  // ── ink: age fade, per-day zone palettes, per-biome NEUTRAL atlases ──────
   // Oldest plates faintest, floored at 0.55 of full ink, same as everywhere.
   // The atlases are coverage masks (biome glyphs at per-band intensity); the
-  // color is per vertex — each plate's day picks a zone, the zone ink for
-  // its band is lerped from the surface by the age fade, and zonedMaterial
-  // multiplies coverage × ink. Eight atlases serve all sixteen zones.
+  // color is per vertex — each day carries its own generated zone palette
+  // ({ n, c, w } in the payload), the zone ink for its band is lerped from
+  // the surface by the age fade, and zonedMaterial multiplies coverage ×
+  // ink. Eight atlases serve every day's palette.
   const fade = (band) => 1 - (band / Math.max(ageBands - 1, 1)) * 0.45;
   const ageOf = (i) => Math.min(ageBands - 1, Math.floor(((n - i) * ageBands) / (n + 1)));
-  const zoneInks = (data.zones || []).map((z) => z.colors.map((c) => new THREE.Color(c)));
 
-  // inkFor caches the per-band vertex inks for one (zone, age) pair.
+  // inkFor caches the per-band vertex inks for one day — its own palette at
+  // its own age fade.
   const inkCache = new Map();
-  const inkFor = (zi, age) => {
-    const key = zi * ageBands + age;
-    let inks = inkCache.get(key);
+  const inkFor = (i) => {
+    let inks = inkCache.get(i);
     if (!inks) {
-      const f = fade(age);
-      const palette = zoneInks[zi] || [theme.ink];
+      const f = fade(ageOf(i));
+      const zc = (days[i].zone && days[i].zone.c) || [];
+      const palette = zc.length ? zc.map((c) => new THREE.Color(c)) : [theme.ink];
       inks = [];
       for (let b = 0; b < hfBands; b++) {
         const ink = palette[Math.floor((b * palette.length) / hfBands)];
         inks.push(theme.surface.clone().lerp(ink, f));
       }
-      inkCache.set(key, inks);
+      inkCache.set(i, inks);
     }
     return inks;
   };
@@ -233,7 +235,7 @@ async function enhanceCastle(plate) {
       levels: days[i].hf,
       c: centers[i],
       uvFor: atlasFor(bi).uvFor,
-      inks: inkFor(days[i].zone || 0, ageOf(i)),
+      inks: inkFor(i),
       ph: (i * 2.399963) % (Math.PI * 2), // golden-angle phases — no beats
     });
     b.marks.push({ ord: i, end: b.vertexCount });
@@ -344,10 +346,10 @@ async function enhanceCastle(plate) {
   const dateOf = (i) => new Date(epochMs + i * 86400000).toISOString().slice(0, 10);
   const describe = (i) => {
     const biome = data.biomes[days[i].biome];
-    const zone = (data.zones || [])[days[i].zone];
+    const zone = days[i].zone;
     return 'DAY ' + i + ' · ' + dateOf(i) +
       ' · ' + (biome ? biome.name.toUpperCase() : '') +
-      (zone ? ' · ' + zone.name.toUpperCase() : '');
+      (zone && zone.n ? ' · ' + zone.n.toUpperCase() : '');
   };
   const dayAtVertex = (ranges, v) => {
     let lo = 0;
@@ -423,7 +425,7 @@ async function enhanceCastle(plate) {
   console.log('[structure] three r' + THREE.REVISION + ' · castle · ' + N +
     ' plates · ' + meshes.length + ' biome meshes · ' + Math.round(tris / 1000) +
     'k tris ×2 sides · ' + atlases.size + ' neutral glyph atlases · ' +
-    zoneInks.length + ' zones in vertex ink');
+    'per-day zone inks in vertex color');
 }
 
 // ═══ the worldline: one continuous ribbon (?view=line) ═════════════════════
@@ -590,29 +592,30 @@ async function enhanceLine(plate) {
     }
   }
 
-  // ── ink: age fade, zone palettes, per-biome NEUTRAL glyph atlases ────────
+  // ── ink: age fade, per-day zone palettes, per-biome NEUTRAL atlases ──────
   // Oldest end faintest, floored at 0.55 of full ink — the same compression
   // the SVG plates use, so the 2020 end stays clearly written. The atlases
-  // are coverage masks; each day's zone ink rides the vertex colors and
+  // are coverage masks; each day carries its own generated zone palette
+  // ({ n, c, w } in the payload), its inks ride the vertex colors, and
   // zonedMaterial mixes surface → ink by coverage.
   const fade = (band) => 1 - (band / Math.max(ageBands - 1, 1)) * 0.45;
   const ageOf = (i) => Math.min(ageBands - 1, Math.floor(((n - i) * ageBands) / (n + 1)));
-  const zoneInks = (data.zones || []).map((z) => z.colors.map((c) => new THREE.Color(c)));
 
-  // inkFor caches the per-band vertex inks for one (zone, age) pair.
+  // inkFor caches the per-band vertex inks for one day — its own palette at
+  // its own age fade.
   const inkCache = new Map();
-  const inkFor = (zi, age) => {
-    const key = zi * ageBands + age;
-    let inks = inkCache.get(key);
+  const inkFor = (i) => {
+    let inks = inkCache.get(i);
     if (!inks) {
-      const f = fade(age);
-      const palette = zoneInks[zi] || [theme.ink];
+      const f = fade(ageOf(i));
+      const zc = (days[i].zone && days[i].zone.c) || [];
+      const palette = zc.length ? zc.map((c) => new THREE.Color(c)) : [theme.ink];
       inks = [];
       for (let b = 0; b < hfBands; b++) {
         const ink = palette[Math.floor((b * palette.length) / hfBands)];
         inks.push(theme.surface.clone().lerp(ink, f));
       }
-      inkCache.set(key, inks);
+      inkCache.set(i, inks);
     }
     return inks;
   };
@@ -688,7 +691,7 @@ async function enhanceLine(plate) {
       builders.set(bi, b);
     }
     const start = b.vertexCount;
-    const inks = inkFor(days[i].zone || 0, ageOf(i));
+    const inks = inkFor(i);
     const { uvFor } = atlasFor(bi);
     for (let s = i * SPD; s < (i + 1) * SPD; s++) {
       const aMid = stripA(s + 0.5);
@@ -794,10 +797,10 @@ async function enhanceLine(plate) {
   const dateOf = (i) => new Date(epochMs + i * 86400000).toISOString().slice(0, 10);
   const describe = (i) => {
     const biome = data.biomes[days[i].biome];
-    const zone = (data.zones || [])[days[i].zone];
+    const zone = days[i].zone;
     return 'DAY ' + i + ' · ' + dateOf(i) +
       ' · ' + (biome ? biome.name.toUpperCase() : '') +
-      (zone ? ' · ' + zone.name.toUpperCase() : '');
+      (zone && zone.n ? ' · ' + zone.n.toUpperCase() : '');
   };
   const dayAtVertex = (ranges, v) => {
     let lo = 0;
@@ -867,5 +870,5 @@ async function enhanceLine(plate) {
   console.log('[structure] three r' + THREE.REVISION + ' · worldline · ' + N +
     ' days · ' + meshes.length + ' biome meshes · ' + Math.round(tris / 1000) +
     'k tris ×2 sides · ' + atlases.size + ' neutral glyph atlases · ' +
-    zoneInks.length + ' zones in vertex ink');
+    'per-day zone inks in vertex color');
 }

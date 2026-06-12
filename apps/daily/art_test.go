@@ -26,53 +26,124 @@ func TestSeedDeterminismAndDomainSeparation(t *testing.T) {
 	}
 }
 
-// TestZoneDeterminismAndDomainSeparation: the day's zone — its ink palette —
-// must be a pure function of the date, drawn from its own hash domain so it
-// is independent of the art seed (terrain) and the biome stream, with every
-// index in range and the whole palette table exercised over a year.
-func TestZoneDeterminismAndDomainSeparation(t *testing.T) {
-	seen := map[int]bool{}
-	for i := 0; i < 365; i++ {
-		d := addDays(artifactEpoch, i)
-		zi := zoneIndexFor(d)
-		if zi != zoneIndexFor(d) {
-			t.Fatalf("zone for %s is not deterministic", d)
-		}
-		if zi < 0 || zi >= len(zones) {
-			t.Fatalf("zone for %s = %d, out of [0,%d)", d, zi, len(zones))
-		}
-		seen[zi] = true
+// zoneTestRGB parses a "#rrggbb" ink for the zone tests.
+func zoneTestRGB(t *testing.T, hex string) (int, int, int) {
+	t.Helper()
+	if len(hex) != 7 || hex[0] != '#' {
+		t.Fatalf("malformed ink %q", hex)
 	}
-	if len(seen) != len(zones) {
-		t.Errorf("a year exercises %d of %d zones — distribution looks broken", len(seen), len(zones))
+	n, err := strconv.ParseUint(hex[1:], 16, 32)
+	if err != nil {
+		t.Fatalf("malformed ink %q: %v", hex, err)
 	}
-	// Domain separation: the zone stream must come from "art-zone:", not
-	// from the art seed's domain — the prefix has to matter.
+	return int(n >> 16), int(n >> 8 & 0xff), int(n & 0xff)
+}
+
+// zoneTestLum is the linear relative luminance of an ink, via the same exact
+// sRGB linearization table the generator uses (Q24 → 0..1).
+func zoneTestLum(t *testing.T, hex string) float64 {
+	r, g, b := zoneTestRGB(t, hex)
+	lin := func(v int) float64 { return float64(srgbLinTab[v]) / (1 << 24) }
+	return 0.2126*lin(r) + 0.7152*lin(g) + 0.0722*lin(b)
+}
+
+// TestZoneGeneration: every date generates its own palette — a pure function
+// of the date under its own hash domain — and the generator's guardrails
+// hold: well-formed inks, monotonic darkening, bounded saturation, a wash
+// that stays near the page surface, and a year of dates spreading across the
+// whole hue wheel with (nearly) no two days sharing a palette.
+func TestZoneGeneration(t *testing.T) {
+	if zoneFor("2024-03-15") != zoneFor("2024-03-15") {
+		t.Fatal("zone for one date is not deterministic")
+	}
+	// Domain separation: the palette must come from "art-zone:", not from
+	// the art seed's domain — the prefix has to matter.
 	differs := false
 	for i := 0; i < 64 && !differs; i++ {
 		d := addDays(artifactEpoch, i)
-		h := sha256.Sum256([]byte(domainArt + ":" + d))
-		differs = zoneIndexFor(d) != int(h[0])%len(zones)
+		differs = zoneFor(d) != zoneFromSum(sha256.Sum256([]byte(domainArt+":"+d)))
 	}
 	if !differs {
-		t.Error("zone indices mirror the art seed stream — domain separation is broken")
+		t.Error("zones mirror the art seed stream — domain separation is broken")
 	}
 	// The plate must carry the date's zone — same date, same zone, everywhere.
 	n, _ := artDayIndex("2024-03-15")
-	p := artPlotFor("2024-03-15", n)
-	if p.ZoneIdx != zoneIndexFor("2024-03-15") || p.Zone.Name != zones[p.ZoneIdx].Name {
-		t.Errorf("plot zone = %d %q, want %d", p.ZoneIdx, p.Zone.Name, zoneIndexFor("2024-03-15"))
+	if p := artPlotFor("2024-03-15", n); p.Zone != zoneFor("2024-03-15") {
+		t.Errorf("plot zone = %+v, want the date's own", p.Zone)
 	}
-	// And every zone's ink set is complete.
-	for i, z := range zones {
-		if z.Name == "" || z.Wash == "" {
-			t.Errorf("zone %d is missing a name or wash", i)
+
+	palettes := map[[4]string]bool{}
+	names := map[string]bool{}
+	hueBuckets := map[int]bool{}
+	for i := 0; i < 365; i++ {
+		d := addDays(artifactEpoch, i)
+		z := zoneFor(d)
+		if z.Name == "" {
+			t.Fatalf("zone for %s has no name", d)
 		}
-		for _, ink := range z.Inks {
-			if len(ink) != 7 || ink[0] != '#' {
-				t.Errorf("zone %q has a malformed ink %q", z.Name, ink)
+		names[z.Name] = true
+		palettes[z.Inks] = true
+
+		// Monotonic darkening: each ink strictly darker than the last, the
+		// light end a mid-light ink, the dark end deep but never black.
+		prev := 1.0
+		for k, ink := range z.Inks {
+			lum := zoneTestLum(t, ink)
+			if lum >= prev {
+				t.Fatalf("zone %s (%s) ink %d (%s) does not darken: %.3f after %.3f",
+					d, z.Name, k, ink, lum, prev)
+			}
+			prev = lum
+			// Saturation stays an instrument ink, never neon: the RGB
+			// channel spread is bounded well under a saturated primary's.
+			r, g, b := zoneTestRGB(t, ink)
+			spread := max(r, max(g, b)) - min(r, min(g, b))
+			if spread > 150 {
+				t.Errorf("zone %s (%s) ink %s reads neon: channel spread %d", d, z.Name, ink, spread)
 			}
 		}
+		if hi := zoneTestLum(t, z.Inks[0]); hi < 0.18 || hi > 0.55 {
+			t.Errorf("zone %s (%s) light ink %s luminance %.3f out of (0.18, 0.55)", d, z.Name, z.Inks[0], hi)
+		}
+		if lo := zoneTestLum(t, z.Inks[3]); lo < 0.015 || lo > 0.10 {
+			t.Errorf("zone %s (%s) dark ink %s luminance %.3f out of (0.015, 0.10)", d, z.Name, z.Inks[3], lo)
+		}
+		// The wash is the day's paper: near the surface lightness, barely
+		// tinted.
+		if wl := zoneTestLum(t, z.Wash); wl < 0.80 {
+			t.Errorf("zone %s (%s) wash %s too dark for paper: luminance %.3f", d, z.Name, z.Wash, wl)
+		}
+		wr, wg, wb := zoneTestRGB(t, z.Wash)
+		if spread := max(wr, max(wg, wb)) - min(wr, min(wg, wb)); spread > 16 {
+			t.Errorf("zone %s (%s) wash %s too saturated for paper: spread %d", d, z.Name, z.Wash, spread)
+		}
+		// Hue of the second ink, bucketed at 15° for the spread check.
+		r, g, b := zoneTestRGB(t, z.Inks[1])
+		mx, mn := max(r, max(g, b)), min(r, min(g, b))
+		if mx > mn { // chromatic — graphite/bone days may sit on the axis
+			var hue float64
+			switch mx {
+			case r:
+				hue = float64(g-b) / float64(mx-mn)
+			case g:
+				hue = 2 + float64(b-r)/float64(mx-mn)
+			default:
+				hue = 4 + float64(r-g)/float64(mx-mn)
+			}
+			hueBuckets[(int(hue*60+360)%360)/15] = true
+		}
+	}
+	// A year of dates is a continuous spread of hues, not a handful of
+	// presets: nearly every palette distinct, the caption vocabulary well
+	// exercised, and the hue wheel covered.
+	if len(palettes) < 360 {
+		t.Errorf("a year yields %d distinct palettes, want ≥ 360 — generation looks quantized", len(palettes))
+	}
+	if len(names) < 12 {
+		t.Errorf("a year exercises %d caption names, want ≥ 12", len(names))
+	}
+	if len(hueBuckets) < 20 {
+		t.Errorf("a year covers %d of 24 hue buckets, want ≥ 20", len(hueBuckets))
 	}
 }
 
@@ -318,20 +389,19 @@ func TestArtStructureAPI(t *testing.T) {
 			Y     int    `json:"y"`
 			Z     int    `json:"z"`
 			Biome int    `json:"biome"`
-			Zone  int    `json:"zone"`
-			Age   int    `json:"age"`
-			Today bool   `json:"today"`
-			HF    []int  `json:"hf"`
+			Zone  struct {
+				N string    `json:"n"`
+				C [4]string `json:"c"`
+				W string    `json:"w"`
+			} `json:"zone"`
+			Age   int   `json:"age"`
+			Today bool  `json:"today"`
+			HF    []int `json:"hf"`
 		} `json:"cells"`
 		Biomes []struct {
 			Name   string   `json:"name"`
 			Colors []string `json:"colors"`
 		} `json:"biomes"`
-		Zones []struct {
-			Name   string   `json:"name"`
-			Colors []string `json:"colors"`
-			Wash   string   `json:"wash"`
-		} `json:"zones"`
 	}
 	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
 		t.Fatalf("unmarshal: %v", err)
@@ -353,13 +423,8 @@ func TestArtStructureAPI(t *testing.T) {
 			t.Errorf("biome %d = %+v", i, b)
 		}
 	}
-	if len(body.Zones) != len(zones) {
-		t.Fatalf("zones = %d, want %d", len(body.Zones), len(zones))
-	}
-	for i, z := range body.Zones {
-		if z.Name != zones[i].Name || len(z.Colors) != 4 || z.Wash == "" {
-			t.Errorf("zone %d = %+v", i, z)
-		}
+	if strings.Contains(rec.Body.String(), `"zones"`) {
+		t.Error("structure JSON still carries a zones table — palettes are per day now")
 	}
 	prev := int64(-1)
 	for _, c := range body.Cells {
@@ -369,8 +434,8 @@ func TestArtStructureAPI(t *testing.T) {
 		if c.Biome < 0 || c.Biome >= len(biomes) || c.Age < 0 || c.Age >= structAgeBands {
 			t.Fatalf("cell %d bad biome/age: %+v", c.I, c)
 		}
-		if c.Zone != zoneIndexFor(addDays(artifactEpoch, int(c.I))) {
-			t.Fatalf("cell %d zone = %d, want its date's zone", c.I, c.Zone)
+		if z := zoneFor(addDays(artifactEpoch, int(c.I))); c.Zone.N != z.Name || c.Zone.C != z.Inks || c.Zone.W != z.Wash {
+			t.Fatalf("cell %d zone = %+v, want its date's own palette", c.I, c.Zone)
 		}
 		if int64(c.I) <= prev {
 			t.Fatal("cells must arrive in ascending day order")
@@ -452,21 +517,20 @@ func TestArtStructureAPIFull(t *testing.T) {
 				Y     int    `json:"y"`
 				Z     int    `json:"z"`
 				Biome int    `json:"biome"`
-				Zone  int    `json:"zone"`
-				Age   int    `json:"age"`
-				Today bool   `json:"today"`
-				HF    []int  `json:"hf"`
+				Zone  struct {
+					N string    `json:"n"`
+					C [4]string `json:"c"`
+					W string    `json:"w"`
+				} `json:"zone"`
+				Age   int   `json:"age"`
+				Today bool  `json:"today"`
+				HF    []int `json:"hf"`
 			} `json:"cells"`
 		} `json:"slices"`
 		Biomes []struct {
 			Name   string   `json:"name"`
 			Colors []string `json:"colors"`
 		} `json:"biomes"`
-		Zones []struct {
-			Name   string   `json:"name"`
-			Colors []string `json:"colors"`
-			Wash   string   `json:"wash"`
-		} `json:"zones"`
 	}
 	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
 		t.Fatalf("unmarshal: %v", err)
@@ -480,8 +544,8 @@ func TestArtStructureAPIFull(t *testing.T) {
 	if len(body.Biomes) != len(biomes) {
 		t.Fatalf("biomes = %d, want %d", len(body.Biomes), len(biomes))
 	}
-	if len(body.Zones) != len(zones) {
-		t.Fatalf("zones = %d, want %d", len(body.Zones), len(zones))
+	if strings.Contains(rec.Body.String(), `"zones"`) {
+		t.Error("structure JSON still carries a zones table — palettes are per day now")
 	}
 	if len(body.Slices) == 0 {
 		t.Fatal("full structure must carry at least one slice")
@@ -507,8 +571,8 @@ func TestArtStructureAPIFull(t *testing.T) {
 			if c.Biome < 0 || c.Biome >= len(biomes) || c.Age < 0 || c.Age >= structAgeBands {
 				t.Fatalf("cell %d bad biome/age: %+v", c.I, c)
 			}
-			if c.Zone < 0 || c.Zone >= len(zones) {
-				t.Fatalf("cell %d zone %d out of range", c.I, c.Zone)
+			if c.Zone.N == "" || c.Zone.W == "" || c.Zone.C[0] == "" || c.Zone.C[3] == "" {
+				t.Fatalf("cell %d zone incomplete: %+v", c.I, c.Zone)
 			}
 			if int64(c.I) <= prev {
 				t.Fatalf("slice w=%d cells must arrive in ascending day order", sl.W)
@@ -584,8 +648,8 @@ func TestArtPathAPI(t *testing.T) {
 	if etag == "" {
 		t.Fatal("path JSON must carry an ETag")
 	}
-	if size := rec.Body.Len(); size > 700*1024 {
-		t.Errorf("raw payload = %d bytes, want ≤ 700KB", size)
+	if size := rec.Body.Len(); size > 900*1024 {
+		t.Errorf("raw payload = %d bytes, want ≤ 900KB", size)
 	}
 
 	var body struct {
@@ -599,18 +663,17 @@ func TestArtPathAPI(t *testing.T) {
 			I     uint64 `json:"i"`
 			Coord []int  `json:"coord"`
 			Biome int    `json:"biome"`
-			Zone  int    `json:"zone"`
-			HF    []int  `json:"hf"`
+			Zone  struct {
+				N string    `json:"n"`
+				C [4]string `json:"c"`
+				W string    `json:"w"`
+			} `json:"zone"`
+			HF []int `json:"hf"`
 		} `json:"days"`
 		Biomes []struct {
 			Name   string   `json:"name"`
 			Colors []string `json:"colors"`
 		} `json:"biomes"`
-		Zones []struct {
-			Name   string   `json:"name"`
-			Colors []string `json:"colors"`
-			Wash   string   `json:"wash"`
-		} `json:"zones"`
 	}
 	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
 		t.Fatalf("unmarshal: %v", err)
@@ -629,13 +692,8 @@ func TestArtPathAPI(t *testing.T) {
 			t.Errorf("biome %d = %+v", i, b)
 		}
 	}
-	if len(body.Zones) != len(zones) {
-		t.Fatalf("zones = %d, want %d", len(body.Zones), len(zones))
-	}
-	for i, z := range body.Zones {
-		if z.Name != zones[i].Name || len(z.Colors) != 4 || z.Wash != zones[i].Wash {
-			t.Errorf("zone %d = %+v", i, z)
-		}
+	if strings.Contains(rec.Body.String(), `"zones"`) {
+		t.Error("path JSON still carries a zones table — palettes are per day now")
 	}
 	// Every day from the epoch through today, in order, no gaps, no trims.
 	if want := int(body.N) + 1; len(body.Days) != want {
@@ -657,8 +715,8 @@ func TestArtPathAPI(t *testing.T) {
 		if d.Biome < 0 || d.Biome >= len(biomes) {
 			t.Fatalf("day %d biome %d out of range", k, d.Biome)
 		}
-		if d.Zone != zoneIndexFor(addDays(artifactEpoch, k)) {
-			t.Fatalf("day %d zone = %d, want its date's zone", k, d.Zone)
+		if z := zoneFor(addDays(artifactEpoch, k)); d.Zone.N != z.Name || d.Zone.C != z.Inks || d.Zone.W != z.Wash {
+			t.Fatalf("day %d zone = %+v, want its date's own palette", k, d.Zone)
 		}
 		if len(d.HF) != structTileGrid*structTileGrid {
 			t.Fatalf("day %d hf len = %d, want %d — every day keeps its terrain", k, len(d.HF), structTileGrid*structTileGrid)
@@ -730,7 +788,6 @@ func TestArtTerrainAPI(t *testing.T) {
 				Colors []string `json:"colors"`
 			} `json:"biome"`
 			Zone struct {
-				Index  int      `json:"index"`
 				Name   string   `json:"name"`
 				Colors []string `json:"colors"`
 				Wash   string   `json:"wash"`
@@ -747,9 +804,9 @@ func TestArtTerrainAPI(t *testing.T) {
 		if body.Bands != len(biomes[body.Biome.Index].Ramp) || len(body.Biome.Colors) != 3 {
 			t.Errorf("%s bands/colors = %d/%d", path, body.Bands, len(body.Biome.Colors))
 		}
-		if body.Zone.Index != zoneIndexFor(body.Date) || body.Zone.Name != zones[body.Zone.Index].Name ||
-			len(body.Zone.Colors) != 4 || body.Zone.Wash != zones[body.Zone.Index].Wash {
-			t.Errorf("%s zone = %+v, want the date's zone", path, body.Zone)
+		if z := zoneFor(body.Date); body.Zone.Name != z.Name || len(body.Zone.Colors) != 4 ||
+			body.Zone.Colors[0] != z.Inks[0] || body.Zone.Colors[3] != z.Inks[3] || body.Zone.Wash != z.Wash {
+			t.Errorf("%s zone = %+v, want the date's own palette", path, body.Zone)
 		}
 		for i, lv := range body.Levels {
 			if lv < 0 || lv >= body.Bands {

@@ -100,7 +100,7 @@ func statusAt(x, y, z, w int, todayN uint64) cellStatus {
 type structCell struct {
 	x, y, z int
 	biome   int
-	zone    int
+	zone    Zone
 	idx     uint64
 	band    int
 	today   bool
@@ -206,7 +206,7 @@ func renderStructureSVG(wSlice int, todayN uint64) []byte {
 				cells = append(cells, structCell{
 					x: x, y: y, z: z,
 					biome: biomeIndexAt(x, y, z, wSlice),
-					zone:  zoneIndexFor(addDays(artifactEpoch, int(idx))),
+					zone:  zoneFor(addDays(artifactEpoch, int(idx))),
 					idx:   idx,
 					band:  ageBand(idx, todayN),
 					today: st == cellToday,
@@ -243,50 +243,33 @@ func renderStructureSVG(wSlice int, todayN uint64) []byte {
 	var buf bytes.Buffer
 	fmt.Fprintf(&buf, `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 40 400 244" role="img" aria-label="Hyperstructure w-slice %d" font-family="%s">`+"\n", wSlice, svgFont)
 
-	// Strata patterns — one per zone × side × age band actually used, keyed
-	// stably as s{zone}{L|R}{band}. The left plane hatches denser (every 2px)
-	// than the right (every 3px), so the two side planes of the mass read
-	// differently, and the lines run in global pattern space, so strata
-	// continue across neighboring cells like beds in a cut bank.
-	type patKey struct {
-		zone int
-		left bool
-		band int
-	}
-	used := map[patKey]bool{}
-	for _, c := range cells {
-		if leftExposed(c) {
-			used[patKey{c.zone, true, c.band}] = true
-		}
-		if rightExposed(c) {
-			used[patKey{c.zone, false, c.band}] = true
-		}
-	}
-	keys := make([]patKey, 0, len(used))
-	for k := range used {
-		keys = append(keys, k)
-	}
-	sort.Slice(keys, func(i, j int) bool {
-		a, b := keys[i], keys[j]
-		if a.zone != b.zone {
-			return a.zone < b.zone
-		}
-		if a.left != b.left {
-			return a.left
-		}
-		return a.band < b.band
-	})
-	buf.WriteString("<defs>\n")
-	for _, k := range keys {
-		p := zones[k.zone].Inks
+	// Strata patterns — every day generates its own zone palette, so each
+	// cell with an exposed side gets its own pattern, keyed stably by its
+	// day index as s{idx}{L|R} (the cell's age band sets the opacities
+	// inside). The left plane hatches denser (every 2px) than the right
+	// (every 3px), so the two side planes of the mass read differently, and
+	// the lines run in global pattern space, so strata continue across
+	// neighboring cells like beds in a cut bank. Cells are emitted in
+	// painter order — a fixed order, so the bytes stay stable.
+	pattern := func(c structCell, left bool) {
+		p := c.zone.Inks
 		side, spacing, base, line := "R", 3, p[2], p[3]
-		if k.left {
+		if left {
 			side, spacing, base, line = "L", 2, p[3], p[0]
 		}
-		fmt.Fprintf(&buf, `<pattern id="s%d%s%d" width="4" height="%d" patternUnits="userSpaceOnUse">`, k.zone, side, k.band, spacing)
-		fmt.Fprintf(&buf, `<rect width="4" height="%d" fill="%s" fill-opacity="%s"/>`, spacing, base, structSideOp[k.band])
-		fmt.Fprintf(&buf, `<line x1="0" y1="0.5" x2="4" y2="0.5" stroke="%s" stroke-opacity="%s" stroke-width="0.5"/>`, line, structLineOp[k.band])
+		fmt.Fprintf(&buf, `<pattern id="s%d%s" width="4" height="%d" patternUnits="userSpaceOnUse">`, c.idx, side, spacing)
+		fmt.Fprintf(&buf, `<rect width="4" height="%d" fill="%s" fill-opacity="%s"/>`, spacing, base, structSideOp[c.band])
+		fmt.Fprintf(&buf, `<line x1="0" y1="0.5" x2="4" y2="0.5" stroke="%s" stroke-opacity="%s" stroke-width="0.5"/>`, line, structLineOp[c.band])
 		buf.WriteString("</pattern>\n")
+	}
+	buf.WriteString("<defs>\n")
+	for _, c := range cells {
+		if leftExposed(c) {
+			pattern(c, true)
+		}
+		if rightExposed(c) {
+			pattern(c, false)
+		}
 	}
 	buf.WriteString("</defs>\n")
 
@@ -355,7 +338,7 @@ func renderStructureSVG(wSlice int, todayN uint64) []byte {
 		cx := structOX + (c.x-c.y)*structDX
 		cy := structOY + (c.x+c.y)*structDY - c.z*structDZ
 		b := biomes[c.biome]
-		p := zones[c.zone].Inks
+		p := c.zone.Inks
 		stroke := fmt.Sprintf(` stroke="%s" stroke-opacity="0.25" stroke-width="0.5"`, p[3])
 		if c.today {
 			stroke = ` stroke="#d93a00" stroke-width="1"`
@@ -366,14 +349,14 @@ func renderStructureSVG(wSlice int, todayN uint64) []byte {
 				p[0], structWashOp[c.band], stroke)
 		}
 		if left {
-			fmt.Fprintf(&buf, `<polygon points="%d,%d %d,%d %d,%d %d,%d" fill="url(#s%dL%d)"%s/>`+"\n",
+			fmt.Fprintf(&buf, `<polygon points="%d,%d %d,%d %d,%d %d,%d" fill="url(#s%dL)"%s/>`+"\n",
 				cx-structDX, cy, cx, cy+structDY, cx, cy+structDY+structDZ, cx-structDX, cy+structDZ,
-				c.zone, c.band, stroke)
+				c.idx, stroke)
 		}
 		if right {
-			fmt.Fprintf(&buf, `<polygon points="%d,%d %d,%d %d,%d %d,%d" fill="url(#s%dR%d)"%s/>`+"\n",
+			fmt.Fprintf(&buf, `<polygon points="%d,%d %d,%d %d,%d %d,%d" fill="url(#s%dR)"%s/>`+"\n",
 				cx+structDX, cy, cx, cy+structDY, cx, cy+structDY+structDZ, cx+structDX, cy+structDZ,
-				c.zone, c.band, stroke)
+				c.idx, stroke)
 		}
 		if !top {
 			continue
