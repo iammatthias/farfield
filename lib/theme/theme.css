@@ -146,10 +146,17 @@ textarea { min-height: 8rem; resize: vertical; line-height: 1.55;
 	font-family: var(--font-mono); font-size: 0.85rem; }
 input[type="checkbox"], input[type="file"] { width: auto; }
 
+/* iOS zooms the page when a focused control renders under 16px — keep every
+   form control at native size on touch-scale screens. !important so app-local
+   compact styles (which load after this sheet) can't reintroduce the zoom. */
+@media (max-width: 46rem) {
+	input, textarea, select { font-size: max(16px, 1em) !important; }
+}
+
 /* form field — a labelled control */
 .field { margin: 1.1rem 0; }
 .field > label, label.label {
-	display: block; margin-bottom: 0.3rem;
+	display: block; margin-bottom: 0.55rem;
 	font: 500 0.7rem/1 var(--font-mono);
 	text-transform: uppercase; letter-spacing: 0.09em; opacity: 0.6;
 }
