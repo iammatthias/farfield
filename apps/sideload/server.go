@@ -103,6 +103,7 @@ func (s *Server) routes() http.Handler {
 	mux.HandleFunc("GET /{$}", s.auth.RequireSession(s.handleIndex))
 	mux.HandleFunc("POST /upload", s.auth.RequireSession(s.handleUpload))
 	mux.HandleFunc("GET /app/{bundle}", s.auth.RequireSession(s.handleApp))
+	mux.HandleFunc("POST /app/{bundle}/delete", s.auth.RequireSession(s.handleAppDelete))
 	mux.HandleFunc("GET /b/{id}", s.auth.RequireSession(s.handleBuild))
 	mux.HandleFunc("POST /b/{id}/share", s.auth.RequireSession(s.handleShareCreate))
 	mux.HandleFunc("POST /b/{id}/delete", s.auth.RequireSession(s.handleDelete))
@@ -129,6 +130,7 @@ func (s *Server) routes() http.Handler {
 	mux.HandleFunc("GET /api/builds", s.auth.RequireAPIKey(s.handleAPIList))
 	mux.HandleFunc("DELETE /api/builds/{id}", s.auth.RequireAPIKey(s.handleAPIDelete))
 	mux.HandleFunc("POST /api/builds/{id}/share", s.auth.RequireAPIKey(s.handleAPIShare))
+	mux.HandleFunc("DELETE /api/apps/{bundle}", s.auth.RequireAPIKey(s.handleAPIAppDelete))
 
 	mux.HandleFunc("GET /status", s.handleStatus)
 	mux.HandleFunc("GET /static/styles.css", theme.CSSHandler())
@@ -167,7 +169,7 @@ func validID(id string) bool { return idPattern.MatchString(id) }
 // ingest stores an uploaded .ipa under its content address, parses its
 // metadata, and records the build. It streams the upload to disk (never
 // buffering the whole archive) and dedupes identical bytes.
-func (s *Server) ingest(r *http.Request, src io.Reader, filename, gitCommit, notes string) (*Build, error) {
+func (s *Server) ingest(src io.Reader, filename, gitCommit, notes string) (*Build, error) {
 	fullCID, size, err := s.blobs.spool(src, maxIPABytes)
 	if err != nil {
 		return nil, err
@@ -248,7 +250,7 @@ func (s *Server) handleUpload(w http.ResponseWriter, r *http.Request) {
 	if closer != nil {
 		defer closer.Close()
 	}
-	b, err := s.ingest(r, src, filename, r.FormValue("commit"), r.FormValue("notes"))
+	b, err := s.ingest(src, filename, r.FormValue("commit"), r.FormValue("notes"))
 	if err != nil {
 		s.renderIndex(w, http.StatusBadRequest, err.Error())
 		return
@@ -267,7 +269,7 @@ func (s *Server) handleAPIUpload(w http.ResponseWriter, r *http.Request) {
 		defer closer.Close()
 	}
 	q := r.URL.Query()
-	b, err := s.ingest(r, src, filename, q.Get("commit"), q.Get("notes"))
+	b, err := s.ingest(src, filename, q.Get("commit"), q.Get("notes"))
 	if err != nil {
 		web.WriteError(w, http.StatusBadRequest, err.Error())
 		return
@@ -325,8 +327,27 @@ func (s *Server) handleApp(w http.ResponseWriter, r *http.Request) {
 	s.rd.Render(w, "app.html", map[string]any{
 		"BundleID": bundle,
 		"AppName":  builds[0].AppName,
+		"Latest":   builds[0],
 		"Builds":   builds,
 	})
+}
+
+// handleAppDelete removes an entire app — every version and its blobs.
+func (s *Server) handleAppDelete(w http.ResponseWriter, r *http.Request) {
+	bundle := r.PathValue("bundle")
+	cids, n, err := deleteApp(s.db, bundle)
+	if err != nil {
+		slog.Error("delete app", "bundle", bundle, "err", err)
+		http.Error(w, "internal error", http.StatusInternalServerError)
+		return
+	}
+	for _, c := range cids {
+		if err := s.blobs.remove(c); err != nil {
+			slog.Warn("could not remove blob", "cid", c, "err", err)
+		}
+	}
+	slog.Info("app deleted", "bundle", bundle, "versions", n)
+	http.Redirect(w, r, "/", http.StatusSeeOther)
 }
 
 func (s *Server) handleBuild(w http.ResponseWriter, r *http.Request) {
@@ -366,6 +387,8 @@ func (s *Server) handleBuild(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
+// handleDelete removes one version. It returns to the app's version list when
+// other versions remain, else to the index.
 func (s *Server) handleDelete(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")
 	b, err := getBuild(s.db, id)
@@ -373,6 +396,7 @@ func (s *Server) handleDelete(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "internal error", http.StatusInternalServerError)
 		return
 	}
+	dest := "/"
 	if b != nil {
 		if _, err := deleteBuild(s.db, id); err != nil {
 			slog.Error("delete build", "err", err)
@@ -382,8 +406,11 @@ func (s *Server) handleDelete(w http.ResponseWriter, r *http.Request) {
 		if err := s.blobs.remove(b.CID); err != nil {
 			slog.Warn("could not remove blob", "cid", b.CID, "err", err)
 		}
+		if remaining, err := listBuildsByBundle(s.db, b.BundleID); err == nil && len(remaining) > 0 {
+			dest = "/app/" + b.BundleID
+		}
 	}
-	http.Redirect(w, r, "/", http.StatusSeeOther)
+	http.Redirect(w, r, dest, http.StatusSeeOther)
 }
 
 // ── shares ───────────────────────────────────────────────────────────────────
@@ -635,6 +662,26 @@ func (s *Server) handleAPIDelete(w http.ResponseWriter, r *http.Request) {
 		slog.Warn("could not remove blob", "cid", b.CID, "err", err)
 	}
 	web.WriteJSON(w, http.StatusOK, map[string]any{"deleted": id})
+}
+
+// handleAPIAppDelete removes an entire app (every version) by bundle id.
+func (s *Server) handleAPIAppDelete(w http.ResponseWriter, r *http.Request) {
+	bundle := r.PathValue("bundle")
+	cids, n, err := deleteApp(s.db, bundle)
+	if err != nil {
+		web.WriteError(w, http.StatusInternalServerError, "could not delete app")
+		return
+	}
+	if n == 0 {
+		web.WriteError(w, http.StatusNotFound, "app not found")
+		return
+	}
+	for _, c := range cids {
+		if err := s.blobs.remove(c); err != nil {
+			slog.Warn("could not remove blob", "cid", c, "err", err)
+		}
+	}
+	web.WriteJSON(w, http.StatusOK, map[string]any{"deleted": bundle, "versions": n})
 }
 
 func (s *Server) handleAPIShare(w http.ResponseWriter, r *http.Request) {

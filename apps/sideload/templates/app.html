@@ -4,7 +4,11 @@
 
   <a class="back" href="/">← all apps</a>
   <h1 style="font-size:1.25rem;margin-top:0.5rem">{{if .AppName}}{{.AppName}}{{else}}{{.BundleID}}{{end}}</h1>
-  <p class="meta"><span class="cid">{{.BundleID}}</span></p>
+  <p class="meta">
+    <span class="cid">{{.BundleID}}</span>
+    <span>{{len .Builds}} version{{if ne (len .Builds) 1}}s{{end}}</span>
+    {{if gt .Latest.DeviceCount 0}}<span>{{.Latest.DeviceCount}} device{{if ne .Latest.DeviceCount 1}}s{{end}} enrolled</span>{{end}}
+  </p>
 
   <div class="table-wrap" style="margin-top:1.2rem">
     <table class="admin">
@@ -22,10 +26,22 @@
           <td class="num">{{sizeText .SizeBytes}}</td>
           <td class="mono">{{relAge .CreatedAt}}</td>
           <td class="mono">{{if .ProfileExpiry}}{{.ProfileExpiry}}{{else}}—{{end}}</td>
-          <td class="actions"><a href="/b/{{.ID}}">install →</a></td>
+          <td class="actions">
+            <a href="/b/{{.ID}}">install →</a>
+            <form method="post" action="/b/{{.ID}}/delete"
+                  onsubmit="return confirm('Delete version {{.Version}} ({{.BuildNumber}})?')">
+              <button type="submit">delete</button>
+            </form>
+          </td>
         </tr>
         {{end}}
       </tbody>
     </table>
   </div>
+
+  <form method="post" action="/app/{{.BundleID}}/delete"
+        onsubmit="return confirm('Delete the entire app and all {{len .Builds}} version(s)? This cannot be undone.')"
+        style="margin-top:1.4rem">
+    <button class="danger" type="submit">Delete app ({{len .Builds}} version{{if ne (len .Builds) 1}}s{{end}})</button>
+  </form>
 {{end}}

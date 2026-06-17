@@ -4,7 +4,7 @@
 
   <p class="summary">
     <span>{{len .Apps}} app{{if ne (len .Apps) 1}}s{{end}}</span>
-    <span>{{.Total}} build{{if ne .Total 1}}s{{end}}</span>
+    <span>{{.Total}} version{{if ne .Total 1}}s{{end}}</span>
   </p>
 
   {{with .Error}}<p class="error">{{.}}</p>{{end}}
@@ -16,12 +16,12 @@
       <span class="name">{{if .AppName}}{{.AppName}}{{else}}{{.BundleID}}{{end}}</span>
       <span class="bundle">{{.BundleID}}</span>
       <span class="ver">{{.Latest.Version}} ({{.Latest.BuildNumber}})</span>
-      <span class="count">{{.Count}} build{{if ne .Count 1}}s{{end}}</span>
+      <span class="count">{{.Count}} version{{if ne .Count 1}}s{{end}}</span>
     </a>
     {{end}}
   </div>
   {{else}}
-  <p class="muted" style="margin:1.4rem 0">No builds yet. Upload a signed ad-hoc <code>.ipa</code> below.</p>
+  <p class="muted" style="margin:1.4rem 0">No apps yet. Upload a signed ad-hoc <code>.ipa</code> below — each upload becomes a version of its app, grouped by bundle id.</p>
   {{end}}
 
   <section class="panel">

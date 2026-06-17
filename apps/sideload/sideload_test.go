@@ -272,6 +272,93 @@ func TestDeliversFinalByte(t *testing.T) {
 	}
 }
 
+// ── delete app / version ─────────────────────────────────────────────────────
+
+func TestDeleteApp(t *testing.T) {
+	s := testServer(t)
+	exp := time.Now().Add(100 * 24 * time.Hour)
+	a1 := makeIPA(t, "com.x.a", "Aye", "1.0", "1", exp, []string{"u1"})
+	a2 := makeIPA(t, "com.x.a", "Aye", "1.1", "2", exp, []string{"u1"})
+	bOnly := makeIPA(t, "com.x.b", "Bee", "0.1", "1", exp, nil)
+
+	ba1, err := s.ingest(bytes.NewReader(a1), "a1.ipa", "", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.ingest(bytes.NewReader(a2), "a2.ipa", "", ""); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.ingest(bytes.NewReader(bOnly), "b.ipa", "", ""); err != nil {
+		t.Fatal(err)
+	}
+	share, _ := createShare(s.db, ba1.ID, time.Hour, 1, "")
+
+	cids, n, err := deleteApp(s.db, "com.x.a")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if n != 2 {
+		t.Fatalf("deleted versions = %d want 2", n)
+	}
+	for _, c := range cids {
+		if err := s.blobs.remove(c); err != nil {
+			t.Errorf("remove blob: %v", err)
+		}
+	}
+	if got, _ := listBuildsByBundle(s.db, "com.x.a"); len(got) != 0 {
+		t.Error("app A versions should be gone")
+	}
+	if got, _ := listBuildsByBundle(s.db, "com.x.b"); len(got) != 1 {
+		t.Error("app B should be untouched")
+	}
+	if tk, _ := getToken(s.db, share.Token); tk != nil {
+		t.Error("app A install tokens should be deleted")
+	}
+	if f, _, err := s.blobs.open(ba1.CID); err == nil {
+		f.Close()
+		t.Error("app A blob should be removed from disk")
+	}
+}
+
+func TestVersionDeleteRedirect(t *testing.T) {
+	s := testServer(t)
+	srv := httptest.NewServer(s.routes())
+	defer srv.Close()
+	client := &http.Client{CheckRedirect: func(*http.Request, []*http.Request) error {
+		return http.ErrUseLastResponse
+	}}
+	exp := time.Now().Add(100 * 24 * time.Hour)
+	b1, _ := s.ingest(bytes.NewReader(makeIPA(t, "com.x.c", "Cee", "1.0", "1", exp, nil)), "1.ipa", "", "")
+	b2, _ := s.ingest(bytes.NewReader(makeIPA(t, "com.x.c", "Cee", "1.1", "2", exp, nil)), "2.ipa", "", "")
+	cookie := sessionCookie(t, s)
+
+	// Deleting one of two versions returns to the app's version list.
+	if loc := postRedirect(t, client, srv.URL+"/b/"+b2.ID+"/delete", cookie); loc != "/app/com.x.c" {
+		t.Errorf("redirect after partial delete = %q want /app/com.x.c", loc)
+	}
+	// Deleting the last version returns to the index.
+	if loc := postRedirect(t, client, srv.URL+"/b/"+b1.ID+"/delete", cookie); loc != "/" {
+		t.Errorf("redirect after last delete = %q want /", loc)
+	}
+}
+
+func postRedirect(t *testing.T, c *http.Client, url string, cookie *http.Cookie) string {
+	t.Helper()
+	req, _ := http.NewRequest("POST", url, nil)
+	if cookie != nil {
+		req.AddCookie(cookie)
+	}
+	resp, err := c.Do(req)
+	if err != nil {
+		t.Fatalf("POST %s: %v", url, err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusSeeOther {
+		t.Fatalf("POST %s status = %d want 303", url, resp.StatusCode)
+	}
+	return resp.Header.Get("Location")
+}
+
 // ── end-to-end install + share ───────────────────────────────────────────────
 
 func TestInstallFlow(t *testing.T) {

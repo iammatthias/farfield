@@ -299,6 +299,38 @@ func countBuilds(db *sql.DB) (int, error) {
 	return n, err
 }
 
+// deleteApp removes every build of one bundle id, along with their tokens. It
+// returns the content addresses it deleted so the caller can drop their blobs,
+// and the number of versions removed.
+func deleteApp(db *sql.DB, bundleID string) (cids []string, n int, err error) {
+	rows, err := db.Query(`SELECT cid FROM builds WHERE bundle_id = ?`, bundleID)
+	if err != nil {
+		return nil, 0, err
+	}
+	for rows.Next() {
+		var c string
+		if err := rows.Scan(&c); err != nil {
+			rows.Close()
+			return nil, 0, err
+		}
+		cids = append(cids, c)
+	}
+	rows.Close()
+	if err := rows.Err(); err != nil {
+		return nil, 0, err
+	}
+	if _, err := db.Exec(`DELETE FROM install_tokens WHERE build_id IN
+		(SELECT id FROM builds WHERE bundle_id = ?)`, bundleID); err != nil {
+		return nil, 0, err
+	}
+	res, err := db.Exec(`DELETE FROM builds WHERE bundle_id = ?`, bundleID)
+	if err != nil {
+		return nil, 0, err
+	}
+	affected, _ := res.RowsAffected()
+	return cids, int(affected), nil
+}
+
 // ── install tokens ───────────────────────────────────────────────────────────
 
 const tokenCols = `token, build_id, kind, state, max_installs, used_installs,
