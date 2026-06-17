@@ -255,6 +255,26 @@ services:
     volumes:
       - ./data:/data
 
+  sideload:
+    <<: *defaults
+    build:
+      context: .
+      args: { APP: sideload }
+    image: farfield-sideload
+    ports:
+      - "${SIDELOAD_PORT:-8800}:8800"
+    environment:
+      - HOST=0.0.0.0
+      - SIDELOAD_PORT=8800
+      - SIDELOAD_DB_PATH=/data/sideload.sqlite
+      - SIDELOAD_DIR=/data/sideload-blobs
+      - SIDELOAD_API_KEY=${SIDELOAD_API_KEY:-}
+      - SIDELOAD_PUBLIC_URL=${SIDELOAD_PUBLIC_URL:-https://sideload.farfield.systems}
+      - PASSWORD=${PASSWORD:-changeme}
+      - COOKIE_SECURE=true
+    volumes:
+      - ./data:/data
+
   backup:
     <<: *defaults
     build:

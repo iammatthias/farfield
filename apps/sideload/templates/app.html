@@ -1,0 +1,31 @@
+{{define "title"}}{{.AppName}} · farfield sideload{{end}}
+{{define "content"}}
+  {{template "topbar" .}}
+
+  <a class="back" href="/">← all apps</a>
+  <h1 style="font-size:1.25rem;margin-top:0.5rem">{{if .AppName}}{{.AppName}}{{else}}{{.BundleID}}{{end}}</h1>
+  <p class="meta"><span class="cid">{{.BundleID}}</span></p>
+
+  <div class="table-wrap" style="margin-top:1.2rem">
+    <table class="admin">
+      <thead>
+        <tr>
+          <th>Version</th><th>Build</th><th>Size</th><th>Uploaded</th>
+          <th>Profile</th><th></th>
+        </tr>
+      </thead>
+      <tbody>
+        {{range .Builds}}
+        <tr>
+          <td>{{.Version}}</td>
+          <td class="mono">{{.BuildNumber}}</td>
+          <td class="num">{{sizeText .SizeBytes}}</td>
+          <td class="mono">{{relAge .CreatedAt}}</td>
+          <td class="mono">{{if .ProfileExpiry}}{{.ProfileExpiry}}{{else}}—{{end}}</td>
+          <td class="actions"><a href="/b/{{.ID}}">install →</a></td>
+        </tr>
+        {{end}}
+      </tbody>
+    </table>
+  </div>
+{{end}}

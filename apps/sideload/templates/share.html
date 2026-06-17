@@ -1,0 +1,35 @@
+{{define "title"}}Install {{.Build.AppName}} · sideload{{end}}
+{{define "content"}}
+  <section style="max-width:30rem;margin:2rem auto">
+    <p class="label">farfield · sideload</p>
+    <h1 style="font-size:1.3rem;margin-top:0.3rem">
+      {{if .Build.AppName}}{{.Build.AppName}}{{else}}{{.Build.BundleID}}{{end}}
+    </h1>
+    <p class="meta">
+      <span>{{.Build.Version}} ({{.Build.BuildNumber}})</span>
+      <span>{{sizeText .Build.SizeBytes}}</span>
+    </p>
+    {{with .Label}}<p class="muted" style="margin-top:0.2rem">{{.}}</p>{{end}}
+
+    {{with .Expiry}}{{if .Known}}
+      {{if .Expired}}
+        <p class="banner danger">This build's signing profile has expired — iOS will refuse to install it.</p>
+      {{else if .Warn}}
+        <p class="banner warn">Signing profile expires in {{.Days}} day{{if ne .Days 1}}s{{end}}.</p>
+      {{end}}
+    {{end}}{{end}}
+
+    <div class="install" style="margin-top:1.4rem">
+      <div class="lede">
+        <a class="install-btn" href="{{.InstallURL}}">Install</a>
+      </div>
+    </div>
+
+    <p class="muted" style="font-size:0.82rem;line-height:1.5;margin-top:1rem">
+      Open this link in <strong>Safari</strong> on iPhone and tap Install. This is
+      an ad-hoc build: it will only install on a device whose UDID was registered
+      in the signing profile. On any other device it downloads but iOS declines to
+      install it. This link is single-use and expires shortly.
+    </p>
+  </section>
+{{end}}

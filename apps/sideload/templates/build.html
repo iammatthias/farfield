@@ -1,0 +1,84 @@
+{{define "title"}}{{.Build.AppName}} {{.Build.Version}} · sideload{{end}}
+{{define "content"}}
+  {{template "topbar" .}}
+
+  <a class="back" href="/app/{{.Build.BundleID}}">← {{if .Build.AppName}}{{.Build.AppName}}{{else}}{{.Build.BundleID}}{{end}}</a>
+  <h1 style="font-size:1.25rem;margin-top:0.5rem">
+    {{if .Build.AppName}}{{.Build.AppName}}{{else}}{{.Build.BundleID}}{{end}}
+    <span class="muted" style="font-weight:400">{{.Build.Version}} ({{.Build.BuildNumber}})</span>
+  </h1>
+  <p class="meta">
+    <span class="cid">{{.Build.BundleID}}</span>
+    <span>{{sizeText .Build.SizeBytes}}</span>
+    <span>uploaded {{relAge .Build.CreatedAt}}</span>
+    {{if .Build.Team}}<span>{{.Build.Team}}</span>{{end}}
+    {{if .Build.GitCommit}}<span>commit {{.Build.GitCommit}}</span>{{end}}
+  </p>
+  {{with .Build.Notes}}<p class="muted" style="margin-top:0.3rem">{{.}}</p>{{end}}
+
+  {{with .Expiry}}{{if .Known}}
+    {{if .Expired}}
+      <p class="banner danger">Provisioning profile expired {{.Date}} — iOS will refuse this build. Re-sign and re-upload.</p>
+    {{else if .Warn}}
+      <p class="banner warn">Provisioning profile expires in {{.Days}} day{{if ne .Days 1}}s{{end}} ({{.Date}}). Re-sign before it lapses.</p>
+    {{else}}
+      <p class="banner ok">Profile valid until {{.Date}} — {{.Days}} days left.</p>
+    {{end}}
+  {{end}}{{end}}
+
+  <section class="install">
+    <div class="lede">
+      <a class="install-btn" href="{{.InstallURL}}">Install on this iPhone</a>
+      <p class="meta" style="margin-top:0.9rem">
+        <span>Open this page in Safari on a registered iPhone and tap install.</span>
+      </p>
+      <p class="muted" style="font-size:0.8rem;margin-top:0.4rem">
+        {{if gt .Build.DeviceCount 0}}{{.Build.DeviceCount}} device{{if ne .Build.DeviceCount 1}}s{{end}} enrolled in this profile.{{end}}
+        Only devices whose UDID is in the profile can install.
+      </p>
+    </div>
+    {{if .QR}}
+    <div class="qr-wrap">
+      <div class="qr">{{.QR}}</div>
+      <div class="qr-cap">scan to open<br>on your phone</div>
+    </div>
+    {{end}}
+  </section>
+
+  <section class="panel">
+    <h2>Share off-tailnet</h2>
+    <p class="muted" style="font-size:0.82rem;margin:0 0 0.8rem">
+      Mint a public, single-use install link for one registered device. It
+      self-revokes after one install and expires on its own.
+    </p>
+    <form class="inline-form" method="post" action="/b/{{.Build.ID}}/share">
+      <div class="field">
+        <label for="ttl">Expires</label>
+        <select id="ttl" name="ttl">
+          <option value="30m">30 minutes</option>
+          <option value="2h">2 hours</option>
+          <option value="24h">24 hours</option>
+        </select>
+      </div>
+      <div class="field">
+        <label for="max">Installs</label>
+        <select id="max" name="max">
+          <option value="1">single-use</option>
+          <option value="3">up to 3</option>
+          <option value="unlimited">unlimited</option>
+        </select>
+      </div>
+      <div class="field" style="flex:1 1 12rem">
+        <label for="label">Label (optional)</label>
+        <input type="text" id="label" name="label" placeholder="for Sam's iPhone">
+      </div>
+      <button type="submit">Create share link</button>
+    </form>
+  </section>
+
+  <form method="post" action="/b/{{.Build.ID}}/delete"
+        onsubmit="return confirm('Delete this build and its .ipa?')"
+        style="margin-top:1.4rem">
+    <button class="danger" type="submit">Delete build</button>
+  </form>
+{{end}}

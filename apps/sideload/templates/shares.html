@@ -1,0 +1,41 @@
+{{define "title"}}Shares · farfield sideload{{end}}
+{{define "content"}}
+  {{template "topbar" .}}
+
+  <h1 style="font-size:1.2rem">Share links</h1>
+  <p class="muted" style="margin-top:0.3rem">Public single-use install links for off-tailnet devices.</p>
+
+  {{if .Shares}}
+  <div class="table-wrap" style="margin-top:1.1rem">
+    <table class="admin">
+      <thead>
+        <tr><th>App</th><th>State</th><th>Installs</th><th>Expires</th><th>Label</th><th>Created</th><th></th></tr>
+      </thead>
+      <tbody>
+        {{range .Shares}}
+        <tr>
+          <td>{{if .AppName}}{{.AppName}}{{else}}{{.BuildID}}{{end}} <span class="muted">{{.Version}}</span></td>
+          <td>
+            {{if .Live}}<span class="pill live">live</span>
+            {{else}}<span class="pill dead">{{.State}}</span>{{end}}
+          </td>
+          <td class="num">{{.UsedInstalls}}{{if gt .MaxInstalls 0}}/{{.MaxInstalls}}{{else}}/∞{{end}}</td>
+          <td class="mono">{{if .ExpiresAt}}{{.ExpiresAt}}{{else}}never{{end}}</td>
+          <td class="mono">{{if .Label}}{{.Label}}{{else}}—{{end}}</td>
+          <td class="mono">{{relAge .CreatedAt}}</td>
+          <td class="actions">
+            {{if .Live}}
+            <form method="post" action="/shares/{{.Token.Token}}/revoke">
+              <button type="submit">revoke</button>
+            </form>
+            {{end}}
+          </td>
+        </tr>
+        {{end}}
+      </tbody>
+    </table>
+  </div>
+  {{else}}
+  <p class="muted" style="margin:1.4rem 0">No share links yet.</p>
+  {{end}}
+{{end}}

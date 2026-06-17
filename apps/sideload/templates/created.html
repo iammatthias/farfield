@@ -1,0 +1,29 @@
+{{define "title"}}Share link created · sideload{{end}}
+{{define "content"}}
+  {{template "topbar" .}}
+
+  <a class="back" href="/b/{{.Build.ID}}">← {{if .Build.AppName}}{{.Build.AppName}}{{else}}{{.Build.BundleID}}{{end}}</a>
+  <h1 style="font-size:1.2rem;margin-top:0.5rem">Share link created</h1>
+  <p class="muted" style="margin-top:0.3rem">
+    Send this link to install on one registered device off the tailnet.
+    {{if .ExpiresAt}}It expires at {{.ExpiresAt}}.{{end}}
+    {{if eq .Max 1}}It self-revokes after one install.{{else if gt .Max 0}}It allows up to {{.Max}} installs.{{else}}It allows unlimited installs until it expires.{{end}}
+  </p>
+
+  <div style="margin-top:1.2rem">
+    {{with .Label}}
+    <div class="share-row">
+      <p class="label">Label</p>
+      <code>{{.}}</code>
+    </div>
+    {{end}}
+    <div class="share-row">
+      <p class="label">Install link</p>
+      <code>{{.ShareURL}}</code>
+    </div>
+  </div>
+
+  <p class="meta" style="margin-top:1.2rem">
+    <a href="/shares">Manage shares →</a>
+  </p>
+{{end}}

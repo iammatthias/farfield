@@ -16,7 +16,7 @@ jobs:
       matrix:
         # Add each app here as it is created — this is the one wiring step CI
         # needs per app (see .claude/skills/farfield-stack/SKILL.md).
-        app: [blobs, bookmarks, content, daily, feed, library, qr, scrap, apex, backup, bard, dead-presidents, pulse]
+        app: [blobs, bookmarks, content, daily, feed, library, qr, scrap, sideload, apex, backup, bard, dead-presidents, pulse]
     steps:
       - uses: actions/checkout@v4
 

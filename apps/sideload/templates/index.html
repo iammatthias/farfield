@@ -1,0 +1,51 @@
+{{define "title"}}Builds · farfield sideload{{end}}
+{{define "content"}}
+  {{template "topbar" .}}
+
+  <p class="summary">
+    <span>{{len .Apps}} app{{if ne (len .Apps) 1}}s{{end}}</span>
+    <span>{{.Total}} build{{if ne .Total 1}}s{{end}}</span>
+  </p>
+
+  {{with .Error}}<p class="error">{{.}}</p>{{end}}
+
+  {{if .Apps}}
+  <div class="app-list">
+    {{range .Apps}}
+    <a class="app-row" href="/app/{{.BundleID}}">
+      <span class="name">{{if .AppName}}{{.AppName}}{{else}}{{.BundleID}}{{end}}</span>
+      <span class="bundle">{{.BundleID}}</span>
+      <span class="ver">{{.Latest.Version}} ({{.Latest.BuildNumber}})</span>
+      <span class="count">{{.Count}} build{{if ne .Count 1}}s{{end}}</span>
+    </a>
+    {{end}}
+  </div>
+  {{else}}
+  <p class="muted" style="margin:1.4rem 0">No builds yet. Upload a signed ad-hoc <code>.ipa</code> below.</p>
+  {{end}}
+
+  <section class="panel">
+    <h2>Upload a build</h2>
+    <form method="post" action="/upload" enctype="multipart/form-data">
+      <div class="field">
+        <label for="ipa">Signed ad-hoc .ipa</label>
+        <input type="file" id="ipa" name="ipa" accept=".ipa" required>
+      </div>
+      <div class="inline-form">
+        <div class="field">
+          <label for="commit">Git commit (optional)</label>
+          <input type="text" id="commit" name="commit" placeholder="a1b2c3d">
+        </div>
+        <div class="field" style="flex:1 1 16rem">
+          <label for="notes">Notes (optional)</label>
+          <input type="text" id="notes" name="notes" placeholder="what changed">
+        </div>
+        <button type="submit">Upload</button>
+      </div>
+    </form>
+    <p class="meta" style="margin-top:0.9rem">
+      <span>or via the API:</span>
+      <span class="mono">curl --data-binary @app.ipa -H "X-API-Key: …" .../api/builds</span>
+    </p>
+  </section>
+{{end}}
