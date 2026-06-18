@@ -87,6 +87,7 @@ func run(host, port string) error {
 			DB:           db,
 			Password:     store.Env("PASSWORD", ""),
 			APIKey:       store.Env("BLOBS_API_KEY", ""),
+			ReadKey:      store.Env("BLOBS_READ_KEY", ""),
 			CookieSecure: store.Env("COOKIE_SECURE", "false") == "true",
 		},
 		rd:        &web.Renderer{Templates: tmpl, AssetVer: theme.Version},
@@ -110,9 +111,12 @@ func (s *Server) routes() http.Handler {
 	mux.HandleFunc("POST /login", s.auth.HandleLogin)
 	mux.HandleFunc("GET /logout", s.auth.HandleLogout)
 
-	// Public JSON / bytes API.
+	// Bytes and per-CID metadata stay public: images are embedded as <img> on
+	// public pages and loaded by the browser, which cannot send a bearer, and a
+	// CID is needed to reach them. The index LIST enumerates every stored CID,
+	// so it is bearer-gated when BLOBS_READ_KEY is set. /status stays public.
 	mux.HandleFunc("GET /status", s.handleStatus)
-	mux.HandleFunc("GET /blobs", s.handleAPIList)
+	mux.HandleFunc("GET /blobs", s.auth.RequireReadKey(s.handleAPIList))
 	mux.HandleFunc("GET /blobs/{cid}", s.handleAPIGetBytes)
 	mux.HandleFunc("GET /blobs/{cid}/meta", s.handleAPIGetMeta)
 

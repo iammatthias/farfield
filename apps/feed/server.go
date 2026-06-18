@@ -66,6 +66,7 @@ func run(host, port string) error {
 			DB:           db,
 			Password:     store.Env("PASSWORD", ""),
 			APIKey:       store.Env("FEED_API_KEY", ""),
+			ReadKey:      store.Env("FEED_READ_KEY", ""),
 			CookieSecure: store.Env("COOKIE_SECURE", "false") == "true",
 		},
 		rd:            &web.Renderer{Templates: tmpl, AssetVer: theme.Version},
@@ -96,10 +97,11 @@ func (s *Server) routes() http.Handler {
 	mux.HandleFunc("POST /login", s.auth.HandleLogin)
 	mux.HandleFunc("GET /logout", s.auth.HandleLogout)
 
-	// Public JSON read API.
+	// JSON read API — bearer-token-gated when FEED_READ_KEY is set (the write
+	// FEED_API_KEY is also accepted). /status stays public for the healthcheck.
 	mux.HandleFunc("GET /status", s.handleStatus)
-	mux.HandleFunc("GET /api/posts", s.handleAPIList)
-	mux.HandleFunc("GET /api/posts/{slug}", s.handleAPIGet)
+	mux.HandleFunc("GET /api/posts", s.auth.RequireReadKey(s.handleAPIList))
+	mux.HandleFunc("GET /api/posts/{slug}", s.auth.RequireReadKey(s.handleAPIGet))
 
 	// JSON write API — API-key-gated.
 	mux.HandleFunc("POST /api/posts", s.auth.RequireAPIKey(s.handleAPICreate))

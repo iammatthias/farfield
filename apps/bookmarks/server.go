@@ -51,6 +51,7 @@ func run(host, port string) error {
 			DB:           db,
 			Password:     store.Env("PASSWORD", ""),
 			APIKey:       store.Env("BOOKMARKS_API_KEY", ""),
+			ReadKey:      store.Env("BOOKMARKS_READ_KEY", ""),
 			CookieSecure: store.Env("COOKIE_SECURE", "false") == "true",
 		},
 		rd:   &web.Renderer{Templates: tmpl, AssetVer: theme.Version},
@@ -77,11 +78,12 @@ func (s *Server) routes() http.Handler {
 	mux.HandleFunc("POST /login", s.auth.HandleLogin)
 	mux.HandleFunc("GET /logout", s.auth.HandleLogout)
 
-	// Public JSON read API — public bookmarks only.
+	// JSON read API — bearer-token-gated when BOOKMARKS_READ_KEY is set (the
+	// write BOOKMARKS_API_KEY is also accepted). /status stays public.
 	mux.HandleFunc("GET /status", s.handleStatus)
-	mux.HandleFunc("GET /api/bookmarks", s.handleAPIList)
-	mux.HandleFunc("GET /api/bookmarks/{id}", s.handleAPIGet)
-	mux.HandleFunc("GET /api/categories", s.handleAPICategories)
+	mux.HandleFunc("GET /api/bookmarks", s.auth.RequireReadKey(s.handleAPIList))
+	mux.HandleFunc("GET /api/bookmarks/{id}", s.auth.RequireReadKey(s.handleAPIGet))
+	mux.HandleFunc("GET /api/categories", s.auth.RequireReadKey(s.handleAPICategories))
 
 	// API-key-gated write API.
 	mux.HandleFunc("POST /api/bookmarks", s.auth.RequireAPIKey(s.handleAPICreate))

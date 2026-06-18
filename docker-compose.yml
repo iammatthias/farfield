@@ -37,6 +37,7 @@ services:
       - BLOBS_DIR=/data/blobs
       - PASSWORD=${PASSWORD:-changeme}
       - BLOBS_API_KEY=${BLOBS_API_KEY:-}
+      - BLOBS_READ_KEY=${BLOBS_READ_KEY:-}
       - R2_ACCOUNT_ID=${R2_ACCOUNT_ID:-}
       - R2_BUCKET=${R2_BUCKET:-}
       - R2_ACCESS_KEY_ID=${R2_ACCESS_KEY_ID:-}
@@ -112,6 +113,7 @@ services:
       - FEED_DB_PATH=/data/feed.sqlite
       - PASSWORD=${PASSWORD:-changeme}
       - FEED_API_KEY=${FEED_API_KEY:-}
+      - FEED_READ_KEY=${FEED_READ_KEY:-}
       - BLOBS_URL=http://blobs:8789
       - BLOBS_API_KEY=${BLOBS_API_KEY:-}
       - CONTENT_URL=http://content:8787
@@ -214,6 +216,7 @@ services:
       - BOOKMARKS_DB_PATH=/data/bookmarks.sqlite
       - PASSWORD=${PASSWORD:-changeme}
       - BOOKMARKS_API_KEY=${BOOKMARKS_API_KEY:-}
+      - BOOKMARKS_READ_KEY=${BOOKMARKS_READ_KEY:-}
       - COOKIE_SECURE=true
     volumes:
       - ./data:/data
@@ -231,6 +234,7 @@ services:
       - QR_PORT=8794
       - QR_DB_PATH=/data/qr.sqlite
       - QR_API_KEY=${QR_API_KEY:-}
+      - QR_READ_KEY=${QR_READ_KEY:-}
       - QR_PUBLIC_URL=${QR_PUBLIC_URL:-https://qr.farfield.systems}
       - PASSWORD=${PASSWORD:-changeme}
       - COOKIE_SECURE=true

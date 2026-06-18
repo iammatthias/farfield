@@ -58,6 +58,7 @@ func run(host, port string) error {
 			DB:           db,
 			Password:     store.Env("PASSWORD", ""),
 			APIKey:       store.Env("QR_API_KEY", ""),
+			ReadKey:      store.Env("QR_READ_KEY", ""),
 			CookieSecure: store.Env("COOKIE_SECURE", "false") == "true",
 		},
 		publicURL: strings.TrimRight(store.Env("QR_PUBLIC_URL", "http://"+net.JoinHostPort(host, port)), "/"),
@@ -91,15 +92,18 @@ func (s *Server) routes() http.Handler {
 	mux.HandleFunc("POST /login", s.auth.HandleLogin)
 	mux.HandleFunc("GET /logout", s.auth.HandleLogout)
 
-	// Public QR rendering — only for codes marked public AND enabled. The
-	// .svg suffix is optional; {id} captures it and the handler trims it.
+	// Public QR rendering — must stay open: strangers scan these. Only for
+	// codes marked public AND enabled. The .svg suffix is optional; {id}
+	// captures it and the handler trims it.
 	mux.HandleFunc("GET /qr/{id}", s.handleQRSVG)
 	mux.HandleFunc("GET /r/{id}", s.handleProxyRedirect)
 
-	// Public JSON read API.
+	// JSON read API — bearer-token-gated when QR_READ_KEY is set: the list and
+	// detail enumerate every code and its target, so they are not public like
+	// the scan/redirect routes above. /status stays public.
 	mux.HandleFunc("GET /status", s.handleStatus)
-	mux.HandleFunc("GET /api/codes", s.handleAPIList)
-	mux.HandleFunc("GET /api/codes/{id}", s.handleAPIGet)
+	mux.HandleFunc("GET /api/codes", s.auth.RequireReadKey(s.handleAPIList))
+	mux.HandleFunc("GET /api/codes/{id}", s.auth.RequireReadKey(s.handleAPIGet))
 
 	// API-key-gated write API.
 	mux.HandleFunc("POST /api/codes", s.auth.RequireAPIKey(s.handleAPICreate))
