@@ -1,0 +1,86 @@
+{{define "content"}}
+  <h1>sideload</h1>
+  <p class="meta"><code>sideload.farfield.systems</code></p>
+
+  <p>Self-hosted ad-hoc iOS distribution — one-tap installs of signed <code>.ipa</code> builds onto a registered iPhone, no cable and no laptop in reach. Upload a build and sideload content-addresses it, extracts its metadata from <code>Info.plist</code> and the embedded provisioning profile, generates the OTA manifest iOS expects, and serves a one-tap install page.</p>
+
+  <figure class="screenshot">
+    <img src="assets/sideload.png?v=20260618" alt="Screenshot of the Farfield sideload install page" width="1120" height="1180" loading="lazy">
+    <figcaption>A build's install page: identity and profile-expiry banner, the one-tap install button, and a QR for desktop→phone handoff.</figcaption>
+  </figure>
+
+  <h2>How it works</h2>
+  <p>iOS fetches the manifest, the <code>.ipa</code>, and the prompt icons from its own install daemon — not Safari — so those requests carry no cookie. The install payload therefore lives under high-entropy <strong>capability tokens</strong> at <code>/i/{token}/…</code>, reachable without a session, while the index and uploads stay session-gated. The same token mechanism backs public single-use share links at <code>/s/{token}</code> that self-revoke after one install.</p>
+
+  <h2>Authentication</h2>
+  <p>The index, build pages, and management UI are gated by the shared password. Uploads and the management API use the write key — send <code>X-API-Key</code> or <code>Authorization: Bearer</code>. The install routes (<code>/i/{token}/…</code>) and the public share landing (<code>/s/{token}</code>) authenticate by their unguessable token, not a header. <code>/status</code> stays public.</p>
+
+  <h2>API</h2>
+
+  <div class="endpoint">
+    <span class="method">POST</span>
+    <span class="path">/api/builds</span>
+    <div class="returns">Upload a signed <code>.ipa</code> (raw body or multipart field <code>ipa</code>). Returns <code>{ id, cid, bundleId, version, buildNumber, profileExpiry, deviceCount, installURL }</code>. Write key.</div>
+  </div>
+
+  <div class="endpoint">
+    <span class="method">GET</span>
+    <span class="path">/api/builds</span>
+    <div class="returns"><code>{ "builds": [Build, …] }</code>. Write key.</div>
+  </div>
+
+  <div class="endpoint">
+    <span class="method">POST</span>
+    <span class="path">/api/builds/{id}/share</span>
+    <div class="returns">Mint a public single-use install link. <code>?ttl=30m|2h|24h&amp;max=1|3|unlimited</code>. Returns <code>{ token, shareURL, expiresAt }</code>. Write key.</div>
+  </div>
+
+  <div class="endpoint">
+    <span class="method">DELETE</span>
+    <span class="path">/api/builds/{id}</span>
+    <div class="returns">Delete one build, its blob, and its tokens. Write key.</div>
+  </div>
+
+  <div class="endpoint">
+    <span class="method">DELETE</span>
+    <span class="path">/api/apps/{bundle}</span>
+    <div class="returns">Delete an entire app — every version. Write key.</div>
+  </div>
+
+  <div class="endpoint">
+    <span class="method">GET</span>
+    <span class="path">/i/{token}/manifest.plist</span>
+    <div class="returns">OTA manifest; the <code>itms-services://</code> install link points here. Token-gated.</div>
+  </div>
+
+  <div class="endpoint">
+    <span class="method">GET</span>
+    <span class="path">/i/{token}/app.ipa</span>
+    <div class="returns">The build bytes (Range-capable). A single-use share consumes on the final byte. Token-gated.</div>
+  </div>
+
+  <div class="endpoint">
+    <span class="method">GET</span>
+    <span class="path">/status</span>
+    <div class="returns"><code>{ "service": "sideload", "ok": true, "builds": N }</code></div>
+  </div>
+
+  <h2>Record Shape</h2>
+
+  <h3>Build</h3>
+<pre class="record-shape">{
+  "id": "bafk… (16-char content address)",
+  "cid": "bafk…",
+  "bundleId": "com.example.app",
+  "appName": "Example",
+  "version": "1.4.2",
+  "buildNumber": "231",
+  "team": "Team Name",
+  "profileExpiry": "2027-04-03T00:00:00Z",
+  "deviceCount": 4,
+  "sizeBytes": 12345678,
+  "createdAt": "2026-06-17T00:00:00Z"
+}</pre>
+
+  <p>Builds are grouped by bundle id — each upload of the same app becomes a <strong>version</strong> of it. Distribution is ad-hoc: a build installs only on a device whose UDID is registered in the signing profile, and stays installable until the profile expires (about a year).</p>
+{{end}}

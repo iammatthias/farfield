@@ -8,10 +8,13 @@
 
   <figure class="screenshot">
     <img src="assets/qr.png?v=20260520-loggedin" alt="Screenshot of the Farfield qr UI" width="1280" height="800" loading="lazy">
-    <figcaption>QR code admin table in the logged-in state. Public QR SVG and redirect endpoints are unauthenticated.</figcaption>
+    <figcaption>QR code admin table in the logged-in state. The scan and redirect endpoints are public; the code list is token-gated.</figcaption>
   </figure>
 
-  <h2>Public API</h2>
+  <h2>Authentication</h2>
+  <p>The scannable image (<code>/qr/{id}</code>) and redirect (<code>/r/{id}</code>) stay <strong>public</strong> — strangers scan them, and a public/enabled record is required either way. The enumerating <code>/api/codes</code> list and detail require a bearer token — send the read key as <code>Authorization: Bearer &lt;token&gt;</code> or <code>X-API-Key</code>; the write key is also accepted. <code>/status</code> stays public.</p>
+
+  <h2>API</h2>
 
   <div class="endpoint">
     <span class="method">GET</span>

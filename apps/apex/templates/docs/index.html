@@ -4,8 +4,9 @@
                     <p>
                         A set of small, single-binary Go services. Each app is
                         an HTML admin UI for writing and moderating content,
-                        plus a public JSON API the website reads. These apps
-                        provide the backends for various self hosted projects.
+                        plus a JSON API the website reads behind a read token.
+                        These apps provide the backends for various self hosted
+                        projects.
                     </p>
                 </div>
 
@@ -95,6 +96,13 @@
                             Direct and editable-proxy QR codes
                         </div>
                     </a>
+                    <a class="app-card" href="sideload.html">
+                        <div class="name">sideload</div>
+                        <div class="url">sideload.farfield.systems</div>
+                        <div class="desc">
+                            One-tap OTA installs of ad-hoc iOS builds
+                        </div>
+                    </a>
                     <a class="app-card" href="bard.html">
                         <div class="name">bard</div>
                         <div class="url">bard.farfield.systems</div>
@@ -131,14 +139,31 @@
                 <h2>Conventions</h2>
                 <ul>
                     <li>
-                        <strong>Reads are public</strong> — no auth — and send
-                        <code>Access-Control-Allow-Origin: *</code>, so the
-                        browser can fetch them directly.
+                        <strong>Reads need a read token.</strong> The JSON read
+                        APIs require a bearer token — send the app's read key as
+                        <code>Authorization: Bearer &lt;token&gt;</code> or
+                        <code>X-API-Key</code>. The write key is also accepted.
+                        Responses still send
+                        <code>Access-Control-Allow-Origin: *</code>.
                     </li>
                     <li>
-                        <strong>Writes need a key</strong> — send
-                        <code>X-API-Key</code> or
-                        <code>Authorization: Bearer</code>.
+                        <strong>Some routes stay public.</strong> Things a
+                        browser or scanner loads directly and cannot attach a
+                        header to: blob <em>bytes</em>
+                        (<code>/blobs/{cid}</code>), QR scan and redirect
+                        (<code>/qr/{id}</code>, <code>/r/{id}</code>), the daily
+                        artifacts, and every <code>/status</code>.
+                    </li>
+                    <li>
+                        <strong>Writes need the write key</strong> — same
+                        headers, a separate higher-privilege token.
+                    </li>
+                    <li>
+                        <strong>Drafts.</strong> The read token returns
+                        published content only. The write key additionally
+                        previews drafts on <code>content</code>
+                        (<code>?status=all</code> or <code>?status=draft</code>,
+                        or fetch a draft by slug).
                     </li>
                     <li>
                         Every record has a stable <strong>key</strong> (its
@@ -151,9 +176,5 @@
                         conditional GET.
                     </li>
                     <li>Timestamps are RFC3339 UTC strings.</li>
-                    <li>
-                        The public API returns published entries only; drafts
-                        never appear.
-                    </li>
                 </ul>
 {{end}}

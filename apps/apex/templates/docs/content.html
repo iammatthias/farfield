@@ -9,7 +9,11 @@
     <figcaption>Content admin dashboard in the logged-in state. Records shown are the live management view.</figcaption>
   </figure>
 
-  <h2>Public API</h2>
+  <h2>Authentication</h2>
+  <p>The read endpoints require a bearer token — send the read key as <code>Authorization: Bearer &lt;token&gt;</code> or <code>X-API-Key</code>; the write key is also accepted. <code>/status</code> stays public, and responses still send <code>Access-Control-Allow-Origin: *</code>.</p>
+  <p>The read token returns <strong>published</strong> content only. The <strong>write</strong> key additionally previews drafts: <code>?status=all</code> or <code>?status=draft</code> on <code>/api/entries</code>, or fetch a draft directly by slug (a draft is a <code>404</code> to the read token).</p>
+
+  <h2>JSON API</h2>
 
   <div class="endpoint">
     <span class="method">GET</span>

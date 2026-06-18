@@ -6,10 +6,13 @@
 
   <figure class="screenshot">
     <img src="assets/blobs.png?v=20260520-loggedin" alt="Screenshot of the Farfield blobs UI" width="1280" height="800" loading="lazy">
-    <figcaption>Blobs admin library in the logged-in state. Media bytes are public by CID; mutation requires auth.</figcaption>
+    <figcaption>Blobs admin library in the logged-in state. Media bytes are public by CID; the index list and mutations require auth.</figcaption>
   </figure>
 
-  <h2>Public API</h2>
+  <h2>Authentication</h2>
+  <p>Blob <strong>bytes</strong> (<code>/blobs/{cid}</code>) and per-CID <code>meta</code> stay <strong>public</strong> — they are embedded as <code>&lt;img&gt;</code> on public pages and loaded by browsers that cannot send a header, and a CID is needed to reach them. The enumerating index <code>GET /blobs</code> requires a bearer token — send the read key as <code>Authorization: Bearer &lt;token&gt;</code> or <code>X-API-Key</code>; the write key is also accepted. <code>/status</code> stays public.</p>
+
+  <h2>API</h2>
 
   <div class="endpoint">
     <span class="method">GET</span>
