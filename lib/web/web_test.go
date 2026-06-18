@@ -191,3 +191,64 @@ func TestAPIKeyFrom(t *testing.T) {
 		t.Fatal("Bearer token not read")
 	}
 }
+
+func TestRequireReadKey(t *testing.T) {
+	next := func(w http.ResponseWriter, r *http.Request) { w.WriteHeader(http.StatusOK) }
+
+	t.Run("open when no read key configured", func(t *testing.T) {
+		a := &Auth{} // ReadKey == "" → open
+		w := httptest.NewRecorder()
+		a.RequireReadKey(next)(w, httptest.NewRequest("GET", "/api/x", nil))
+		if w.Code != http.StatusOK {
+			t.Fatalf("status = %d, want 200 (open)", w.Code)
+		}
+	})
+
+	a := &Auth{ReadKey: "read-secret", APIKey: "write-secret"}
+	cases := []struct {
+		name, header, value string
+		want                int
+	}{
+		{"no token", "", "", http.StatusUnauthorized},
+		{"wrong token", "Authorization", "Bearer nope", http.StatusUnauthorized},
+		{"read token via bearer", "Authorization", "Bearer read-secret", http.StatusOK},
+		{"read token via x-api-key", "X-API-Key", "read-secret", http.StatusOK},
+		{"write token also reads", "Authorization", "Bearer write-secret", http.StatusOK},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			r := httptest.NewRequest("GET", "/api/x", nil)
+			if tc.header != "" {
+				r.Header.Set(tc.header, tc.value)
+			}
+			w := httptest.NewRecorder()
+			a.RequireReadKey(next)(w, r)
+			if w.Code != tc.want {
+				t.Fatalf("status = %d, want %d", w.Code, tc.want)
+			}
+		})
+	}
+}
+
+func TestHasWriteKey(t *testing.T) {
+	a := &Auth{ReadKey: "read-secret", APIKey: "write-secret"}
+	mk := func(h, v string) *http.Request {
+		r := httptest.NewRequest("GET", "/", nil)
+		if h != "" {
+			r.Header.Set(h, v)
+		}
+		return r
+	}
+	if a.HasWriteKey(mk("Authorization", "Bearer write-secret")) != true {
+		t.Error("write key should be recognized")
+	}
+	if a.HasWriteKey(mk("Authorization", "Bearer read-secret")) != false {
+		t.Error("read key must not count as the write key")
+	}
+	if a.HasWriteKey(mk("", "")) != false {
+		t.Error("no key must not count as the write key")
+	}
+	if (&Auth{}).HasWriteKey(mk("X-API-Key", "anything")) != false {
+		t.Error("unconfigured APIKey must never match")
+	}
+}

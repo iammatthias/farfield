@@ -335,21 +335,45 @@ func scanEntry(row interface{ Scan(...any) error }) (*Entry, error) {
 	return &e, nil
 }
 
+// entryStatus selects which entries a query returns. The zero value is
+// statusPublished, so a forgotten filter fails safe toward the public view
+// rather than leaking drafts.
+type entryStatus int
+
+const (
+	statusPublished entryStatus = iota // published only — the default public view
+	statusAll                          // published and drafts
+	statusDraft                        // drafts only
+)
+
+// clause returns the SQL predicate (on the e alias) for a status, or "" for no
+// filter (statusAll).
+func (st entryStatus) clause() string {
+	switch st {
+	case statusDraft:
+		return "e.published = 0"
+	case statusAll:
+		return ""
+	default:
+		return "e.published = 1"
+	}
+}
+
 // listEntries returns entries without bodies (Body == ""), newest first — the
 // projection for list views, which never render bodies. collection filters by
-// collection slug ("" = all); publishedOnly restricts to published entries;
-// limit caps the result (<= 0 means no limit).
-func listEntries(db *sql.DB, collection string, publishedOnly bool, limit int) ([]Entry, error) {
-	return queryEntries(db, entryListCols, collection, publishedOnly, limit, 0)
+// collection slug ("" = all); status restricts by published state; limit caps
+// the result (<= 0 means no limit).
+func listEntries(db *sql.DB, collection string, status entryStatus, limit int) ([]Entry, error) {
+	return queryEntries(db, entryListCols, collection, status, limit, 0)
 }
 
 // listEntriesFull is listEntries with full markdown bodies, plus an offset for
 // paging — for the public API and exports, whose consumers render bodies.
-func listEntriesFull(db *sql.DB, collection string, publishedOnly bool, limit, offset int) ([]Entry, error) {
-	return queryEntries(db, entryCols, collection, publishedOnly, limit, offset)
+func listEntriesFull(db *sql.DB, collection string, status entryStatus, limit, offset int) ([]Entry, error) {
+	return queryEntries(db, entryCols, collection, status, limit, offset)
 }
 
-func queryEntries(db *sql.DB, cols, collection string, publishedOnly bool, limit, offset int) ([]Entry, error) {
+func queryEntries(db *sql.DB, cols, collection string, status entryStatus, limit, offset int) ([]Entry, error) {
 	q := `SELECT ` + cols + `
 	      FROM entries e JOIN collections c ON c.id = e.collection_id`
 	var where []string
@@ -358,8 +382,8 @@ func queryEntries(db *sql.DB, cols, collection string, publishedOnly bool, limit
 		where = append(where, "c.slug = ?")
 		args = append(args, collection)
 	}
-	if publishedOnly {
-		where = append(where, "e.published = 1")
+	if clause := status.clause(); clause != "" {
+		where = append(where, clause)
 	}
 	if len(where) > 0 {
 		q += " WHERE " + strings.Join(where, " AND ")
@@ -391,8 +415,8 @@ func queryEntries(db *sql.DB, cols, collection string, publishedOnly bool, limit
 }
 
 // countEntries returns the number of entries, optionally filtered to one
-// collection and to published entries only.
-func countEntries(db *sql.DB, collection string, publishedOnly bool) (int, error) {
+// collection and by published state.
+func countEntries(db *sql.DB, collection string, status entryStatus) (int, error) {
 	q := `SELECT COUNT(*) FROM entries e`
 	var where []string
 	var args []any
@@ -401,8 +425,8 @@ func countEntries(db *sql.DB, collection string, publishedOnly bool) (int, error
 		where = append(where, "c.slug = ?")
 		args = append(args, collection)
 	}
-	if publishedOnly {
-		where = append(where, "e.published = 1")
+	if clause := status.clause(); clause != "" {
+		where = append(where, clause)
 	}
 	if len(where) > 0 {
 		q += " WHERE " + strings.Join(where, " AND ")
@@ -412,17 +436,24 @@ func countEntries(db *sql.DB, collection string, publishedOnly bool) (int, error
 	return n, err
 }
 
-// entriesFingerprint returns a cheap change fingerprint for the published
-// entry list — "<count>-<max updated_at>" — used to derive a list-level ETag
-// without loading any bodies. collection filters by collection slug ("" = all).
-func entriesFingerprint(db *sql.DB, collection string) (string, error) {
+// entriesFingerprint returns a cheap change fingerprint for an entry list —
+// "<count>-<max updated_at>" — used to derive a list-level ETag without loading
+// any bodies. collection filters by collection slug ("" = all); status scopes
+// the fingerprint so a draft change cannot reuse a published list's ETag.
+func entriesFingerprint(db *sql.DB, collection string, status entryStatus) (string, error) {
 	q := `SELECT COUNT(*) || '-' || COALESCE(MAX(e.updated_at), '') FROM entries e`
+	var where []string
 	var args []any
 	if collection != "" {
-		q += ` JOIN collections c ON c.id = e.collection_id WHERE e.published = 1 AND c.slug = ?`
+		q += ` JOIN collections c ON c.id = e.collection_id`
+		where = append(where, "c.slug = ?")
 		args = append(args, collection)
-	} else {
-		q += ` WHERE e.published = 1`
+	}
+	if clause := status.clause(); clause != "" {
+		where = append(where, clause)
+	}
+	if len(where) > 0 {
+		q += " WHERE " + strings.Join(where, " AND ")
 	}
 	var fp string
 	err := db.QueryRow(q, args...).Scan(&fp)

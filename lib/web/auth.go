@@ -14,10 +14,15 @@ import (
 // Auth bundles the credentials and session storage an app's gated routes
 // share. Zero-value fields fail closed: an empty Password rejects every
 // login, an empty APIKey refuses every API write.
+//
+// ReadKey is the optional read-only bearer token. It is the one deliberately
+// fail-open field: when empty, RequireReadKey leaves read endpoints public
+// (their pre-token behavior), so a read token is opt-in per deployment.
 type Auth struct {
 	DB           *sql.DB
 	Password     string
 	APIKey       string
+	ReadKey      string
 	CookieSecure bool
 }
 
@@ -49,6 +54,34 @@ func (a *Auth) RequireAPIKey(next http.HandlerFunc) http.HandlerFunc {
 		}
 		next(w, r)
 	}
+}
+
+// RequireReadKey guards read endpoints with the read-only bearer token,
+// presented as "Authorization: Bearer <key>" or X-API-Key. The write APIKey is
+// also accepted, since write access implies read access. When no ReadKey is
+// configured the gate is open — set one (e.g. CONTENT_READ_KEY) to require a
+// token for reads.
+func (a *Auth) RequireReadKey(next http.HandlerFunc) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if a.ReadKey == "" {
+			next(w, r)
+			return
+		}
+		key := APIKeyFrom(r)
+		if auth.VerifyAPIKey(key, a.ReadKey) ||
+			(a.APIKey != "" && auth.VerifyAPIKey(key, a.APIKey)) {
+			next(w, r)
+			return
+		}
+		WriteError(w, http.StatusUnauthorized, "missing or invalid read token")
+	}
+}
+
+// HasWriteKey reports whether the request carries the valid write APIKey — the
+// privileged credential that unlocks writes and, for read endpoints, drafts.
+// It is false when no APIKey is configured.
+func (a *Auth) HasWriteKey(r *http.Request) bool {
+	return a.APIKey != "" && auth.VerifyAPIKey(APIKeyFrom(r), a.APIKey)
 }
 
 // APIKeyFrom reads the API key from either an X-API-Key header or an

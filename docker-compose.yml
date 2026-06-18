@@ -86,6 +86,7 @@ services:
       - CONTENT_DB_PATH=/data/content.sqlite
       - PASSWORD=${PASSWORD:-changeme}
       - CONTENT_API_KEY=${CONTENT_API_KEY:-}
+      - CONTENT_READ_KEY=${CONTENT_READ_KEY:-}
       - BLOBS_URL=http://blobs:8789
       - BLOBS_API_KEY=${BLOBS_API_KEY:-}
       - BLOBS_PUBLIC_URL=${BLOBS_PUBLIC_URL:-https://blobs.farfield.systems}

@@ -54,6 +54,7 @@ func run(host, port string) error {
 			DB:           db,
 			Password:     store.Env("PASSWORD", ""),
 			APIKey:       store.Env("CONTENT_API_KEY", ""),
+			ReadKey:      store.Env("CONTENT_READ_KEY", ""),
 			CookieSecure: store.Env("COOKIE_SECURE", "false") == "true",
 		},
 		rd:            &web.Renderer{Templates: tmpl, AssetVer: theme.Version},
@@ -94,13 +95,16 @@ func (s *Server) routes() http.Handler {
 	mux.HandleFunc("POST /login", s.auth.HandleLogin)
 	mux.HandleFunc("GET /logout", s.auth.HandleLogout)
 
-	// Public JSON read API — published content only.
+	// JSON read API — bearer-token-gated when CONTENT_READ_KEY is set (the
+	// write CONTENT_API_KEY is also accepted, and unlocks drafts for preview).
+	// /status stays public so the healthcheck and uptime probes never need a
+	// token. Published content only, unless the request carries the write key.
 	mux.HandleFunc("GET /status", s.handleStatus)
-	mux.HandleFunc("GET /api/collections", s.handleAPICollections)
-	mux.HandleFunc("GET /api/entries", s.handleAPIEntries)
-	mux.HandleFunc("GET /api/entries/{slug}", s.handleAPIEntry)
-	mux.HandleFunc("GET /api/series", s.handleAPISeries)
-	mux.HandleFunc("GET /api/series/{slug}", s.handleAPISeriesOne)
+	mux.HandleFunc("GET /api/collections", s.auth.RequireReadKey(s.handleAPICollections))
+	mux.HandleFunc("GET /api/entries", s.auth.RequireReadKey(s.handleAPIEntries))
+	mux.HandleFunc("GET /api/entries/{slug}", s.auth.RequireReadKey(s.handleAPIEntry))
+	mux.HandleFunc("GET /api/series", s.auth.RequireReadKey(s.handleAPISeries))
+	mux.HandleFunc("GET /api/series/{slug}", s.auth.RequireReadKey(s.handleAPISeriesOne))
 
 	// JSON write API — API-key-gated.
 	mux.HandleFunc("POST /api/entries", s.auth.RequireAPIKey(s.handleAPICreateEntry))
@@ -131,12 +135,12 @@ func (s *Server) handleDashboard(w http.ResponseWriter, r *http.Request) {
 		s.fail(w, "list collections", err)
 		return
 	}
-	recent, err := listEntries(s.db, "", false, 12)
+	recent, err := listEntries(s.db, "", statusAll, 12)
 	if err != nil {
 		s.fail(w, "list entries", err)
 		return
 	}
-	total, err := countEntries(s.db, "", false)
+	total, err := countEntries(s.db, "", statusAll)
 	if err != nil {
 		s.fail(w, "count entries", err)
 		return
@@ -225,7 +229,7 @@ func (s *Server) handleDeleteCollection(w http.ResponseWriter, r *http.Request) 
 
 func (s *Server) handleEntries(w http.ResponseWriter, r *http.Request) {
 	filter := r.URL.Query().Get("collection")
-	entries, err := listEntries(s.db, filter, false, 0)
+	entries, err := listEntries(s.db, filter, statusAll, 0)
 	if err != nil {
 		s.fail(w, "list entries", err)
 		return
@@ -363,16 +367,22 @@ func (s *Server) handleAPICollections(w http.ResponseWriter, r *http.Request) {
 func (s *Server) handleAPIEntries(w http.ResponseWriter, r *http.Request) {
 	q := r.URL.Query()
 	collection := q.Get("collection")
+	status, ok := s.resolveStatus(w, r, q.Get("status"))
+	if !ok {
+		return
+	}
 	limit, page := parsePaging(q.Get("limit"), q.Get("page"))
 
 	// List-level ETag from a cheap fingerprint, checked before the full list
 	// query — an unchanged client revalidates without a single body loading.
-	fp, err := entriesFingerprint(s.db, collection)
+	// The status is in the fingerprint so a draft view never reuses a published
+	// list's ETag.
+	fp, err := entriesFingerprint(s.db, collection, status)
 	if err != nil {
 		web.WriteError(w, http.StatusInternalServerError, "could not list entries")
 		return
 	}
-	if listETagDone(w, r, fmt.Sprintf("entries|%s|%d|%d|%s", collection, limit, page, fp)) {
+	if listETagDone(w, r, fmt.Sprintf("entries|%s|%d|%d|%d|%s", collection, int(status), limit, page, fp)) {
 		return
 	}
 
@@ -380,7 +390,7 @@ func (s *Server) handleAPIEntries(w http.ResponseWriter, r *http.Request) {
 	if limit > 0 {
 		offset = (page - 1) * limit
 	}
-	entries, err := listEntriesFull(s.db, collection, true, limit, offset)
+	entries, err := listEntriesFull(s.db, collection, status, limit, offset)
 	if err != nil {
 		web.WriteError(w, http.StatusInternalServerError, "could not list entries")
 		return
@@ -389,6 +399,32 @@ func (s *Server) handleAPIEntries(w http.ResponseWriter, r *http.Request) {
 		entries = []Entry{}
 	}
 	web.WriteJSON(w, http.StatusOK, map[string]any{"entries": entries})
+}
+
+// resolveStatus maps the ?status= query to an entryStatus and enforces that
+// draft visibility (status=draft or status=all) requires the write key — the
+// read token alone only ever sees published content. It writes the error
+// response and returns ok=false when the request is rejected.
+func (s *Server) resolveStatus(w http.ResponseWriter, r *http.Request, param string) (entryStatus, bool) {
+	switch strings.ToLower(strings.TrimSpace(param)) {
+	case "", "published":
+		return statusPublished, true
+	case "draft", "drafts":
+		if !s.auth.HasWriteKey(r) {
+			web.WriteError(w, http.StatusForbidden, "drafts require the write API key")
+			return statusPublished, false
+		}
+		return statusDraft, true
+	case "all":
+		if !s.auth.HasWriteKey(r) {
+			web.WriteError(w, http.StatusForbidden, "drafts require the write API key")
+			return statusPublished, false
+		}
+		return statusAll, true
+	default:
+		web.WriteError(w, http.StatusBadRequest, "unknown status (use published, draft, or all)")
+		return statusPublished, false
+	}
 }
 
 // maxPageSize caps a requested page of /api/entries.
@@ -435,7 +471,10 @@ func (s *Server) handleAPIEntry(w http.ResponseWriter, r *http.Request) {
 		web.WriteError(w, http.StatusInternalServerError, "could not read entry")
 		return
 	}
-	if e == nil || !e.Published {
+	// A draft is fetchable by slug only with the write key — that is the
+	// preview path. To the read token a draft is indistinguishable from a
+	// missing entry.
+	if e == nil || (!e.Published && !s.auth.HasWriteKey(r)) {
 		web.WriteError(w, http.StatusNotFound, "entry not found")
 		return
 	}
