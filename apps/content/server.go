@@ -113,8 +113,12 @@ func (s *Server) routes() http.Handler {
 	mux.HandleFunc("POST /api/series", s.auth.RequireAPIKey(s.handleAPICreateSeries))
 
 	// Editor embedding — session-gated proxy so service keys stay server-side.
+	// The list reads (blob gallery, series picker) proxy the now-token-gated
+	// sibling APIs so the editor page never needs a read token.
 	mux.HandleFunc("POST /embed/blob", s.auth.RequireSession(s.handleEmbedBlob))
 	mux.HandleFunc("POST /embed/series", s.auth.RequireSession(s.handleEmbedSeries))
+	mux.HandleFunc("GET /embed/blobs", s.auth.RequireSession(s.handleEmbedBlobsList))
+	mux.HandleFunc("GET /embed/series", s.auth.RequireSession(s.handleEmbedSeriesList))
 
 	// Shared theme stylesheet and editor script.
 	mux.HandleFunc("GET /static/styles.css", theme.CSSHandler())

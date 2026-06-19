@@ -28,6 +28,46 @@ func (s *Server) handleEmbedBlob(w http.ResponseWriter, r *http.Request) {
 	proxyBlobUpload(w, r, s.blobsURL, s.blobsKey)
 }
 
+// handleEmbedBlobsList proxies the editor's paginated blob-gallery read to the
+// blobs service with the server-side key — the blobs index is token-gated, so
+// the browser cannot read it directly.
+func (s *Server) handleEmbedBlobsList(w http.ResponseWriter, r *http.Request) {
+	proxyGet(w, r, strings.TrimRight(s.blobsURL, "/")+"/blobs", s.blobsKey)
+}
+
+// handleEmbedSeriesList proxies the editor's series picker to content, where
+// series live, with the server-side content key.
+func (s *Server) handleEmbedSeriesList(w http.ResponseWriter, r *http.Request) {
+	proxyGet(w, r, strings.TrimRight(s.contentURL, "/")+"/api/series", s.contentKey)
+}
+
+// proxyGet forwards a GET (with its query string) to an internal farfield
+// service using the server-side API key, streaming the JSON response back. It
+// lets the session-gated editor read a now-token-gated sibling service without
+// the key ever reaching the page.
+func proxyGet(w http.ResponseWriter, r *http.Request, target, apiKey string) {
+	if r.URL.RawQuery != "" {
+		target += "?" + r.URL.RawQuery
+	}
+	req, err := http.NewRequestWithContext(r.Context(), http.MethodGet, target, nil)
+	if err != nil {
+		web.WriteError(w, http.StatusInternalServerError, "bad upstream request")
+		return
+	}
+	if apiKey != "" {
+		req.Header.Set("X-API-Key", apiKey)
+	}
+	resp, err := embedClient.Do(req)
+	if err != nil {
+		web.WriteError(w, http.StatusBadGateway, "upstream unreachable")
+		return
+	}
+	defer resp.Body.Close()
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(resp.StatusCode)
+	_, _ = io.Copy(w, resp.Body)
+}
+
 // handleEmbedSeries builds a series fragment from an ordered set of blob CIDs.
 // Series live in the content service, so the feed editor creates them there
 // through content's API-key-gated endpoint and relays the result.

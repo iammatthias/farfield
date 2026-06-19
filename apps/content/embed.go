@@ -31,6 +31,56 @@ func (s *Server) handleEmbedBlob(w http.ResponseWriter, r *http.Request) {
 	proxyBlobUpload(w, r, s.blobsURL, s.blobsKey)
 }
 
+// handleEmbedBlobsList proxies the editor's paginated blob-gallery read to the
+// blobs service with the server-side key. The blobs index is token-gated now,
+// so the browser cannot read it directly; this session-gated proxy keeps the
+// key off the page.
+func (s *Server) handleEmbedBlobsList(w http.ResponseWriter, r *http.Request) {
+	proxyGet(w, r, strings.TrimRight(s.blobsURL, "/")+"/blobs", s.blobsKey)
+}
+
+// handleEmbedSeriesList returns the series list for the editor's series picker.
+// Content hosts series, so it reads its own table directly rather than calling
+// its own now-gated API.
+func (s *Server) handleEmbedSeriesList(w http.ResponseWriter, r *http.Request) {
+	series, err := listSeries(s.db)
+	if err != nil {
+		s.fail(w, "list series", err)
+		return
+	}
+	if series == nil {
+		series = []Series{}
+	}
+	web.WriteJSON(w, http.StatusOK, map[string]any{"series": series})
+}
+
+// proxyGet forwards a GET (with its query string) to an internal farfield
+// service using the server-side API key, streaming the JSON response back. It
+// lets a session-gated editor read a now-token-gated sibling service without
+// the key ever reaching the page.
+func proxyGet(w http.ResponseWriter, r *http.Request, target, apiKey string) {
+	if r.URL.RawQuery != "" {
+		target += "?" + r.URL.RawQuery
+	}
+	req, err := http.NewRequestWithContext(r.Context(), http.MethodGet, target, nil)
+	if err != nil {
+		web.WriteError(w, http.StatusInternalServerError, "bad upstream request")
+		return
+	}
+	if apiKey != "" {
+		req.Header.Set("X-API-Key", apiKey)
+	}
+	resp, err := embedClient.Do(req)
+	if err != nil {
+		web.WriteError(w, http.StatusBadGateway, "upstream unreachable")
+		return
+	}
+	defer resp.Body.Close()
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(resp.StatusCode)
+	_, _ = io.Copy(w, resp.Body)
+}
+
 // handleEmbedSeries builds a series fragment from an ordered set of blob CIDs
 // and returns it, so the editor can embed series://<slug>.
 func (s *Server) handleEmbedSeries(w http.ResponseWriter, r *http.Request) {
