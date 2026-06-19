@@ -76,6 +76,20 @@
     </form>
   </section>
 
+  <section class="panel">
+    <h2>Changelog — what's new in this version</h2>
+    <p class="muted" style="font-size:0.82rem;margin:0 0 0.8rem">
+      Shown on the app page under this version. Markdown supported.
+    </p>
+    <form method="post" action="/b/{{.Build.ID}}/notes">
+      <div class="field">
+        <textarea name="notes" rows="5"
+                  placeholder="- Fixed the crash on launch&#10;- New settings screen">{{.Build.Notes}}</textarea>
+      </div>
+      <div class="actions"><button type="submit">Save changelog</button></div>
+    </form>
+  </section>
+
   <form method="post" action="/b/{{.Build.ID}}/delete"
         onsubmit="return confirm('Delete this build and its .ipa?')"
         style="margin-top:1.4rem">

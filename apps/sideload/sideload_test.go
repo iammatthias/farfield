@@ -111,11 +111,11 @@ func TestParseIPA(t *testing.T) {
 	ipa := makeIPA(t, "com.farfield.demo", "Demo", "2.1", "47", expiry,
 		[]string{"udid-a", "udid-b"})
 
-	cid, _, err := s.blobs.spool(bytes.NewReader(ipa), maxIPABytes)
+	cid, _, err := s.blobs.spool(bytes.NewReader(ipa), maxIPABytes, ".ipa")
 	if err != nil {
 		t.Fatalf("spool: %v", err)
 	}
-	meta, err := parseIPA(s.blobs.path(cid))
+	meta, err := parseIPA(s.blobs.path(cid, ".ipa"))
 	if err != nil {
 		t.Fatalf("parseIPA: %v", err)
 	}
@@ -143,11 +143,11 @@ func TestParseIPARejectsNonApp(t *testing.T) {
 	zw := zip.NewWriter(&buf)
 	mustZip(t, zw, "readme.txt", []byte("not an app"))
 	zw.Close()
-	cid, _, err := s.blobs.spool(bytes.NewReader(buf.Bytes()), maxIPABytes)
+	cid, _, err := s.blobs.spool(bytes.NewReader(buf.Bytes()), maxIPABytes, ".ipa")
 	if err != nil {
 		t.Fatalf("spool: %v", err)
 	}
-	if _, err := parseIPA(s.blobs.path(cid)); err == nil {
+	if _, err := parseIPA(s.blobs.path(cid, ".ipa")); err == nil {
 		t.Fatal("expected parseIPA to reject a non-app zip")
 	}
 }
@@ -293,7 +293,7 @@ func TestDeleteApp(t *testing.T) {
 	}
 	share, _ := createShare(s.db, ba1.ID, time.Hour, 1, "")
 
-	cids, n, err := deleteApp(s.db, "com.x.a")
+	cids, _, n, err := deleteApp(s.db, "com.x.a")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -301,7 +301,7 @@ func TestDeleteApp(t *testing.T) {
 		t.Fatalf("deleted versions = %d want 2", n)
 	}
 	for _, c := range cids {
-		if err := s.blobs.remove(c); err != nil {
+		if err := s.blobs.remove(c, ".ipa"); err != nil {
 			t.Errorf("remove blob: %v", err)
 		}
 	}
@@ -314,7 +314,7 @@ func TestDeleteApp(t *testing.T) {
 	if tk, _ := getToken(s.db, share.Token); tk != nil {
 		t.Error("app A install tokens should be deleted")
 	}
-	if f, _, err := s.blobs.open(ba1.CID); err == nil {
+	if f, _, err := s.blobs.open(ba1.CID, ".ipa"); err == nil {
 		f.Close()
 		t.Error("app A blob should be removed from disk")
 	}

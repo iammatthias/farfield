@@ -1,10 +1,11 @@
 {{define "title"}}Install {{.Build.AppName}} · sideload{{end}}
 {{define "content"}}
-  <section style="max-width:30rem;margin:2rem auto">
+  <section style="max-width:34rem;margin:2rem auto">
     <p class="label">farfield · sideload</p>
     <h1 style="font-size:1.3rem;margin-top:0.3rem">
       {{if .Build.AppName}}{{.Build.AppName}}{{else}}{{.Build.BundleID}}{{end}}
     </h1>
+    {{with .Meta}}{{with .Tagline}}<p class="tagline">{{.}}</p>{{end}}{{end}}
     <p class="meta">
       <span>{{.Build.Version}} ({{.Build.BuildNumber}})</span>
       <span>{{sizeText .Build.SizeBytes}}</span>
@@ -19,13 +20,36 @@
       {{end}}
     {{end}}{{end}}
 
+    {{if .Screenshots}}
+    <div class="shots">
+      {{range .Screenshots}}
+      <figure class="shot">
+        <img src="/shots/{{.ID}}" alt="{{.Caption}}" loading="lazy"
+             {{if and (gt .Width 0) (gt .Height 0)}}width="{{.Width}}" height="{{.Height}}"{{end}}>
+        {{with .Caption}}<figcaption>{{.}}</figcaption>{{end}}
+      </figure>
+      {{end}}
+    </div>
+    {{end}}
+
     <div class="install" style="margin-top:1.4rem">
       <div class="lede">
         <a class="install-btn" href="{{.InstallURL}}">Install</a>
       </div>
     </div>
 
-    <p class="muted" style="font-size:0.82rem;line-height:1.5;margin-top:1rem">
+    {{with .Meta}}{{with .Description}}
+    <div class="markdown" style="margin-top:1.2rem">{{markdown .}}</div>
+    {{end}}{{end}}
+
+    {{with .Build.Notes}}
+    <div style="margin-top:1.2rem">
+      <p class="label">What's new</p>
+      <div class="markdown">{{markdown .}}</div>
+    </div>
+    {{end}}
+
+    <p class="muted" style="font-size:0.82rem;line-height:1.5;margin-top:1.2rem">
       Open this link in <strong>Safari</strong> on iPhone and tap Install. This is
       an ad-hoc build: it will only install on a device whose UDID was registered
       in the signing profile. On any other device it downloads but iOS declines to

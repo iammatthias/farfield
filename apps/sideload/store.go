@@ -9,9 +9,11 @@ import (
 	"github.com/iammatthias/farfield/lib/cid"
 )
 
-// blobStore is the on-disk content-addressed store for .ipa files. Each build
-// lives at <dir>/<cid>.ipa, so identical bytes share one file and a build's
-// integrity is verifiable by re-hashing.
+// blobStore is the on-disk content-addressed store. Builds live at
+// <dir>/<cid>.ipa and screenshots at <dir>/<cid>.<ext>, so identical bytes
+// share one file and integrity is verifiable by re-hashing. The extension is
+// per-call, so one directory holds both kinds without collision (a CID is
+// unique to its content).
 type blobStore struct {
 	dir string
 }
@@ -23,17 +25,19 @@ func newBlobStore(dir string) (*blobStore, error) {
 	return &blobStore{dir: dir}, nil
 }
 
-// path returns the on-disk location for a build's full CID.
-func (s *blobStore) path(fullCID string) string {
-	return filepath.Join(s.dir, fullCID+".ipa")
+// path returns the on-disk location for a content address and extension
+// (".ipa", ".png", …).
+func (s *blobStore) path(fullCID, ext string) string {
+	return filepath.Join(s.dir, fullCID+ext)
 }
 
 // spool streams r to a temp file in the store directory while hashing it in the
-// same pass, then moves it into place under its content address. It returns the
-// full CID and byte count. Identical content already present is deduped: the
-// temp file is discarded and the existing blob kept. maxBytes caps the upload;
-// exceeding it is an error so a truncated .ipa is never stored.
-func (s *blobStore) spool(r io.Reader, maxBytes int64) (fullCID string, size int64, err error) {
+// same pass, then moves it into place under its content address with the given
+// extension. It returns the full CID and byte count. Identical content already
+// present is deduped. maxBytes caps the upload; exceeding it is an error so a
+// truncated file is never stored. Use it for large uploads (.ipa); small bytes
+// (images) can use putBytes.
+func (s *blobStore) spool(r io.Reader, maxBytes int64, ext string) (fullCID string, size int64, err error) {
 	tmp, err := os.CreateTemp(s.dir, ".upload-*")
 	if err != nil {
 		return "", 0, err
@@ -62,7 +66,7 @@ func (s *blobStore) spool(r io.Reader, maxBytes int64) (fullCID string, size int
 		return "", 0, fmt.Errorf("empty upload")
 	}
 
-	final := s.path(fullCID)
+	final := s.path(fullCID, ext)
 	if _, statErr := os.Stat(final); statErr == nil {
 		_ = os.Remove(tmpName) // dedupe: identical bytes already stored
 		return fullCID, size, nil
@@ -73,10 +77,24 @@ func (s *blobStore) spool(r io.Reader, maxBytes int64) (fullCID string, size int
 	return fullCID, size, nil
 }
 
+// putBytes stores an in-memory payload (a screenshot) under its content address
+// and extension, deduping. Returns the full CID.
+func (s *blobStore) putBytes(data []byte, ext string) (string, error) {
+	fullCID := cid.Of(data)
+	final := s.path(fullCID, ext)
+	if _, err := os.Stat(final); err == nil {
+		return fullCID, nil // already stored
+	}
+	if err := os.WriteFile(final, data, 0o644); err != nil {
+		return "", err
+	}
+	return fullCID, nil
+}
+
 // open returns a readable handle to a stored blob plus its size, for ranged
 // serving via http.ServeContent.
-func (s *blobStore) open(fullCID string) (*os.File, int64, error) {
-	f, err := os.Open(s.path(fullCID))
+func (s *blobStore) open(fullCID, ext string) (*os.File, int64, error) {
+	f, err := os.Open(s.path(fullCID, ext))
 	if err != nil {
 		return nil, 0, err
 	}
@@ -89,8 +107,8 @@ func (s *blobStore) open(fullCID string) (*os.File, int64, error) {
 }
 
 // remove deletes a stored blob. A missing file is not an error.
-func (s *blobStore) remove(fullCID string) error {
-	err := os.Remove(s.path(fullCID))
+func (s *blobStore) remove(fullCID, ext string) error {
+	err := os.Remove(s.path(fullCID, ext))
 	if os.IsNotExist(err) {
 		return nil
 	}

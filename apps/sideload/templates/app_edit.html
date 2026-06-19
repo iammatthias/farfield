@@ -1,0 +1,71 @@
+{{define "title"}}Edit {{.AppName}} · sideload{{end}}
+{{define "content"}}
+  {{template "topbar" .}}
+
+  <a class="back" href="/app/{{.BundleID}}">← {{if .AppName}}{{.AppName}}{{else}}{{.BundleID}}{{end}}</a>
+  <h1 style="font-size:1.2rem;margin-top:0.5rem">Edit app page</h1>
+  <p class="meta"><span class="cid">{{.BundleID}}</span></p>
+
+  {{with .Error}}<p class="error">{{.}}</p>{{end}}
+
+  <section class="panel">
+    <h2>Description</h2>
+    <form method="post" action="/app/{{.BundleID}}/meta">
+      <div class="field">
+        <label for="tagline">Tagline</label>
+        <input type="text" id="tagline" name="tagline" maxlength="140"
+               placeholder="One line — what the app is"
+               value="{{if .Meta}}{{.Meta.Tagline}}{{end}}">
+      </div>
+      <div class="field">
+        <label for="description">Description (markdown)</label>
+        <textarea id="description" name="description" rows="8"
+                  placeholder="What it does, how to use it, links… Markdown supported.">{{if .Meta}}{{.Meta.Description}}{{end}}</textarea>
+      </div>
+      <div class="actions"><button type="submit">Save description</button></div>
+    </form>
+  </section>
+
+  <section class="panel">
+    <h2>Screenshots</h2>
+    <form method="post" action="/app/{{.BundleID}}/screenshots" enctype="multipart/form-data">
+      <div class="inline-form">
+        <div class="field">
+          <label for="image">Add an image (PNG, JPEG, GIF)</label>
+          <input type="file" id="image" name="image" accept="image/*" required>
+        </div>
+        <div class="field" style="flex:1 1 14rem">
+          <label for="caption">Caption (optional)</label>
+          <input type="text" id="caption" name="caption" placeholder="e.g. Home screen">
+        </div>
+        <button type="submit">Upload</button>
+      </div>
+    </form>
+
+    {{if .Screenshots}}
+    <div class="shot-manage">
+      {{range $i, $s := .Screenshots}}
+      <figure>
+        <img src="/shots/{{$s.ID}}" alt="{{$s.Caption}}" loading="lazy">
+        <form method="post" action="/app/{{$.BundleID}}/screenshots/{{$s.ID}}/caption" class="row">
+          <input type="text" name="caption" value="{{$s.Caption}}" placeholder="caption">
+          <button type="submit">save</button>
+        </form>
+        <div class="row" style="justify-content:space-between">
+          <span class="ord">
+            <form method="post" action="/app/{{$.BundleID}}/screenshots/{{$s.ID}}/move?dir=up"><button title="move up" type="submit">↑</button></form>
+            <form method="post" action="/app/{{$.BundleID}}/screenshots/{{$s.ID}}/move?dir=down"><button title="move down" type="submit">↓</button></form>
+          </span>
+          <form method="post" action="/app/{{$.BundleID}}/screenshots/{{$s.ID}}/delete"
+                onsubmit="return confirm('Delete this screenshot?')">
+            <button type="submit" class="danger">delete</button>
+          </form>
+        </div>
+      </figure>
+      {{end}}
+    </div>
+    {{else}}
+    <p class="muted" style="margin-top:0.8rem">No screenshots yet.</p>
+    {{end}}
+  </section>
+{{end}}

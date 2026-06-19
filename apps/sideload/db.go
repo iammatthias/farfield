@@ -132,7 +132,31 @@ CREATE TABLE IF NOT EXISTS install_tokens (
 );
 CREATE INDEX IF NOT EXISTS tokens_by_build ON install_tokens (build_id);
 CREATE INDEX IF NOT EXISTS tokens_by_kind_state
-	ON install_tokens (kind, state);`
+	ON install_tokens (kind, state);
+
+-- Optional rich page content, keyed by bundle id. Apps with no row here render
+-- the plain version list — the metadata is entirely additive.
+CREATE TABLE IF NOT EXISTS app_meta (
+	bundle_id   TEXT PRIMARY KEY,
+	tagline     TEXT NOT NULL DEFAULT '',
+	description TEXT NOT NULL DEFAULT '',
+	updated_at  TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS app_screenshots (
+	id         TEXT PRIMARY KEY,
+	bundle_id  TEXT NOT NULL,
+	cid        TEXT NOT NULL,
+	ext        TEXT NOT NULL DEFAULT '',
+	mime       TEXT NOT NULL DEFAULT '',
+	width      INTEGER NOT NULL DEFAULT 0,
+	height     INTEGER NOT NULL DEFAULT 0,
+	caption    TEXT NOT NULL DEFAULT '',
+	sort       INTEGER NOT NULL DEFAULT 0,
+	created_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS screenshots_by_app
+	ON app_screenshots (bundle_id, sort, created_at);`
 
 // openDB opens the SQLite database, applies pragmas, runs the schema, and
 // performs idempotent column-add migrations — every step safe on every startup
@@ -299,36 +323,230 @@ func countBuilds(db *sql.DB) (int, error) {
 	return n, err
 }
 
-// deleteApp removes every build of one bundle id, along with their tokens. It
-// returns the content addresses it deleted so the caller can drop their blobs,
-// and the number of versions removed.
-func deleteApp(db *sql.DB, bundleID string) (cids []string, n int, err error) {
+// deleteApp removes every build of one bundle id, along with their tokens and
+// its rich-page metadata + screenshots. It returns the build content addresses
+// and the screenshots it deleted so the caller can drop their files, plus the
+// number of versions removed.
+func deleteApp(db *sql.DB, bundleID string) (cids []string, shots []Screenshot, n int, err error) {
 	rows, err := db.Query(`SELECT cid FROM builds WHERE bundle_id = ?`, bundleID)
 	if err != nil {
-		return nil, 0, err
+		return nil, nil, 0, err
 	}
 	for rows.Next() {
 		var c string
 		if err := rows.Scan(&c); err != nil {
 			rows.Close()
-			return nil, 0, err
+			return nil, nil, 0, err
 		}
 		cids = append(cids, c)
 	}
 	rows.Close()
 	if err := rows.Err(); err != nil {
-		return nil, 0, err
+		return nil, nil, 0, err
+	}
+	shots, err = listScreenshots(db, bundleID)
+	if err != nil {
+		return nil, nil, 0, err
 	}
 	if _, err := db.Exec(`DELETE FROM install_tokens WHERE build_id IN
 		(SELECT id FROM builds WHERE bundle_id = ?)`, bundleID); err != nil {
-		return nil, 0, err
+		return nil, nil, 0, err
+	}
+	if _, err := db.Exec(`DELETE FROM app_screenshots WHERE bundle_id = ?`, bundleID); err != nil {
+		return nil, nil, 0, err
+	}
+	if _, err := db.Exec(`DELETE FROM app_meta WHERE bundle_id = ?`, bundleID); err != nil {
+		return nil, nil, 0, err
 	}
 	res, err := db.Exec(`DELETE FROM builds WHERE bundle_id = ?`, bundleID)
 	if err != nil {
-		return nil, 0, err
+		return nil, nil, 0, err
 	}
 	affected, _ := res.RowsAffected()
-	return cids, int(affected), nil
+	return cids, shots, int(affected), nil
+}
+
+// updateBuildNotes sets a build's changelog ("what's new") text.
+func updateBuildNotes(db *sql.DB, id, notes string) error {
+	_, err := db.Exec(`UPDATE builds SET notes = ? WHERE id = ?`, notes, id)
+	return err
+}
+
+// ── app rich-page metadata ───────────────────────────────────────────────────
+
+// AppMeta is the optional rich-page content for an app, keyed by bundle id.
+type AppMeta struct {
+	BundleID    string
+	Tagline     string
+	Description string // markdown
+	UpdatedAt   string
+}
+
+// Screenshot is one uploaded image for an app's page.
+type Screenshot struct {
+	ID        string
+	BundleID  string
+	CID       string
+	Ext       string
+	Mime      string
+	Width     int
+	Height    int
+	Caption   string
+	Sort      int
+	CreatedAt string
+}
+
+// getAppMeta returns the rich-page metadata for a bundle id, or nil when none
+// has been set — the backwards-compatible default.
+func getAppMeta(db *sql.DB, bundleID string) (*AppMeta, error) {
+	var m AppMeta
+	err := db.QueryRow(`SELECT bundle_id, tagline, description, updated_at
+		FROM app_meta WHERE bundle_id = ?`, bundleID).Scan(
+		&m.BundleID, &m.Tagline, &m.Description, &m.UpdatedAt)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	return &m, nil
+}
+
+// upsertAppMeta writes (or clears) an app's tagline and description. When both
+// are empty the row is removed, so an app falls cleanly back to the plain view.
+func upsertAppMeta(db *sql.DB, m *AppMeta) error {
+	if strings.TrimSpace(m.Tagline) == "" && strings.TrimSpace(m.Description) == "" {
+		_, err := db.Exec(`DELETE FROM app_meta WHERE bundle_id = ?`, m.BundleID)
+		return err
+	}
+	_, err := db.Exec(`INSERT INTO app_meta (bundle_id, tagline, description, updated_at)
+		VALUES (?, ?, ?, ?)
+		ON CONFLICT(bundle_id) DO UPDATE SET
+			tagline = excluded.tagline,
+			description = excluded.description,
+			updated_at = excluded.updated_at`,
+		m.BundleID, m.Tagline, m.Description, store.NowRFC3339())
+	return err
+}
+
+func scanScreenshot(row scanner) (*Screenshot, error) {
+	var s Screenshot
+	if err := row.Scan(&s.ID, &s.BundleID, &s.CID, &s.Ext, &s.Mime,
+		&s.Width, &s.Height, &s.Caption, &s.Sort, &s.CreatedAt); err != nil {
+		return nil, err
+	}
+	return &s, nil
+}
+
+const screenshotCols = `id, bundle_id, cid, ext, mime, width, height, caption, sort, created_at`
+
+// listScreenshots returns an app's screenshots in display order.
+func listScreenshots(db *sql.DB, bundleID string) ([]Screenshot, error) {
+	rows, err := db.Query(`SELECT `+screenshotCols+` FROM app_screenshots
+		WHERE bundle_id = ? ORDER BY sort, created_at`, bundleID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := []Screenshot{}
+	for rows.Next() {
+		s, err := scanScreenshot(rows)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, *s)
+	}
+	return out, rows.Err()
+}
+
+// getScreenshot returns one screenshot by id, or (nil, nil) when absent.
+func getScreenshot(db *sql.DB, id string) (*Screenshot, error) {
+	s, err := scanScreenshot(db.QueryRow(
+		`SELECT `+screenshotCols+` FROM app_screenshots WHERE id = ?`, id))
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	return s, nil
+}
+
+// addScreenshot inserts a screenshot, appending it to the end of the app's
+// display order.
+func addScreenshot(db *sql.DB, s *Screenshot) error {
+	if s.CreatedAt == "" {
+		s.CreatedAt = store.NowRFC3339()
+	}
+	var maxSort sql.NullInt64
+	if err := db.QueryRow(`SELECT MAX(sort) FROM app_screenshots WHERE bundle_id = ?`,
+		s.BundleID).Scan(&maxSort); err != nil {
+		return err
+	}
+	s.Sort = int(maxSort.Int64) + 1
+	_, err := db.Exec(`INSERT INTO app_screenshots (`+screenshotCols+`)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		s.ID, s.BundleID, s.CID, s.Ext, s.Mime, s.Width, s.Height,
+		s.Caption, s.Sort, s.CreatedAt)
+	return err
+}
+
+// screenshotsWithCID counts how many screenshot rows reference a content
+// address — so a shared image file is dropped only when the last row using it
+// is deleted.
+func screenshotsWithCID(db *sql.DB, cid string) (int, error) {
+	var n int
+	err := db.QueryRow(`SELECT COUNT(*) FROM app_screenshots WHERE cid = ?`, cid).Scan(&n)
+	return n, err
+}
+
+// setScreenshotCaption updates a screenshot's caption.
+func setScreenshotCaption(db *sql.DB, id, caption string) error {
+	_, err := db.Exec(`UPDATE app_screenshots SET caption = ? WHERE id = ?`, caption, id)
+	return err
+}
+
+// deleteScreenshot removes a screenshot row and returns it (for file cleanup),
+// or nil when absent.
+func deleteScreenshot(db *sql.DB, id string) (*Screenshot, error) {
+	s, err := getScreenshot(db, id)
+	if err != nil || s == nil {
+		return nil, err
+	}
+	if _, err := db.Exec(`DELETE FROM app_screenshots WHERE id = ?`, id); err != nil {
+		return nil, err
+	}
+	return s, nil
+}
+
+// moveScreenshot swaps a screenshot's sort with its neighbour in the given
+// direction ("up" or "down"), reordering the gallery.
+func moveScreenshot(db *sql.DB, id, dir string) error {
+	cur, err := getScreenshot(db, id)
+	if err != nil || cur == nil {
+		return err
+	}
+	cmp, order := ">", "ASC"
+	if dir == "up" {
+		cmp, order = "<", "DESC"
+	}
+	var nID string
+	var nSort int
+	err = db.QueryRow(`SELECT id, sort FROM app_screenshots
+		WHERE bundle_id = ? AND (sort `+cmp+` ? OR (sort = ? AND id `+cmp+` ?))
+		ORDER BY sort `+order+`, id `+order+` LIMIT 1`,
+		cur.BundleID, cur.Sort, cur.Sort, cur.ID).Scan(&nID, &nSort)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil // already at the edge
+	}
+	if err != nil {
+		return err
+	}
+	if _, err := db.Exec(`UPDATE app_screenshots SET sort = ? WHERE id = ?`, nSort, cur.ID); err != nil {
+		return err
+	}
+	_, err = db.Exec(`UPDATE app_screenshots SET sort = ? WHERE id = ?`, cur.Sort, nID)
+	return err
 }
 
 // ── install tokens ───────────────────────────────────────────────────────────

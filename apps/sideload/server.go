@@ -88,6 +88,7 @@ func (s *Server) parseTemplates() error {
 	tmpl, err := web.ParseTemplates(assets, template.FuncMap{
 		"relAge":   relAge,
 		"sizeText": sizeText,
+		"markdown": renderMarkdown,
 	})
 	if err != nil {
 		return err
@@ -103,9 +104,16 @@ func (s *Server) routes() http.Handler {
 	mux.HandleFunc("GET /{$}", s.auth.RequireSession(s.handleIndex))
 	mux.HandleFunc("POST /upload", s.auth.RequireSession(s.handleUpload))
 	mux.HandleFunc("GET /app/{bundle}", s.auth.RequireSession(s.handleApp))
+	mux.HandleFunc("GET /app/{bundle}/edit", s.auth.RequireSession(s.handleAppEdit))
+	mux.HandleFunc("POST /app/{bundle}/meta", s.auth.RequireSession(s.handleAppMetaSave))
+	mux.HandleFunc("POST /app/{bundle}/screenshots", s.auth.RequireSession(s.handleScreenshotUpload))
+	mux.HandleFunc("POST /app/{bundle}/screenshots/{sid}/caption", s.auth.RequireSession(s.handleScreenshotCaption))
+	mux.HandleFunc("POST /app/{bundle}/screenshots/{sid}/move", s.auth.RequireSession(s.handleScreenshotMove))
+	mux.HandleFunc("POST /app/{bundle}/screenshots/{sid}/delete", s.auth.RequireSession(s.handleScreenshotDelete))
 	mux.HandleFunc("POST /app/{bundle}/delete", s.auth.RequireSession(s.handleAppDelete))
 	mux.HandleFunc("GET /b/{id}", s.auth.RequireSession(s.handleBuild))
 	mux.HandleFunc("POST /b/{id}/share", s.auth.RequireSession(s.handleShareCreate))
+	mux.HandleFunc("POST /b/{id}/notes", s.auth.RequireSession(s.handleBuildNotes))
 	mux.HandleFunc("POST /b/{id}/delete", s.auth.RequireSession(s.handleDelete))
 	mux.HandleFunc("GET /shares", s.auth.RequireSession(s.handleShares))
 	mux.HandleFunc("POST /shares/{token}/revoke", s.auth.RequireSession(s.handleShareRevoke))
@@ -122,8 +130,10 @@ func (s *Server) routes() http.Handler {
 	mux.HandleFunc("GET /i/{token}/display.png", s.handleIcon(57))
 	mux.HandleFunc("GET /i/{token}/full.png", s.handleIcon(512))
 
-	// Public share landing.
+	// Public share landing + screenshot images (content-addressed, no token —
+	// they appear on the public share page).
 	mux.HandleFunc("GET /s/{token}", s.handleShareLanding)
+	mux.HandleFunc("GET /shots/{sid}", s.handleScreenshot)
 
 	// Agent API — X-API-Key.
 	mux.HandleFunc("POST /api/builds", s.auth.RequireAPIKey(s.handleAPIUpload))
@@ -170,18 +180,18 @@ func validID(id string) bool { return idPattern.MatchString(id) }
 // metadata, and records the build. It streams the upload to disk (never
 // buffering the whole archive) and dedupes identical bytes.
 func (s *Server) ingest(src io.Reader, filename, gitCommit, notes string) (*Build, error) {
-	fullCID, size, err := s.blobs.spool(src, maxIPABytes)
+	fullCID, size, err := s.blobs.spool(src, maxIPABytes, ".ipa")
 	if err != nil {
 		return nil, err
 	}
 	id := fullCID[:16]
 
-	meta, err := parseIPA(s.blobs.path(fullCID))
+	meta, err := parseIPA(s.blobs.path(fullCID, ".ipa"))
 	if err != nil {
 		// Not a valid .ipa. Drop the bytes unless a prior build already claims
 		// this content address.
 		if existing, gerr := getBuild(s.db, id); gerr == nil && existing == nil {
-			_ = s.blobs.remove(fullCID)
+			_ = s.blobs.remove(fullCID, ".ipa")
 		}
 		return nil, err
 	}
@@ -324,30 +334,248 @@ func (s *Server) handleApp(w http.ResponseWriter, r *http.Request) {
 		http.NotFound(w, r)
 		return
 	}
+	meta, shots, err := s.loadAppContent(bundle)
+	if err != nil {
+		slog.Error("load app content", "err", err)
+		http.Error(w, "internal error", http.StatusInternalServerError)
+		return
+	}
 	s.rd.Render(w, "app.html", map[string]any{
-		"BundleID": bundle,
-		"AppName":  builds[0].AppName,
-		"Latest":   builds[0],
-		"Builds":   builds,
+		"BundleID":    bundle,
+		"AppName":     builds[0].AppName,
+		"Latest":      builds[0],
+		"Builds":      builds,
+		"Meta":        meta,
+		"Screenshots": shots,
 	})
 }
 
-// handleAppDelete removes an entire app — every version and its blobs.
+// loadAppContent fetches an app's optional rich-page metadata and screenshots.
+// Both may be empty — the page renders fine without them.
+func (s *Server) loadAppContent(bundle string) (*AppMeta, []Screenshot, error) {
+	meta, err := getAppMeta(s.db, bundle)
+	if err != nil {
+		return nil, nil, err
+	}
+	shots, err := listScreenshots(s.db, bundle)
+	if err != nil {
+		return nil, nil, err
+	}
+	return meta, shots, nil
+}
+
+// handleAppEdit renders the rich-page editor: tagline + description, and the
+// screenshot manager.
+func (s *Server) handleAppEdit(w http.ResponseWriter, r *http.Request) {
+	bundle := r.PathValue("bundle")
+	builds, err := listBuildsByBundle(s.db, bundle)
+	if err != nil {
+		http.Error(w, "internal error", http.StatusInternalServerError)
+		return
+	}
+	if len(builds) == 0 {
+		http.NotFound(w, r)
+		return
+	}
+	meta, shots, err := s.loadAppContent(bundle)
+	if err != nil {
+		http.Error(w, "internal error", http.StatusInternalServerError)
+		return
+	}
+	s.rd.Render(w, "app_edit.html", map[string]any{
+		"BundleID":    bundle,
+		"AppName":     builds[0].AppName,
+		"Meta":        meta,
+		"Screenshots": shots,
+		"Error":       r.URL.Query().Get("error"),
+	})
+}
+
+// handleAppMetaSave stores the tagline and description (markdown). Clearing both
+// removes the row, returning the app to the plain view.
+func (s *Server) handleAppMetaSave(w http.ResponseWriter, r *http.Request) {
+	bundle := r.PathValue("bundle")
+	_ = r.ParseForm()
+	if err := upsertAppMeta(s.db, &AppMeta{
+		BundleID:    bundle,
+		Tagline:     strings.TrimSpace(r.FormValue("tagline")),
+		Description: strings.TrimSpace(r.FormValue("description")),
+	}); err != nil {
+		slog.Error("save app meta", "err", err)
+		http.Error(w, "internal error", http.StatusInternalServerError)
+		return
+	}
+	http.Redirect(w, r, "/app/"+bundle+"/edit", http.StatusSeeOther)
+}
+
+// handleScreenshotUpload stores an uploaded image for the app's gallery.
+func (s *Server) handleScreenshotUpload(w http.ResponseWriter, r *http.Request) {
+	bundle := r.PathValue("bundle")
+	f, _, err := r.FormFile("image")
+	if err != nil {
+		s.editError(w, r, bundle, "choose an image to upload")
+		return
+	}
+	defer f.Close()
+	data, err := io.ReadAll(io.LimitReader(f, maxScreenshotBytes+1))
+	if err != nil {
+		s.editError(w, r, bundle, "could not read the upload")
+		return
+	}
+	if int64(len(data)) > maxScreenshotBytes {
+		s.editError(w, r, bundle, "image too large (max 12 MB)")
+		return
+	}
+	mime, ext, width, height, err := imageInfo(data)
+	if err != nil {
+		s.editError(w, r, bundle, err.Error())
+		return
+	}
+	cidStr, err := s.blobs.putBytes(data, ext)
+	if err != nil {
+		slog.Error("store screenshot", "err", err)
+		http.Error(w, "internal error", http.StatusInternalServerError)
+		return
+	}
+	if err := addScreenshot(s.db, &Screenshot{
+		ID:       store.ShortID(),
+		BundleID: bundle,
+		CID:      cidStr,
+		Ext:      ext,
+		Mime:     mime,
+		Width:    width,
+		Height:   height,
+		Caption:  strings.TrimSpace(r.FormValue("caption")),
+	}); err != nil {
+		slog.Error("add screenshot", "err", err)
+		http.Error(w, "internal error", http.StatusInternalServerError)
+		return
+	}
+	http.Redirect(w, r, "/app/"+bundle+"/edit", http.StatusSeeOther)
+}
+
+// editError re-shows the edit page with a message.
+func (s *Server) editError(w http.ResponseWriter, r *http.Request, bundle, msg string) {
+	http.Redirect(w, r, "/app/"+bundle+"/edit?error="+url.QueryEscape(msg), http.StatusSeeOther)
+}
+
+func (s *Server) handleScreenshotCaption(w http.ResponseWriter, r *http.Request) {
+	bundle := r.PathValue("bundle")
+	_ = r.ParseForm()
+	if err := setScreenshotCaption(s.db, r.PathValue("sid"), strings.TrimSpace(r.FormValue("caption"))); err != nil {
+		slog.Error("caption", "err", err)
+		http.Error(w, "internal error", http.StatusInternalServerError)
+		return
+	}
+	http.Redirect(w, r, "/app/"+bundle+"/edit", http.StatusSeeOther)
+}
+
+func (s *Server) handleScreenshotMove(w http.ResponseWriter, r *http.Request) {
+	bundle := r.PathValue("bundle")
+	dir := r.URL.Query().Get("dir")
+	if dir != "up" && dir != "down" {
+		dir = "down"
+	}
+	if err := moveScreenshot(s.db, r.PathValue("sid"), dir); err != nil {
+		slog.Error("move screenshot", "err", err)
+		http.Error(w, "internal error", http.StatusInternalServerError)
+		return
+	}
+	http.Redirect(w, r, "/app/"+bundle+"/edit", http.StatusSeeOther)
+}
+
+func (s *Server) handleScreenshotDelete(w http.ResponseWriter, r *http.Request) {
+	bundle := r.PathValue("bundle")
+	sh, err := deleteScreenshot(s.db, r.PathValue("sid"))
+	if err != nil {
+		slog.Error("delete screenshot", "err", err)
+		http.Error(w, "internal error", http.StatusInternalServerError)
+		return
+	}
+	if sh != nil {
+		// Drop the image file only when no other screenshot shares its bytes.
+		if others, _ := screenshotsWithCID(s.db, sh.CID); others == 0 {
+			if err := s.blobs.remove(sh.CID, sh.Ext); err != nil {
+				slog.Warn("could not remove screenshot file", "cid", sh.CID, "err", err)
+			}
+		}
+	}
+	http.Redirect(w, r, "/app/"+bundle+"/edit", http.StatusSeeOther)
+}
+
+// handleScreenshot serves a screenshot image by id — public and immutable,
+// since the bytes are content-addressed. It appears on the public share page.
+func (s *Server) handleScreenshot(w http.ResponseWriter, r *http.Request) {
+	sh, err := getScreenshot(s.db, r.PathValue("sid"))
+	if err != nil || sh == nil {
+		http.NotFound(w, r)
+		return
+	}
+	w.Header().Set("ETag", `"`+sh.CID+`"`)
+	w.Header().Set("Cache-Control", "public, max-age=31536000, immutable")
+	if web.ETagMatch(r, sh.CID) {
+		w.WriteHeader(http.StatusNotModified)
+		return
+	}
+	f, _, err := s.blobs.open(sh.CID, sh.Ext)
+	if err != nil {
+		http.NotFound(w, r)
+		return
+	}
+	defer f.Close()
+	w.Header().Set("Content-Type", sh.Mime)
+	modtime := time.Time{}
+	http.ServeContent(w, r, "screenshot"+sh.Ext, modtime, f)
+}
+
+// handleBuildNotes updates a version's changelog ("what's new").
+func (s *Server) handleBuildNotes(w http.ResponseWriter, r *http.Request) {
+	id := r.PathValue("id")
+	b, err := getBuild(s.db, id)
+	if err != nil {
+		http.Error(w, "internal error", http.StatusInternalServerError)
+		return
+	}
+	if b == nil {
+		http.NotFound(w, r)
+		return
+	}
+	_ = r.ParseForm()
+	if err := updateBuildNotes(s.db, id, strings.TrimSpace(r.FormValue("notes"))); err != nil {
+		slog.Error("update notes", "err", err)
+		http.Error(w, "internal error", http.StatusInternalServerError)
+		return
+	}
+	http.Redirect(w, r, "/b/"+id, http.StatusSeeOther)
+}
+
+// handleAppDelete removes an entire app — every version, its tokens, its
+// rich-page metadata, and all of their files.
 func (s *Server) handleAppDelete(w http.ResponseWriter, r *http.Request) {
 	bundle := r.PathValue("bundle")
-	cids, n, err := deleteApp(s.db, bundle)
+	cids, shots, n, err := deleteApp(s.db, bundle)
 	if err != nil {
 		slog.Error("delete app", "bundle", bundle, "err", err)
 		http.Error(w, "internal error", http.StatusInternalServerError)
 		return
 	}
-	for _, c := range cids {
-		if err := s.blobs.remove(c); err != nil {
+	s.removeAppFiles(cids, shots)
+	slog.Info("app deleted", "bundle", bundle, "versions", n)
+	http.Redirect(w, r, "/", http.StatusSeeOther)
+}
+
+// removeAppFiles drops a deleted app's .ipa blobs and screenshot images.
+func (s *Server) removeAppFiles(buildCIDs []string, shots []Screenshot) {
+	for _, c := range buildCIDs {
+		if err := s.blobs.remove(c, ".ipa"); err != nil {
 			slog.Warn("could not remove blob", "cid", c, "err", err)
 		}
 	}
-	slog.Info("app deleted", "bundle", bundle, "versions", n)
-	http.Redirect(w, r, "/", http.StatusSeeOther)
+	for _, sh := range shots {
+		if err := s.blobs.remove(sh.CID, sh.Ext); err != nil {
+			slog.Warn("could not remove screenshot", "cid", sh.CID, "err", err)
+		}
+	}
 }
 
 func (s *Server) handleBuild(w http.ResponseWriter, r *http.Request) {
@@ -403,7 +631,7 @@ func (s *Server) handleDelete(w http.ResponseWriter, r *http.Request) {
 			http.Error(w, "internal error", http.StatusInternalServerError)
 			return
 		}
-		if err := s.blobs.remove(b.CID); err != nil {
+		if err := s.blobs.remove(b.CID, ".ipa"); err != nil {
 			slog.Warn("could not remove blob", "cid", b.CID, "err", err)
 		}
 		if remaining, err := listBuildsByBundle(s.db, b.BundleID); err == nil && len(remaining) > 0 {
@@ -494,11 +722,18 @@ func (s *Server) handleShareLanding(w http.ResponseWriter, r *http.Request) {
 		s.rd.Render(w, "gone.html", nil)
 		return
 	}
+	// Rich content is best-effort on a public page — never fail the install over it.
+	meta, shots, err := s.loadAppContent(b.BundleID)
+	if err != nil {
+		slog.Warn("share content", "err", err)
+	}
 	s.rd.Render(w, "share.html", map[string]any{
-		"Build":      b,
-		"Expiry":     expiryView(b),
-		"InstallURL": s.installLink(tok.Token),
-		"Label":      tok.Label,
+		"Build":       b,
+		"Expiry":      expiryView(b),
+		"InstallURL":  s.installLink(tok.Token),
+		"Label":       tok.Label,
+		"Meta":        meta,
+		"Screenshots": shots,
 	})
 }
 
@@ -565,7 +800,7 @@ func (s *Server) handleIPA(w http.ResponseWriter, r *http.Request) {
 		goneText(w)
 		return
 	}
-	f, size, err := s.blobs.open(b.CID)
+	f, size, err := s.blobs.open(b.CID, ".ipa")
 	if err != nil {
 		slog.Error("open blob", "cid", b.CID, "err", err)
 		goneText(w)
@@ -658,7 +893,7 @@ func (s *Server) handleAPIDelete(w http.ResponseWriter, r *http.Request) {
 		web.WriteError(w, http.StatusInternalServerError, "could not delete build")
 		return
 	}
-	if err := s.blobs.remove(b.CID); err != nil {
+	if err := s.blobs.remove(b.CID, ".ipa"); err != nil {
 		slog.Warn("could not remove blob", "cid", b.CID, "err", err)
 	}
 	web.WriteJSON(w, http.StatusOK, map[string]any{"deleted": id})
@@ -667,7 +902,7 @@ func (s *Server) handleAPIDelete(w http.ResponseWriter, r *http.Request) {
 // handleAPIAppDelete removes an entire app (every version) by bundle id.
 func (s *Server) handleAPIAppDelete(w http.ResponseWriter, r *http.Request) {
 	bundle := r.PathValue("bundle")
-	cids, n, err := deleteApp(s.db, bundle)
+	cids, shots, n, err := deleteApp(s.db, bundle)
 	if err != nil {
 		web.WriteError(w, http.StatusInternalServerError, "could not delete app")
 		return
@@ -676,11 +911,7 @@ func (s *Server) handleAPIAppDelete(w http.ResponseWriter, r *http.Request) {
 		web.WriteError(w, http.StatusNotFound, "app not found")
 		return
 	}
-	for _, c := range cids {
-		if err := s.blobs.remove(c); err != nil {
-			slog.Warn("could not remove blob", "cid", c, "err", err)
-		}
-	}
+	s.removeAppFiles(cids, shots)
 	web.WriteJSON(w, http.StatusOK, map[string]any{"deleted": bundle, "versions": n})
 }
 

@@ -3,41 +3,57 @@
   {{template "topbar" .}}
 
   <a class="back" href="/">← all apps</a>
-  <h1 style="font-size:1.25rem;margin-top:0.5rem">{{if .AppName}}{{.AppName}}{{else}}{{.BundleID}}{{end}}</h1>
+  <div style="display:flex;flex-wrap:wrap;align-items:baseline;gap:0.5rem 1rem;margin-top:0.5rem">
+    <h1 style="font-size:1.25rem;margin:0">{{if .AppName}}{{.AppName}}{{else}}{{.BundleID}}{{end}}</h1>
+    <a class="back" href="/app/{{.BundleID}}/edit" style="margin-left:auto">edit page →</a>
+  </div>
+  {{with .Meta}}{{with .Tagline}}<p class="tagline">{{.}}</p>{{end}}{{end}}
   <p class="meta">
     <span class="cid">{{.BundleID}}</span>
     <span>{{len .Builds}} version{{if ne (len .Builds) 1}}s{{end}}</span>
     {{if gt .Latest.DeviceCount 0}}<span>{{.Latest.DeviceCount}} device{{if ne .Latest.DeviceCount 1}}s{{end}} enrolled</span>{{end}}
   </p>
 
-  <div class="table-wrap" style="margin-top:1.2rem">
-    <table class="admin">
-      <thead>
-        <tr>
-          <th>Version</th><th>Build</th><th>Size</th><th>Uploaded</th>
-          <th>Profile</th><th></th>
-        </tr>
-      </thead>
-      <tbody>
-        {{range .Builds}}
-        <tr>
-          <td>{{.Version}}</td>
-          <td class="mono">{{.BuildNumber}}</td>
-          <td class="num">{{sizeText .SizeBytes}}</td>
-          <td class="mono">{{relAge .CreatedAt}}</td>
-          <td class="mono">{{if .ProfileExpiry}}{{.ProfileExpiry}}{{else}}—{{end}}</td>
-          <td class="actions">
-            <a href="/b/{{.ID}}">install →</a>
-            <form method="post" action="/b/{{.ID}}/delete"
-                  onsubmit="return confirm('Delete version {{.Version}} ({{.BuildNumber}})?')">
-              <button type="submit">delete</button>
-            </form>
-          </td>
-        </tr>
-        {{end}}
-      </tbody>
-    </table>
+  {{if .Screenshots}}
+  <div class="shots">
+    {{range .Screenshots}}
+    <figure class="shot">
+      <img src="/shots/{{.ID}}" alt="{{.Caption}}" loading="lazy"
+           {{if and (gt .Width 0) (gt .Height 0)}}width="{{.Width}}" height="{{.Height}}"{{end}}>
+      {{with .Caption}}<figcaption>{{.}}</figcaption>{{end}}
+    </figure>
+    {{end}}
   </div>
+  {{end}}
+
+  {{with .Meta}}{{with .Description}}
+  <div class="markdown" style="margin:1.2rem 0">{{markdown .}}</div>
+  {{end}}{{end}}
+
+  <section class="versions">
+    <h2 style="font-size:0.95rem">Versions</h2>
+    {{range .Builds}}
+    <div class="vcard">
+      <div class="vhead">
+        <span class="vver">{{.Version}} <span class="muted" style="font-weight:400">({{.BuildNumber}})</span></span>
+        <span class="vmeta">
+          <span>{{sizeText .SizeBytes}}</span>
+          <span>{{relAge .CreatedAt}}</span>
+          {{if .ProfileExpiry}}<span>profile {{.ProfileExpiry}}</span>{{end}}
+        </span>
+      </div>
+      {{with .Notes}}<div class="markdown changelog">{{markdown .}}</div>{{end}}
+      <div class="vactions">
+        <a href="/b/{{.ID}}">install →</a>
+        <a href="/b/{{.ID}}">changelog</a>
+        <form method="post" action="/b/{{.ID}}/delete"
+              onsubmit="return confirm('Delete version {{.Version}} ({{.BuildNumber}})?')">
+          <button type="submit">delete</button>
+        </form>
+      </div>
+    </div>
+    {{end}}
+  </section>
 
   <form method="post" action="/app/{{.BundleID}}/delete"
         onsubmit="return confirm('Delete the entire app and all {{len .Builds}} version(s)? This cannot be undone.')"

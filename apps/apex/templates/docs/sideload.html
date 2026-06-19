@@ -12,6 +12,9 @@
   <h2>How it works</h2>
   <p>iOS fetches the manifest, the <code>.ipa</code>, and the prompt icons from its own install daemon — not Safari — so those requests carry no cookie. The install payload therefore lives under high-entropy <strong>capability tokens</strong> at <code>/i/{token}/…</code>, reachable without a session, while the index and uploads stay session-gated. The same token mechanism backs public single-use share links at <code>/s/{token}</code> that self-revoke after one install.</p>
 
+  <h2>Rich app pages</h2>
+  <p>Each app has an optional page: a tagline, a markdown <strong>description</strong>, ordered <strong>screenshots</strong>, and a per-version <strong>changelog</strong> ("what's new"). It is entirely additive — an app with no page content renders its plain version list, and clearing the content restores that. The same description and screenshots also dress up the public share page, so a shared build reads like a product page rather than a bare install button. Screenshots are content-addressed and served immutably at <code>/shots/{id}</code>.</p>
+
   <h2>Authentication</h2>
   <p>The index, build pages, and management UI are gated by the shared password. Uploads and the management API use the write key — send <code>X-API-Key</code> or <code>Authorization: Bearer</code>. The install routes (<code>/i/{token}/…</code>) and the public share landing (<code>/s/{token}</code>) authenticate by their unguessable token, not a header. <code>/status</code> stays public.</p>
 
@@ -57,6 +60,12 @@
     <span class="method">GET</span>
     <span class="path">/i/{token}/app.ipa</span>
     <div class="returns">The build bytes (Range-capable). A single-use share consumes on the final byte. Token-gated.</div>
+  </div>
+
+  <div class="endpoint">
+    <span class="method">GET</span>
+    <span class="path">/shots/{id}</span>
+    <div class="returns">A screenshot image, content-addressed and immutable. Public — it appears on the share page.</div>
   </div>
 
   <div class="endpoint">
