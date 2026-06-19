@@ -156,7 +156,32 @@ CREATE TABLE IF NOT EXISTS app_screenshots (
 	created_at TEXT NOT NULL
 );
 CREATE INDEX IF NOT EXISTS screenshots_by_app
-	ON app_screenshots (bundle_id, sort, created_at);`
+	ON app_screenshots (bundle_id, sort, created_at);
+
+-- Per-app device whitelist: the UDIDs to register in the next build's ad-hoc
+-- provisioning profile. Added by hand or self-enrolled via the public
+-- registration page.
+CREATE TABLE IF NOT EXISTS app_devices (
+	id         TEXT PRIMARY KEY,
+	bundle_id  TEXT NOT NULL,
+	udid       TEXT NOT NULL,
+	name       TEXT NOT NULL DEFAULT '',
+	note       TEXT NOT NULL DEFAULT '',
+	source     TEXT NOT NULL DEFAULT 'manual',
+	product    TEXT NOT NULL DEFAULT '',
+	created_at TEXT NOT NULL,
+	UNIQUE (bundle_id, udid)
+);
+CREATE INDEX IF NOT EXISTS devices_by_app
+	ON app_devices (bundle_id, created_at DESC);
+
+-- Opt-in public device registration: a token per app that exposes the public
+-- enrollment page. Absent unless registration is enabled.
+CREATE TABLE IF NOT EXISTS app_registration (
+	bundle_id  TEXT PRIMARY KEY,
+	token      TEXT NOT NULL UNIQUE,
+	created_at TEXT NOT NULL
+);`
 
 // openDB opens the SQLite database, applies pragmas, runs the schema, and
 // performs idempotent column-add migrations — every step safe on every startup
@@ -358,6 +383,12 @@ func deleteApp(db *sql.DB, bundleID string) (cids []string, shots []Screenshot, 
 	if _, err := db.Exec(`DELETE FROM app_meta WHERE bundle_id = ?`, bundleID); err != nil {
 		return nil, nil, 0, err
 	}
+	if _, err := db.Exec(`DELETE FROM app_devices WHERE bundle_id = ?`, bundleID); err != nil {
+		return nil, nil, 0, err
+	}
+	if _, err := db.Exec(`DELETE FROM app_registration WHERE bundle_id = ?`, bundleID); err != nil {
+		return nil, nil, 0, err
+	}
 	res, err := db.Exec(`DELETE FROM builds WHERE bundle_id = ?`, bundleID)
 	if err != nil {
 		return nil, nil, 0, err
@@ -546,6 +577,140 @@ func moveScreenshot(db *sql.DB, id, dir string) error {
 		return err
 	}
 	_, err = db.Exec(`UPDATE app_screenshots SET sort = ? WHERE id = ?`, cur.Sort, nID)
+	return err
+}
+
+// ── device whitelist ─────────────────────────────────────────────────────────
+
+// Device is one whitelisted UDID for an app — a device to register in the next
+// build's ad-hoc provisioning profile.
+type Device struct {
+	ID        string
+	BundleID  string
+	UDID      string
+	Name      string
+	Note      string
+	Source    string // manual | capture
+	Product   string // e.g. iPhone16,1 (from self-enrolment)
+	CreatedAt string
+}
+
+const deviceCols = `id, bundle_id, udid, name, note, source, product, created_at`
+
+func scanDevice(row scanner) (*Device, error) {
+	var d Device
+	if err := row.Scan(&d.ID, &d.BundleID, &d.UDID, &d.Name, &d.Note,
+		&d.Source, &d.Product, &d.CreatedAt); err != nil {
+		return nil, err
+	}
+	return &d, nil
+}
+
+// listDevices returns an app's whitelisted devices, newest first.
+func listDevices(db *sql.DB, bundleID string) ([]Device, error) {
+	rows, err := db.Query(`SELECT `+deviceCols+` FROM app_devices
+		WHERE bundle_id = ? ORDER BY created_at DESC, id`, bundleID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := []Device{}
+	for rows.Next() {
+		d, err := scanDevice(rows)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, *d)
+	}
+	return out, rows.Err()
+}
+
+// addOrUpdateDevice inserts a device, or fills in a non-empty name/note/product
+// on an existing one (same bundle + UDID). Reports whether it was newly added.
+func addOrUpdateDevice(db *sql.DB, d *Device) (bool, error) {
+	if d.CreatedAt == "" {
+		d.CreatedAt = store.NowRFC3339()
+	}
+	var existingID string
+	err := db.QueryRow(`SELECT id FROM app_devices WHERE bundle_id = ? AND udid = ?`,
+		d.BundleID, d.UDID).Scan(&existingID)
+	if errors.Is(err, sql.ErrNoRows) {
+		_, ierr := db.Exec(`INSERT INTO app_devices (`+deviceCols+`)
+			VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+			d.ID, d.BundleID, d.UDID, d.Name, d.Note, d.Source, d.Product, d.CreatedAt)
+		return ierr == nil, ierr
+	}
+	if err != nil {
+		return false, err
+	}
+	_, uerr := db.Exec(`UPDATE app_devices SET
+		name    = CASE WHEN ? != '' THEN ? ELSE name END,
+		note    = CASE WHEN ? != '' THEN ? ELSE note END,
+		product = CASE WHEN ? != '' THEN ? ELSE product END
+		WHERE bundle_id = ? AND udid = ?`,
+		d.Name, d.Name, d.Note, d.Note, d.Product, d.Product, d.BundleID, d.UDID)
+	return false, uerr
+}
+
+// deleteDevice removes a whitelisted device by id, scoped to its app.
+func deleteDevice(db *sql.DB, bundleID, id string) error {
+	_, err := db.Exec(`DELETE FROM app_devices WHERE id = ? AND bundle_id = ?`, id, bundleID)
+	return err
+}
+
+// ── public device registration ───────────────────────────────────────────────
+
+// Registration is the opt-in public enrolment link for an app.
+type Registration struct {
+	BundleID  string
+	Token     string
+	CreatedAt string
+}
+
+// getRegistration returns an app's registration, or nil when disabled.
+func getRegistration(db *sql.DB, bundleID string) (*Registration, error) {
+	var rg Registration
+	err := db.QueryRow(`SELECT bundle_id, token, created_at FROM app_registration
+		WHERE bundle_id = ?`, bundleID).Scan(&rg.BundleID, &rg.Token, &rg.CreatedAt)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	return &rg, nil
+}
+
+// registrationBundle resolves a registration token to its bundle id, or "" when
+// no app has that token.
+func registrationBundle(db *sql.DB, token string) (string, error) {
+	var bundle string
+	err := db.QueryRow(`SELECT bundle_id FROM app_registration WHERE token = ?`, token).Scan(&bundle)
+	if errors.Is(err, sql.ErrNoRows) {
+		return "", nil
+	}
+	return bundle, err
+}
+
+// enableRegistration ensures an app has a registration token, returning it
+// (existing or freshly minted).
+func enableRegistration(db *sql.DB, bundleID string) (string, error) {
+	if existing, err := getRegistration(db, bundleID); err != nil {
+		return "", err
+	} else if existing != nil {
+		return existing.Token, nil
+	}
+	token := auth.NewSessionToken()
+	if _, err := db.Exec(`INSERT INTO app_registration (bundle_id, token, created_at)
+		VALUES (?, ?, ?)`, bundleID, token, store.NowRFC3339()); err != nil {
+		return "", err
+	}
+	return token, nil
+}
+
+// disableRegistration removes an app's public enrolment link.
+func disableRegistration(db *sql.DB, bundleID string) error {
+	_, err := db.Exec(`DELETE FROM app_registration WHERE bundle_id = ?`, bundleID)
 	return err
 }
 

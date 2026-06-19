@@ -37,6 +37,7 @@ type Server struct {
 	blobs     *blobStore
 	publicURL string        // absolute HTTPS base for manifest/ipa/icon URLs
 	limiter   *tokenLimiter // failed token lookups, per client IP
+	ownerUDID string        // SIDELOAD_OWNER_UDID — kept in every app's whitelist
 }
 
 // run wires up dependencies and serves until interrupted.
@@ -60,6 +61,12 @@ func run(host, port string) error {
 		store.Env("SIDELOAD_API_KEY", ""),
 		store.Env("COOKIE_SECURE", "false") == "true",
 		store.Env("SIDELOAD_PUBLIC_URL", "http://"+net.JoinHostPort("127.0.0.1", port)))
+	if owner, ok := normalizeUDID(store.Env("SIDELOAD_OWNER_UDID", "")); ok {
+		s.ownerUDID = owner
+		slog.Info("owner device pinned to every app whitelist")
+	} else if raw := store.Env("SIDELOAD_OWNER_UDID", ""); raw != "" {
+		slog.Warn("SIDELOAD_OWNER_UDID is not a valid UDID — ignoring", "value", raw)
+	}
 	if err := s.parseTemplates(); err != nil {
 		return err
 	}
@@ -110,6 +117,13 @@ func (s *Server) routes() http.Handler {
 	mux.HandleFunc("POST /app/{bundle}/screenshots/{sid}/caption", s.auth.RequireSession(s.handleScreenshotCaption))
 	mux.HandleFunc("POST /app/{bundle}/screenshots/{sid}/move", s.auth.RequireSession(s.handleScreenshotMove))
 	mux.HandleFunc("POST /app/{bundle}/screenshots/{sid}/delete", s.auth.RequireSession(s.handleScreenshotDelete))
+	mux.HandleFunc("GET /app/{bundle}/devices", s.auth.RequireSession(s.handleDevices))
+	mux.HandleFunc("POST /app/{bundle}/devices", s.auth.RequireSession(s.handleDeviceAdd))
+	mux.HandleFunc("GET /app/{bundle}/devices.txt", s.auth.RequireSession(s.handleDevicesExport))
+	mux.HandleFunc("POST /app/{bundle}/devices/import", s.auth.RequireSession(s.handleDeviceImport))
+	mux.HandleFunc("POST /app/{bundle}/devices/{did}/delete", s.auth.RequireSession(s.handleDeviceDelete))
+	mux.HandleFunc("POST /app/{bundle}/register/enable", s.auth.RequireSession(s.handleRegEnable))
+	mux.HandleFunc("POST /app/{bundle}/register/disable", s.auth.RequireSession(s.handleRegDisable))
 	mux.HandleFunc("POST /app/{bundle}/delete", s.auth.RequireSession(s.handleAppDelete))
 	mux.HandleFunc("GET /b/{id}", s.auth.RequireSession(s.handleBuild))
 	mux.HandleFunc("POST /b/{id}/share", s.auth.RequireSession(s.handleShareCreate))
@@ -134,6 +148,14 @@ func (s *Server) routes() http.Handler {
 	// they appear on the public share page).
 	mux.HandleFunc("GET /s/{token}", s.handleShareLanding)
 	mux.HandleFunc("GET /shots/{sid}", s.handleScreenshot)
+
+	// Public device registration — opt-in per app, reached by its token. The
+	// .mobileconfig asks iOS to POST its UDID to the capture callback.
+	mux.HandleFunc("GET /register/{token}", s.handleRegisterLanding)
+	mux.HandleFunc("GET /register/{token}/enroll.mobileconfig", s.handleEnrollProfile)
+	mux.HandleFunc("POST /register/{token}/capture", s.handleEnrollCapture)
+	mux.HandleFunc("POST /register/{token}/submit", s.handleRegisterSubmit)
+	mux.HandleFunc("GET /register/{token}/done", s.handleRegisterDone)
 
 	// Agent API — X-API-Key.
 	mux.HandleFunc("POST /api/builds", s.auth.RequireAPIKey(s.handleAPIUpload))
@@ -220,6 +242,8 @@ func (s *Server) ingest(src io.Reader, filename, gitCommit, notes string) (*Buil
 	if err != nil {
 		return nil, err
 	}
+	// Keep the author's own device in the whitelist for every app.
+	s.ensureOwnerDevice(b.BundleID)
 	if !created {
 		// Identical bytes already stored — return the canonical existing row.
 		if existing, err := getBuild(s.db, id); err == nil && existing != nil {
@@ -340,6 +364,19 @@ func (s *Server) handleApp(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "internal error", http.StatusInternalServerError)
 		return
 	}
+	devs, err := s.appDevices(bundle)
+	if err != nil {
+		slog.Error("list devices", "err", err)
+		http.Error(w, "internal error", http.StatusInternalServerError)
+		return
+	}
+	prov := provisionedSet(&builds[0])
+	pending := 0
+	for _, d := range devs {
+		if !prov[strings.ToLower(d.UDID)] {
+			pending++
+		}
+	}
 	s.rd.Render(w, "app.html", map[string]any{
 		"BundleID":    bundle,
 		"AppName":     builds[0].AppName,
@@ -347,6 +384,8 @@ func (s *Server) handleApp(w http.ResponseWriter, r *http.Request) {
 		"Builds":      builds,
 		"Meta":        meta,
 		"Screenshots": shots,
+		"DeviceCount": len(devs),
+		"Pending":     pending,
 	})
 }
 
@@ -547,6 +586,334 @@ func (s *Server) handleBuildNotes(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	http.Redirect(w, r, "/b/"+id, http.StatusSeeOther)
+}
+
+// ── device whitelist (admin) ─────────────────────────────────────────────────
+
+// deviceView pairs a whitelisted device with whether the latest build's
+// profile already provisions it.
+type deviceView struct {
+	Device
+	Provisioned bool
+}
+
+// ensureOwnerDevice keeps the configured owner UDID in an app's whitelist, so
+// the author's own device is always provisioned in the next build. Idempotent.
+func (s *Server) ensureOwnerDevice(bundle string) {
+	if s.ownerUDID == "" {
+		return
+	}
+	if _, err := addOrUpdateDevice(s.db, &Device{
+		ID: store.ShortID(), BundleID: bundle, UDID: s.ownerUDID,
+		Name: "me", Source: "owner",
+	}); err != nil {
+		slog.Warn("ensure owner device", "bundle", bundle, "err", err)
+	}
+}
+
+// appDevices ensures the owner device is present, then lists an app's devices.
+func (s *Server) appDevices(bundle string) ([]Device, error) {
+	s.ensureOwnerDevice(bundle)
+	return listDevices(s.db, bundle)
+}
+
+func (s *Server) handleDevices(w http.ResponseWriter, r *http.Request) {
+	bundle := r.PathValue("bundle")
+	builds, err := listBuildsByBundle(s.db, bundle)
+	if err != nil {
+		http.Error(w, "internal error", http.StatusInternalServerError)
+		return
+	}
+	if len(builds) == 0 {
+		http.NotFound(w, r)
+		return
+	}
+	latest := builds[0]
+	devs, err := s.appDevices(bundle)
+	if err != nil {
+		http.Error(w, "internal error", http.StatusInternalServerError)
+		return
+	}
+	prov := provisionedSet(&latest)
+	views := make([]deviceView, len(devs))
+	pending := 0
+	for i, d := range devs {
+		p := prov[strings.ToLower(d.UDID)]
+		views[i] = deviceView{Device: d, Provisioned: p}
+		if !p {
+			pending++
+		}
+	}
+	reg, err := getRegistration(s.db, bundle)
+	if err != nil {
+		http.Error(w, "internal error", http.StatusInternalServerError)
+		return
+	}
+	registerURL := ""
+	if reg != nil {
+		registerURL = s.publicURL + "/register/" + reg.Token
+	}
+	s.rd.Render(w, "devices.html", map[string]any{
+		"BundleID":     bundle,
+		"AppName":      latest.AppName,
+		"Latest":       latest,
+		"Devices":      views,
+		"Total":        len(devs),
+		"Pending":      pending,
+		"ProfileCount": len(prov),
+		"Registration": reg,
+		"RegisterURL":  registerURL,
+		"Export":       exportDevices(devs),
+		"Error":        r.URL.Query().Get("error"),
+	})
+}
+
+func (s *Server) devicesError(w http.ResponseWriter, r *http.Request, bundle, msg string) {
+	http.Redirect(w, r, "/app/"+bundle+"/devices?error="+url.QueryEscape(msg), http.StatusSeeOther)
+}
+
+func (s *Server) handleDeviceAdd(w http.ResponseWriter, r *http.Request) {
+	bundle := r.PathValue("bundle")
+	_ = r.ParseForm()
+	udid, ok := normalizeUDID(r.FormValue("udid"))
+	if !ok {
+		s.devicesError(w, r, bundle, "That doesn't look like a UDID (expected 25- or 40-char hex).")
+		return
+	}
+	if _, err := addOrUpdateDevice(s.db, &Device{
+		ID:       store.ShortID(),
+		BundleID: bundle,
+		UDID:     udid,
+		Name:     strings.TrimSpace(r.FormValue("name")),
+		Note:     strings.TrimSpace(r.FormValue("note")),
+		Source:   "manual",
+	}); err != nil {
+		slog.Error("add device", "err", err)
+		http.Error(w, "internal error", http.StatusInternalServerError)
+		return
+	}
+	http.Redirect(w, r, "/app/"+bundle+"/devices", http.StatusSeeOther)
+}
+
+// handleDeviceImport seeds the whitelist from the latest build's profile — the
+// devices already provisioned — so an existing app starts tracked.
+func (s *Server) handleDeviceImport(w http.ResponseWriter, r *http.Request) {
+	bundle := r.PathValue("bundle")
+	builds, err := listBuildsByBundle(s.db, bundle)
+	if err != nil || len(builds) == 0 {
+		http.NotFound(w, r)
+		return
+	}
+	n := 0
+	for _, raw := range strings.Split(builds[0].UDIDs, "\n") {
+		udid, ok := normalizeUDID(raw)
+		if !ok {
+			continue
+		}
+		if isNew, err := addOrUpdateDevice(s.db, &Device{
+			ID: store.ShortID(), BundleID: bundle, UDID: udid, Source: "manual",
+		}); err == nil && isNew {
+			n++
+		}
+	}
+	slog.Info("imported profile devices", "bundle", bundle, "added", n)
+	http.Redirect(w, r, "/app/"+bundle+"/devices", http.StatusSeeOther)
+}
+
+func (s *Server) handleDeviceDelete(w http.ResponseWriter, r *http.Request) {
+	bundle := r.PathValue("bundle")
+	if err := deleteDevice(s.db, bundle, r.PathValue("did")); err != nil {
+		slog.Error("delete device", "err", err)
+		http.Error(w, "internal error", http.StatusInternalServerError)
+		return
+	}
+	http.Redirect(w, r, "/app/"+bundle+"/devices", http.StatusSeeOther)
+}
+
+func (s *Server) handleDevicesExport(w http.ResponseWriter, r *http.Request) {
+	devs, err := s.appDevices(r.PathValue("bundle"))
+	if err != nil {
+		http.Error(w, "internal error", http.StatusInternalServerError)
+		return
+	}
+	w.Header().Set("Content-Type", "text/plain; charset=utf-8")
+	w.Header().Set("Content-Disposition", `attachment; filename="devices.txt"`)
+	_, _ = io.WriteString(w, exportDevices(devs))
+}
+
+func (s *Server) handleRegEnable(w http.ResponseWriter, r *http.Request) {
+	bundle := r.PathValue("bundle")
+	if builds, err := listBuildsByBundle(s.db, bundle); err != nil || len(builds) == 0 {
+		http.NotFound(w, r)
+		return
+	}
+	if _, err := enableRegistration(s.db, bundle); err != nil {
+		slog.Error("enable registration", "err", err)
+		http.Error(w, "internal error", http.StatusInternalServerError)
+		return
+	}
+	http.Redirect(w, r, "/app/"+bundle+"/devices", http.StatusSeeOther)
+}
+
+func (s *Server) handleRegDisable(w http.ResponseWriter, r *http.Request) {
+	bundle := r.PathValue("bundle")
+	if err := disableRegistration(s.db, bundle); err != nil {
+		slog.Error("disable registration", "err", err)
+		http.Error(w, "internal error", http.StatusInternalServerError)
+		return
+	}
+	http.Redirect(w, r, "/app/"+bundle+"/devices", http.StatusSeeOther)
+}
+
+// ── public device registration ───────────────────────────────────────────────
+
+// regBundle resolves the registration token to its bundle id, rate-limiting and
+// rendering the gone page when invalid. ok=false means the response is written.
+func (s *Server) regBundle(w http.ResponseWriter, r *http.Request) (string, bool) {
+	token := r.PathValue("token")
+	if !tokenPattern.MatchString(token) {
+		s.renderRegGone(w)
+		return "", false
+	}
+	ip := clientIP(r)
+	if s.limiter.blocked(ip) {
+		s.renderRegGone(w)
+		return "", false
+	}
+	bundle, err := registrationBundle(s.db, token)
+	if err != nil {
+		http.Error(w, "internal error", http.StatusInternalServerError)
+		return "", false
+	}
+	if bundle == "" {
+		s.limiter.fail(ip)
+		s.renderRegGone(w)
+		return "", false
+	}
+	return bundle, true
+}
+
+func (s *Server) renderRegGone(w http.ResponseWriter) {
+	w.WriteHeader(http.StatusNotFound)
+	s.rd.Render(w, "gone.html", nil)
+}
+
+// appName returns an app's friendly name from its latest build.
+func (s *Server) appName(bundle string) string {
+	builds, _ := listBuildsByBundle(s.db, bundle)
+	if len(builds) > 0 && builds[0].AppName != "" {
+		return builds[0].AppName
+	}
+	return bundle
+}
+
+func (s *Server) handleRegisterLanding(w http.ResponseWriter, r *http.Request) {
+	bundle, ok := s.regBundle(w, r)
+	if !ok {
+		return
+	}
+	s.rd.Render(w, "register.html", map[string]any{
+		"Token":    r.PathValue("token"),
+		"AppName":  s.appName(bundle),
+		"BundleID": bundle,
+		"Error":    r.URL.Query().Get("error"),
+	})
+}
+
+func (s *Server) handleEnrollProfile(w http.ResponseWriter, r *http.Request) {
+	bundle, ok := s.regBundle(w, r)
+	if !ok {
+		return
+	}
+	token := r.PathValue("token")
+	callback := s.publicURL + "/register/" + token + "/capture"
+	mc, err := buildEnrollProfile(token, s.appName(bundle), callback)
+	if err != nil {
+		http.Error(w, "internal error", http.StatusInternalServerError)
+		return
+	}
+	w.Header().Set("Content-Type", "application/x-apple-aspen-config; charset=utf-8")
+	w.Header().Set("Content-Disposition", `attachment; filename="enroll.mobileconfig"`)
+	_, _ = w.Write(mc)
+}
+
+// handleEnrollCapture receives the signed device-attributes plist iOS posts
+// after the user installs the enrolment profile, and whitelists the UDID.
+func (s *Server) handleEnrollCapture(w http.ResponseWriter, r *http.Request) {
+	token := r.PathValue("token")
+	bundle, err := registrationBundle(s.db, token)
+	if err != nil || bundle == "" {
+		http.Error(w, "registration closed", http.StatusGone)
+		return
+	}
+	ip := clientIP(r)
+	if s.limiter.blocked(ip) {
+		http.Error(w, "too many attempts", http.StatusTooManyRequests)
+		return
+	}
+	body, err := io.ReadAll(http.MaxBytesReader(w, r.Body, 1<<20))
+	if err != nil {
+		http.Error(w, "bad request", http.StatusBadRequest)
+		return
+	}
+	attrs, err := parseDeviceAttrs(body)
+	if err != nil {
+		s.limiter.fail(ip)
+		slog.Warn("enrol parse", "err", err)
+		http.Error(w, "could not read device info", http.StatusBadRequest)
+		return
+	}
+	udid, ok := normalizeUDID(attrs.UDID)
+	if !ok {
+		http.Error(w, "invalid udid", http.StatusBadRequest)
+		return
+	}
+	if _, err := addOrUpdateDevice(s.db, &Device{
+		ID: store.ShortID(), BundleID: bundle, UDID: udid,
+		Name: strings.TrimSpace(attrs.DeviceName), Product: attrs.Product, Source: "capture",
+	}); err != nil {
+		slog.Error("enrol add device", "err", err)
+	}
+	slog.Info("device enrolled", "bundle", bundle, "product", attrs.Product)
+	http.Redirect(w, r, "/register/"+token+"/done", http.StatusFound)
+}
+
+// handleRegisterSubmit takes a typed UDID from the public page's manual form —
+// the fallback when a visitor already knows their identifier.
+func (s *Server) handleRegisterSubmit(w http.ResponseWriter, r *http.Request) {
+	token := r.PathValue("token")
+	bundle, err := registrationBundle(s.db, token)
+	if err != nil || bundle == "" {
+		s.renderRegGone(w)
+		return
+	}
+	ip := clientIP(r)
+	if s.limiter.blocked(ip) {
+		http.Redirect(w, r, "/register/"+token+"?error="+url.QueryEscape("Too many attempts. Wait a minute."), http.StatusSeeOther)
+		return
+	}
+	_ = r.ParseForm()
+	udid, ok := normalizeUDID(r.FormValue("udid"))
+	if !ok {
+		s.limiter.fail(ip)
+		http.Redirect(w, r, "/register/"+token+"?error="+url.QueryEscape("That doesn't look like a UDID."), http.StatusSeeOther)
+		return
+	}
+	if _, err := addOrUpdateDevice(s.db, &Device{
+		ID: store.ShortID(), BundleID: bundle, UDID: udid,
+		Name: strings.TrimSpace(r.FormValue("name")), Source: "capture",
+	}); err != nil {
+		slog.Error("submit device", "err", err)
+	}
+	http.Redirect(w, r, "/register/"+token+"/done", http.StatusSeeOther)
+}
+
+func (s *Server) handleRegisterDone(w http.ResponseWriter, r *http.Request) {
+	bundle, ok := s.regBundle(w, r)
+	if !ok {
+		return
+	}
+	s.rd.Render(w, "register_done.html", map[string]any{"AppName": s.appName(bundle)})
 }
 
 // handleAppDelete removes an entire app — every version, its tokens, its

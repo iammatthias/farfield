@@ -15,6 +15,10 @@
   <h2>Rich app pages</h2>
   <p>Each app has an optional page: a tagline, a markdown <strong>description</strong>, ordered <strong>screenshots</strong>, and a per-version <strong>changelog</strong> ("what's new"). It is entirely additive — an app with no page content renders its plain version list, and clearing the content restores that. The same description and screenshots also dress up the public share page, so a shared build reads like a product page rather than a bare install button. Screenshots are content-addressed and served immutably at <code>/shots/{id}</code>.</p>
 
+  <h2>Device whitelist</h2>
+  <p>Ad-hoc builds only install on devices whose UDID is in the signing profile. Each app keeps a per-app whitelist of the UDIDs to provision in the <em>next</em> build. It diffs against the latest build's profile, so every device shows as <strong>in build</strong> (already provisioned) or <strong>pending</strong> (register, rebuild, re-upload), and exports a tab-separated <code>UDID&#9;Name</code> list for the Developer portal's bulk registration. The owner device — <code>SIDELOAD_OWNER_UDID</code> — is pinned into every app's list automatically.</p>
+  <p>Public <strong>self-enrolment</strong> is opt-in per app: a token at <code>/register/{token}</code> serves a Profile Service <code>.mobileconfig</code> that, once installed on an iPhone, posts that device's UDID straight into the whitelist. No more emailing UDIDs around.</p>
+
   <h2>Authentication</h2>
   <p>The index, build pages, and management UI are gated by the shared password. Uploads and the management API use the write key — send <code>X-API-Key</code> or <code>Authorization: Bearer</code>. The install routes (<code>/i/{token}/…</code>) and the public share landing (<code>/s/{token}</code>) authenticate by their unguessable token, not a header. <code>/status</code> stays public.</p>
 
@@ -66,6 +70,12 @@
     <span class="method">GET</span>
     <span class="path">/shots/{id}</span>
     <div class="returns">A screenshot image, content-addressed and immutable. Public — it appears on the share page.</div>
+  </div>
+
+  <div class="endpoint">
+    <span class="method">GET</span>
+    <span class="path">/register/{token}</span>
+    <div class="returns">Opt-in public device self-enrolment page; serves a Profile Service <code>.mobileconfig</code> that posts the device's UDID into the app's whitelist. Token-gated.</div>
   </div>
 
   <div class="endpoint">

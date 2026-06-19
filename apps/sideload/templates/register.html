@@ -1,0 +1,36 @@
+{{define "title"}}Register your device · {{.AppName}}{{end}}
+{{define "content"}}
+  <section style="max-width:30rem;margin:2rem auto">
+    <p class="label">farfield · sideload</p>
+    <h1 style="font-size:1.3rem;margin-top:0.3rem">Register your device</h1>
+    <p class="muted">for <strong>{{.AppName}}</strong></p>
+    {{with .Error}}<p class="error">{{.}}</p>{{end}}
+
+    <div class="install" style="margin-top:1.4rem">
+      <div class="lede">
+        <a class="install-btn" href="/register/{{.Token}}/enroll.mobileconfig">Add this device</a>
+        <p class="muted" style="font-size:0.82rem;line-height:1.5;margin-top:0.9rem">
+          Open this page in <strong>Safari</strong> on the iPhone you want to use,
+          then tap above. iOS installs a small profile, sends only your device
+          identifier, and you can remove the profile afterward in Settings.
+        </p>
+      </div>
+    </div>
+
+    <details style="margin-top:1.4rem">
+      <summary class="muted" style="font-size:0.85rem;cursor:pointer">Already know your UDID? Enter it manually</summary>
+      <form method="post" action="/register/{{.Token}}/submit" style="margin-top:0.9rem">
+        <div class="field">
+          <label for="udid">UDID</label>
+          <input type="text" id="udid" name="udid" required autocapitalize="off"
+                 autocomplete="off" placeholder="00008110-001A2B3C4D5E6F70">
+        </div>
+        <div class="field">
+          <label for="name">Your name (optional)</label>
+          <input type="text" id="name" name="name">
+        </div>
+        <div class="actions"><button type="submit">Submit</button></div>
+      </form>
+    </details>
+  </section>
+{{end}}

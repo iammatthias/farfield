@@ -274,6 +274,7 @@ services:
       - SIDELOAD_DB_PATH=/data/sideload.sqlite
       - SIDELOAD_DIR=/data/sideload-blobs
       - SIDELOAD_API_KEY=${SIDELOAD_API_KEY:-}
+      - SIDELOAD_OWNER_UDID=${SIDELOAD_OWNER_UDID:-}
       - SIDELOAD_PUBLIC_URL=${SIDELOAD_PUBLIC_URL:-https://sideload.farfield.systems}
       - PASSWORD=${PASSWORD:-changeme}
       - COOKIE_SECURE=true

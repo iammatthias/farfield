@@ -1,0 +1,100 @@
+{{define "title"}}Devices · {{.AppName}} · sideload{{end}}
+{{define "content"}}
+  {{template "topbar" .}}
+
+  <a class="back" href="/app/{{.BundleID}}">← {{if .AppName}}{{.AppName}}{{else}}{{.BundleID}}{{end}}</a>
+  <h1 style="font-size:1.2rem;margin-top:0.5rem">Devices</h1>
+  <p class="meta">
+    <span class="cid">{{.BundleID}}</span>
+    <span>{{.Total}} whitelisted</span>
+    {{if gt .Pending 0}}<span style="color:var(--accent)">{{.Pending}} pending for next build</span>{{end}}
+    <span>{{.ProfileCount}} in current profile (v{{.Latest.Version}})</span>
+  </p>
+  {{with .Error}}<p class="error">{{.}}</p>{{end}}
+
+  <p class="muted" style="font-size:0.85rem;max-width:42rem">
+    Whitelist the device UDIDs to provision. After adding new ones, register them
+    in the Apple Developer portal, rebuild with an updated ad-hoc profile, and
+    upload — they flip from <strong>pending</strong> to <em>in build</em>.
+  </p>
+
+  <section class="panel">
+    <h2>Add a device</h2>
+    <form class="inline-form" method="post" action="/app/{{.BundleID}}/devices">
+      <div class="field" style="flex:1 1 20rem">
+        <label for="udid">UDID</label>
+        <input type="text" id="udid" name="udid" required autocapitalize="off"
+               autocomplete="off" placeholder="00008110-001A2B3C4D5E6F70">
+      </div>
+      <div class="field" style="flex:1 1 12rem">
+        <label for="name">Name / owner</label>
+        <input type="text" id="name" name="name" placeholder="Sam's iPhone">
+      </div>
+      <button type="submit">Add</button>
+    </form>
+    {{if gt .Latest.DeviceCount 0}}
+    <form method="post" action="/app/{{.BundleID}}/devices/import" style="margin-top:0.7rem">
+      <button type="submit">Import {{.Latest.DeviceCount}} from the current profile</button>
+    </form>
+    {{end}}
+  </section>
+
+  {{if .Devices}}
+  <div class="table-wrap" style="margin-top:1.2rem">
+    <table class="admin">
+      <thead><tr><th>UDID</th><th>Name</th><th>Source</th><th>Status</th><th></th></tr></thead>
+      <tbody>
+        {{range .Devices}}
+        <tr>
+          <td class="mono" style="word-break:break-all">{{.UDID}}</td>
+          <td>{{if .Name}}{{.Name}}{{else}}—{{end}}{{with .Product}} <span class="muted">{{.}}</span>{{end}}</td>
+          <td class="mono">{{if eq .Source "capture"}}self-enrolled{{else if eq .Source "owner"}}you{{else}}{{.Source}}{{end}}</td>
+          <td>{{if .Provisioned}}<span class="pill ok">in build</span>{{else}}<span class="pill pending">pending</span>{{end}}</td>
+          <td class="actions">
+            {{if ne .Source "owner"}}
+            <form method="post" action="/app/{{$.BundleID}}/devices/{{.ID}}/delete"
+                  onsubmit="return confirm('Remove this device?')">
+              <button type="submit">remove</button>
+            </form>
+            {{else}}<span class="muted" style="font:0.72rem var(--font-mono)">always</span>{{end}}
+          </td>
+        </tr>
+        {{end}}
+      </tbody>
+    </table>
+  </div>
+
+  <section class="panel">
+    <h2>Export for Apple</h2>
+    <p class="muted" style="font-size:0.82rem;margin:0 0 0.6rem">
+      Tab-separated <code>UDID&#9;Name</code> — paste into the Developer portal's
+      "Register Multiple Devices", or <a href="/app/{{.BundleID}}/devices.txt">download devices.txt</a>.
+    </p>
+    <textarea readonly rows="5" onclick="this.select()"
+              style="font:0.78rem var(--font-mono)">{{.Export}}</textarea>
+  </section>
+  {{else}}
+  <p class="muted" style="margin:1.2rem 0">No devices yet — add one above, or enable public registration below.</p>
+  {{end}}
+
+  <section class="panel">
+    <h2>Public registration</h2>
+    {{if .Registration}}
+    <p class="muted" style="font-size:0.82rem;margin:0 0 0.6rem">
+      Share this link. Opened on an iPhone it installs a small profile that sends
+      the device's UDID straight into this list as <em>self-enrolled</em>.
+    </p>
+    <div class="share-row"><p class="label">Link</p><code>{{.RegisterURL}}</code></div>
+    <form method="post" action="/app/{{.BundleID}}/register/disable" style="margin-top:0.9rem">
+      <button type="submit" class="danger">Disable registration</button>
+    </form>
+    {{else}}
+    <p class="muted" style="font-size:0.82rem;margin:0 0 0.6rem">
+      Generate a public link people open on their iPhone to enrol their own device.
+    </p>
+    <form method="post" action="/app/{{.BundleID}}/register/enable">
+      <button type="submit">Enable registration</button>
+    </form>
+    {{end}}
+  </section>
+{{end}}

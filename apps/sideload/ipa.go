@@ -134,15 +134,25 @@ func appName(info infoPlist, infoPath string) string {
 // slice it out between its <plist> tags rather than parsing the PKCS#7 envelope
 // — reliable across the Xcode versions that produce these.
 func parseProvision(der []byte) (*provision, error) {
-	start := bytes.Index(der, []byte("<plist"))
-	end := bytes.LastIndex(der, []byte("</plist>"))
-	if start < 0 || end < 0 || end < start {
-		return nil, fmt.Errorf("no plist payload in mobileprovision")
+	xmlBytes, err := extractPlist(der)
+	if err != nil {
+		return nil, err
 	}
-	xmlBytes := der[start : end+len("</plist>")]
 	var p provision
 	if _, err := plist.Unmarshal(xmlBytes, &p); err != nil {
 		return nil, err
 	}
 	return &p, nil
+}
+
+// extractPlist slices the XML plist out of a CMS/PKCS#7-wrapped blob — both the
+// embedded provisioning profile and the device attributes iOS POSTs during
+// enrolment carry their plist as literal text inside the signed envelope.
+func extractPlist(der []byte) ([]byte, error) {
+	start := bytes.Index(der, []byte("<plist"))
+	end := bytes.LastIndex(der, []byte("</plist>"))
+	if start < 0 || end < 0 || end < start {
+		return nil, fmt.Errorf("no plist payload found")
+	}
+	return der[start : end+len("</plist>")], nil
 }

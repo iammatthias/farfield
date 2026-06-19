@@ -5,7 +5,10 @@
   <a class="back" href="/">← all apps</a>
   <div style="display:flex;flex-wrap:wrap;align-items:baseline;gap:0.5rem 1rem;margin-top:0.5rem">
     <h1 style="font-size:1.25rem;margin:0">{{if .AppName}}{{.AppName}}{{else}}{{.BundleID}}{{end}}</h1>
-    <a class="back" href="/app/{{.BundleID}}/edit" style="margin-left:auto">edit page →</a>
+    <span style="margin-left:auto;display:inline-flex;gap:1.1rem">
+      <a class="back" href="/app/{{.BundleID}}/devices">devices{{if gt .Pending 0}} <span style="color:var(--accent)">({{.Pending}} pending)</span>{{end}} →</a>
+      <a class="back" href="/app/{{.BundleID}}/edit">edit page →</a>
+    </span>
   </div>
   {{with .Meta}}{{with .Tagline}}<p class="tagline">{{.}}</p>{{end}}{{end}}
   <p class="meta">
