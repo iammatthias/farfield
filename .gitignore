@@ -26,6 +26,8 @@
 
 # Secrets live in env / EnvironmentFile, never in the repo.
 .env
+# Local backup of the homelab .env (all apps' secrets) — never committed.
+.env.backup
 
 # Editor / OS cruft.
 .DS_Store
