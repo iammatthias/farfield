@@ -53,14 +53,20 @@ how the feed editor builds galleries that live in content.
 
 ## feed — `https://feed.farfield.systems`
 
-| Method & path             | Returns                              |
-|---------------------------|--------------------------------------|
-| `GET /api/posts`          | `{ "posts": [Post, …] }`             |
-| `GET /api/posts/{slug}`     | `Post` — `404` if missing; `ETag`    |
-| `GET /status`             | `{ "service", "ok", "posts" }`       |
-| `POST /api/posts`         | create — `X-API-Key`                 |
-| `PUT /api/posts/{slug}`     | replace — `X-API-Key`                |
-| `DELETE /api/posts/{slug}`  | delete — `X-API-Key`                 |
+| Method & path             | Returns                                       |
+|---------------------------|-----------------------------------------------|
+| `GET /api/posts`          | `{ "posts": [Post, …] }` — read-token-gated   |
+| `GET /api/posts/{slug}`     | `Post` — public, rate-limited; `404`; `ETag` |
+| `GET /status`             | `{ "service", "ok", "posts" }`                |
+| `POST /api/posts`         | create — `X-API-Key`                          |
+| `PUT /api/posts/{slug}`     | replace — `X-API-Key`                        |
+| `DELETE /api/posts/{slug}`  | delete — `X-API-Key`                         |
+
+A single post by slug is **public** so "view source" links open in a browser —
+the slug must already be known and the body is published — but it is rate-limited
+per client IP (callers presenting `FEED_READ_KEY`/`FEED_API_KEY` are exempt). The
+post **list** stays read-token-gated when `FEED_READ_KEY` is set, since it
+enumerates every post.
 
 ## blobs — `https://blobs.farfield.systems`
 

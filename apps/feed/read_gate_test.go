@@ -41,8 +41,10 @@ func TestFeedReadGate(t *testing.T) {
 	if got := code("/api/posts", "write"); got != http.StatusOK {
 		t.Errorf("/api/posts write key = %d, want 200", got)
 	}
-	if got := code("/api/posts/anything", ""); got != http.StatusUnauthorized {
-		t.Errorf("/api/posts/{slug} no token = %d, want 401", got)
+	// A single post by slug is public (the "view source" endpoint), so an
+	// anonymous read reaches the handler: a missing slug 404s rather than 401s.
+	if got := code("/api/posts/anything", ""); got != http.StatusNotFound {
+		t.Errorf("/api/posts/{slug} no token = %d, want 404 (public)", got)
 	}
 	if got := code("/status", ""); got != http.StatusOK {
 		t.Errorf("/status no token = %d, want 200 (public)", got)

@@ -9,6 +9,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/iammatthias/farfield/lib/cid"
 	"github.com/iammatthias/farfield/lib/pulse"
@@ -32,6 +33,10 @@ type Server struct {
 	blobsPublic   string // browser-facing blobs URL — injected into the editor
 	contentPublic string // browser-facing content URL — injected into the editor
 
+	// rl rate-limits the public, ungated single-post read (the "view source"
+	// endpoint) per client IP. Keyed callers are exempt.
+	rl *web.RateLimiter
+
 	// blobCache memoizes successful blob metadata lookups for the lifetime
 	// of the server. Blob CIDs are content-addressed and immutable, so a
 	// cached entry never goes stale.
@@ -43,6 +48,11 @@ const pageSize = 50
 
 // apiMaxLimit caps the ?limit= an API client may request.
 const apiMaxLimit = 200
+
+// publicReadPerMin caps anonymous hits to the public single-post read endpoint
+// per client IP per minute. Keyed callers (e.g. the site's server-side fetches)
+// bypass it, so this only throttles unauthenticated "view source" traffic.
+const publicReadPerMin = 60
 
 // run wires up the service and serves until interrupted.
 func run(host, port string) error {
@@ -82,6 +92,9 @@ func run(host, port string) error {
 }
 
 func (s *Server) routes() http.Handler {
+	if s.rl == nil {
+		s.rl = web.NewRateLimiter(publicReadPerMin, time.Minute)
+	}
 	mux := http.NewServeMux()
 
 	// HTML admin UI — session-gated.
@@ -97,11 +110,15 @@ func (s *Server) routes() http.Handler {
 	mux.HandleFunc("POST /login", s.auth.HandleLogin)
 	mux.HandleFunc("GET /logout", s.auth.HandleLogout)
 
-	// JSON read API — bearer-token-gated when FEED_READ_KEY is set (the write
-	// FEED_API_KEY is also accepted). /status stays public for the healthcheck.
+	// JSON read API. The LIST stays bearer-token-gated when FEED_READ_KEY is set
+	// (it enumerates every post; the write FEED_API_KEY is also accepted). A
+	// single post by slug is PUBLIC so the site's "view source" links load in a
+	// browser — the slug must already be known and the body is published anyway —
+	// but rate-limited per client IP. Keyed callers (the site's server-side
+	// fetches) are exempt. /status stays public for the healthcheck.
 	mux.HandleFunc("GET /status", s.handleStatus)
 	mux.HandleFunc("GET /api/posts", s.auth.RequireReadKey(s.handleAPIList))
-	mux.HandleFunc("GET /api/posts/{slug}", s.auth.RequireReadKey(s.handleAPIGet))
+	mux.HandleFunc("GET /api/posts/{slug}", web.RateLimit(s.rl, s.auth.HasReadKey, s.handleAPIGet))
 
 	// JSON write API — API-key-gated.
 	mux.HandleFunc("POST /api/posts", s.auth.RequireAPIKey(s.handleAPICreate))

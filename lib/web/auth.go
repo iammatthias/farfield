@@ -84,6 +84,20 @@ func (a *Auth) HasWriteKey(r *http.Request) bool {
 	return a.APIKey != "" && auth.VerifyAPIKey(APIKeyFrom(r), a.APIKey)
 }
 
+// HasReadKey reports whether the request presents a credential the read gate
+// accepts: the read key, or the write key (which implies read). Unlike
+// RequireReadKey, an unconfigured key is NOT treated as "open" here — with
+// nothing to match, no request counts as privileged. It exists to exempt
+// trusted, keyed callers from rate limiting on otherwise-public endpoints.
+func (a *Auth) HasReadKey(r *http.Request) bool {
+	key := APIKeyFrom(r)
+	if key == "" {
+		return false
+	}
+	return (a.ReadKey != "" && auth.VerifyAPIKey(key, a.ReadKey)) ||
+		(a.APIKey != "" && auth.VerifyAPIKey(key, a.APIKey))
+}
+
 // APIKeyFrom reads the API key from either an X-API-Key header or an
 // "Authorization: Bearer <key>" header.
 func APIKeyFrom(r *http.Request) string {

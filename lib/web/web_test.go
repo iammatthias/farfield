@@ -8,7 +8,81 @@ import (
 	"strings"
 	"testing"
 	"testing/fstest"
+	"time"
 )
+
+func TestRateLimiterAllow(t *testing.T) {
+	now := time.Unix(1_000_000, 0)
+	l := NewRateLimiter(2, time.Minute)
+	l.now = func() time.Time { return now }
+
+	if !l.Allow("a") || !l.Allow("a") {
+		t.Fatal("first two hits should be allowed")
+	}
+	if l.Allow("a") {
+		t.Fatal("third hit within the window should be blocked")
+	}
+	if !l.Allow("b") {
+		t.Fatal("a different key gets its own budget")
+	}
+	now = now.Add(2 * time.Minute) // age the window out
+	if !l.Allow("a") {
+		t.Fatal("hits should be allowed again once the window passes")
+	}
+}
+
+func TestRateLimitMiddleware(t *testing.T) {
+	next := func(w http.ResponseWriter, r *http.Request) { w.WriteHeader(http.StatusOK) }
+	hit := func(h http.HandlerFunc) int {
+		w := httptest.NewRecorder()
+		r := httptest.NewRequest("GET", "/x", nil)
+		r.Header.Set("CF-Connecting-IP", "1.2.3.4")
+		h(w, r)
+		return w.Code
+	}
+
+	l := NewRateLimiter(1, time.Minute)
+	h := RateLimit(l, nil, next)
+	if hit(h) != http.StatusOK {
+		t.Fatal("first request should pass")
+	}
+	if hit(h) != http.StatusTooManyRequests {
+		t.Fatal("second request should be 429")
+	}
+
+	// An exempt predicate skips the limiter regardless of prior hits.
+	exempt := RateLimit(l, func(*http.Request) bool { return true }, next)
+	if hit(exempt) != http.StatusOK {
+		t.Fatal("exempt request should always pass")
+	}
+	// A nil limiter disables limiting entirely.
+	if hit(RateLimit(nil, nil, next)) != http.StatusOK {
+		t.Fatal("nil limiter should not block")
+	}
+}
+
+func TestHasReadKey(t *testing.T) {
+	a := &Auth{APIKey: "write", ReadKey: "read"}
+	mk := func(k, v string) *http.Request {
+		r := httptest.NewRequest("GET", "/x", nil)
+		if k != "" {
+			r.Header.Set(k, v)
+		}
+		return r
+	}
+	if !a.HasReadKey(mk("Authorization", "Bearer read")) {
+		t.Error("read key should grant read access")
+	}
+	if !a.HasReadKey(mk("X-API-Key", "write")) {
+		t.Error("write key should grant read access")
+	}
+	if a.HasReadKey(mk("Authorization", "Bearer nope")) {
+		t.Error("wrong key should not grant read access")
+	}
+	if a.HasReadKey(mk("", "")) {
+		t.Error("no key should not grant read access")
+	}
+}
 
 func TestLogRequestsCapturesStatus(t *testing.T) {
 	// The recorder must forward the handler's status untouched.
