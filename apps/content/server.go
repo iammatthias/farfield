@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/iammatthias/farfield/lib/cid"
 	"github.com/iammatthias/farfield/lib/pulse"
@@ -30,7 +31,17 @@ type Server struct {
 	blobsKey      string // blobs API key — kept server-side
 	blobsPublic   string // browser-facing blobs URL — injected into the editor
 	contentPublic string // browser-facing content URL — injected into the editor
+
+	// rl rate-limits the public, ungated single-entry read (the "view source"
+	// endpoint) per client IP. Keyed callers are exempt; drafts stay 404 to
+	// anonymous callers (only the write key previews them).
+	rl *web.RateLimiter
 }
+
+// publicReadPerMin caps anonymous hits to the public single-entry read endpoint
+// per client IP per minute. Keyed callers (e.g. the site's server-side fetches)
+// bypass it, so this only throttles unauthenticated "view source" traffic.
+const publicReadPerMin = 60
 
 // run wires up the service and serves until interrupted.
 func run(host, port string) error {
@@ -68,6 +79,9 @@ func run(host, port string) error {
 }
 
 func (s *Server) routes() http.Handler {
+	if s.rl == nil {
+		s.rl = web.NewRateLimiter(publicReadPerMin, time.Minute)
+	}
 	mux := http.NewServeMux()
 
 	// HTML admin UI — session-gated.
@@ -99,10 +113,17 @@ func (s *Server) routes() http.Handler {
 	// write CONTENT_API_KEY is also accepted, and unlocks drafts for preview).
 	// /status stays public so the healthcheck and uptime probes never need a
 	// token. Published content only, unless the request carries the write key.
+	//
+	// A single PUBLISHED entry by slug is the exception: it is public (so the
+	// site's "view source" links open in a browser) but rate-limited per client
+	// IP, with keyed callers exempt. Draft protection is unchanged — handleAPIEntry
+	// 404s a draft unless the write key is present, so anonymous callers can never
+	// see one. The enumerating lists, collections, and series stay token-gated
+	// (a series can back an unpublished entry).
 	mux.HandleFunc("GET /status", s.handleStatus)
 	mux.HandleFunc("GET /api/collections", s.auth.RequireReadKey(s.handleAPICollections))
 	mux.HandleFunc("GET /api/entries", s.auth.RequireReadKey(s.handleAPIEntries))
-	mux.HandleFunc("GET /api/entries/{slug}", s.auth.RequireReadKey(s.handleAPIEntry))
+	mux.HandleFunc("GET /api/entries/{slug}", web.RateLimit(s.rl, s.auth.HasReadKey, s.handleAPIEntry))
 	mux.HandleFunc("GET /api/series", s.auth.RequireReadKey(s.handleAPISeries))
 	mux.HandleFunc("GET /api/series/{slug}", s.auth.RequireReadKey(s.handleAPISeriesOne))
 

@@ -36,11 +36,11 @@ The `backup` service is internal (tailnet-only) and has no public API.
 
 | Method & path                       | Returns                                  |
 |--------------------------------------|------------------------------------------|
-| `GET /api/collections`               | `{ "collections": [Collection, …] }`     |
-| `GET /api/entries[?collection=slug]` | `{ "entries": [Entry, …] }` — published  |
-| `GET /api/entries/{slug}`            | `Entry` — `404` if missing/draft; `ETag` |
-| `GET /api/series`                    | `{ "series": [Series, …] }`              |
-| `GET /api/series/{slug}`             | `Series` — `404` if missing; `ETag`      |
+| `GET /api/collections`               | `{ "collections": [Collection, …] }` — read-token-gated |
+| `GET /api/entries[?collection=slug]` | `{ "entries": [Entry, …] }` — published; read-token-gated |
+| `GET /api/entries/{slug}`            | `Entry` — public, rate-limited; `404` if missing/draft; `ETag` |
+| `GET /api/series`                    | `{ "series": [Series, …] }` — read-token-gated |
+| `GET /api/series/{slug}`             | `Series` — read-token-gated; `404` if missing; `ETag` |
 | `GET /status`                        | `{ "service", "ok", "collections" }`     |
 | `POST /api/entries`                  | create — `X-API-Key`                     |
 | `PUT /api/entries/{slug}`            | replace — `X-API-Key`                    |
@@ -50,6 +50,13 @@ The `backup` service is internal (tailnet-only) and has no public API.
 Collections are managed in the admin UI. `POST /api/series` always assigns a
 fresh slug (slugified from the title) and returns the created fragment — it is
 how the feed editor builds galleries that live in content.
+
+A single **published** entry by slug is **public** so "view source" links open in
+a browser, but rate-limited per client IP (callers presenting `CONTENT_READ_KEY`/
+`CONTENT_API_KEY` are exempt). Draft protection is unchanged: a draft is a `404`
+to anyone without the **write** key, so it can never leak through the public path.
+The lists, collections, and `GET /api/series/{slug}` stay read-token-gated — a
+series fragment can back an unpublished entry.
 
 ## feed — `https://feed.farfield.systems`
 

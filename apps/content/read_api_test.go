@@ -107,6 +107,31 @@ func TestReadGate(t *testing.T) {
 	}
 }
 
+func TestPublicEntryReadIsDraftSafe(t *testing.T) {
+	s, ids := readTestServer(t)
+	srv := httptest.NewServer(s.routes())
+	defer srv.Close()
+
+	// A published entry by slug is public — the "view source" endpoint — so an
+	// anonymous read succeeds.
+	if code, _ := apiGet(t, srv, "/api/entries/"+ids.pubSlug, ""); code != http.StatusOK {
+		t.Errorf("anon published entry = %d, want 200 (public)", code)
+	}
+	// A draft stays hidden from anonymous callers — 404, never 200. Only the
+	// write key previews it.
+	if code, _ := apiGet(t, srv, "/api/entries/"+ids.draftSlug, ""); code != http.StatusNotFound {
+		t.Errorf("anon draft entry = %d, want 404 (draft protected)", code)
+	}
+	// The single-series read stays token-gated (a series can back a draft).
+	if code, _ := apiGet(t, srv, "/api/series/anything", ""); code != http.StatusUnauthorized {
+		t.Errorf("anon series fetch = %d, want 401 (still gated)", code)
+	}
+	// The enumerating list stays token-gated.
+	if code, _ := apiGet(t, srv, "/api/entries", ""); code != http.StatusUnauthorized {
+		t.Errorf("anon entries list = %d, want 401 (still gated)", code)
+	}
+}
+
 func TestReadGateDraftsHiddenFromReadKey(t *testing.T) {
 	s, ids := readTestServer(t)
 	srv := httptest.NewServer(s.routes())

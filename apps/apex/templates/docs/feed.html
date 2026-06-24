@@ -11,6 +11,7 @@
 
   <h2>Authentication</h2>
   <p>The read endpoints require a bearer token — send the read key as <code>Authorization: Bearer &lt;token&gt;</code> or <code>X-API-Key</code>; the write key is also accepted. <code>/status</code> stays public, and responses still send <code>Access-Control-Allow-Origin: *</code>.</p>
+  <p>One exception: a single post, <code>GET /api/posts/{slug}</code>, is <strong>public</strong> so "view source" links open in a browser — no token — but rate-limited per client IP (keyed callers are exempt). The post <strong>list</strong> stays token-gated, since it enumerates every post.</p>
 
   <h2>JSON API</h2>
 
@@ -23,7 +24,7 @@
   <div class="endpoint">
     <span class="method">GET</span>
     <span class="path">/api/posts/{slug}</span>
-    <div class="returns">Post — <code>404</code> if missing; strong <code>ETag</code></div>
+    <div class="returns">Post — <strong>public</strong>, rate-limited; <code>404</code> if missing; strong <code>ETag</code></div>
   </div>
 
   <div class="endpoint">

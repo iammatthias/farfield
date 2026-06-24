@@ -155,6 +155,17 @@
                         artifacts, and every <code>/status</code>.
                     </li>
                     <li>
+                        <strong>"View source" is public.</strong> A single
+                        published record by slug —
+                        <code>feed /api/posts/{slug}</code> and
+                        <code>content /api/entries/{slug}</code> — loads without a
+                        token so the site's "view source" links open in a
+                        browser, but it is rate-limited per client IP (keyed
+                        callers are exempt). Drafts stay a <code>404</code> to
+                        anyone without the write key; the enumerating
+                        <em>lists</em> stay token-gated.
+                    </li>
+                    <li>
                         <strong>Writes need the write key</strong> — same
                         headers, a separate higher-privilege token.
                     </li>
