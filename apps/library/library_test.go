@@ -119,6 +119,19 @@ func newTestServer(t *testing.T) *Server {
 	}
 }
 
+func TestMaxUploadLimit(t *testing.T) {
+	t.Setenv("LIBRARY_MAX_UPLOAD", "400")
+	if got, want := maxUploadLimit(), int64(400)<<20; got != want {
+		t.Errorf("LIBRARY_MAX_UPLOAD=400 -> %d, want %d", got, want)
+	}
+	for _, bad := range []string{"", "0", "-5", "abc"} {
+		t.Setenv("LIBRARY_MAX_UPLOAD", bad)
+		if got := maxUploadLimit(); got != defaultMaxUpload {
+			t.Errorf("LIBRARY_MAX_UPLOAD=%q -> %d, want default %d", bad, got, defaultMaxUpload)
+		}
+	}
+}
+
 func TestUploadKeyScope(t *testing.T) {
 	s := newTestServer(t)
 	s.uploadKey = "intern" // the full LIBRARY_API_KEY is "secret"

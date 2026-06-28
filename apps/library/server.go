@@ -29,6 +29,20 @@ var assets embed.FS
 
 const defaultMaxUpload = 100 << 20 // 100 MiB
 
+// maxUploadLimit resolves the per-file upload cap from LIBRARY_MAX_UPLOAD, an
+// integer number of MiB (e.g. "400" -> 400 MiB). A missing, non-numeric, or
+// non-positive value falls back to the 100 MiB default.
+func maxUploadLimit() int64 {
+	if v := store.Env("LIBRARY_MAX_UPLOAD", ""); v != "" {
+		if mib, err := strconv.Atoi(v); err == nil && mib > 0 {
+			return int64(mib) << 20
+		}
+		slog.Warn("invalid LIBRARY_MAX_UPLOAD (want a positive MiB integer); using default",
+			"value", v, "default_mib", defaultMaxUpload>>20)
+	}
+	return defaultMaxUpload
+}
+
 // Server holds the running OPDS service.
 type Server struct {
 	db    *sql.DB
@@ -98,7 +112,7 @@ func run(host, port string) error {
 		},
 		rd:        &web.Renderer{Templates: tmpl, AssetVer: theme.Version},
 		uploadKey: store.Env("LIBRARY_UPLOAD_KEY", ""),
-		maxUpload: defaultMaxUpload,
+		maxUpload: maxUploadLimit(),
 	}
 
 	return web.Serve(host, port, s.routes())
