@@ -258,15 +258,41 @@ func TestTusResumableUpload(t *testing.T) {
 	}
 	hresp.Body.Close()
 
-	// Final chunk completes the upload and returns the new book's cid.
+	// Final chunk completes the byte transfer; finalize runs in the background.
 	r2 := patch(half, epub[half:])
 	if r2.StatusCode != http.StatusNoContent {
 		t.Fatalf("patch 2 = %d, want 204", r2.StatusCode)
 	}
-	bookCID := r2.Header.Get("X-Library-Cid")
+	if got := r2.Header.Get("X-Library-Status"); got != "finalizing" && got != "done" {
+		t.Errorf("status after final chunk = %q, want finalizing or done", got)
+	}
 	r2.Body.Close()
+
+	// Poll HEAD until finalize completes and yields the book cid.
+	head := func() (status, cid, errMsg string) {
+		req, _ := http.NewRequest("HEAD", uploadURL, nil)
+		req.Header.Set("X-API-Key", "intern")
+		resp, err := client.Do(req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		resp.Body.Close()
+		return resp.Header.Get("X-Library-Status"), resp.Header.Get("X-Library-Cid"), resp.Header.Get("X-Library-Error")
+	}
+	var bookCID string
+	for i := 0; i < 500; i++ {
+		st, cid, errMsg := head()
+		if st == "done" {
+			bookCID = cid
+			break
+		}
+		if st == "error" {
+			t.Fatalf("finalize errored: %s", errMsg)
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
 	if bookCID == "" {
-		t.Fatal("completion returned no X-Library-Cid")
+		t.Fatal("finalize did not complete with a cid")
 	}
 
 	b, err := getBook(s.db, bookCID)
@@ -276,9 +302,13 @@ func TestTusResumableUpload(t *testing.T) {
 	if b.Collection != "Big Shelf" || b.Title != "Big Book" || b.Filename != "big.epub" {
 		t.Errorf("book = %+v, want collection/title/filename from the upload", b)
 	}
-	// The staging row is cleaned up on completion.
-	if u, _ := getUpload(s.db, strings.TrimPrefix(loc, "/api/upload/tus/")); u != nil {
-		t.Error("upload row should be deleted after completion")
+	// The row survives as a "done" record; the staging file is gone.
+	uid := strings.TrimPrefix(loc, "/api/upload/tus/")
+	if u, _ := getUpload(s.db, uid); u == nil || u.Status != "done" || u.BookCID != bookCID {
+		t.Errorf("upload row after completion = %+v, want status done with cid %s", u, bookCID)
+	}
+	if sz, _ := s.stagingSize(uid); sz != 0 {
+		t.Errorf("staging file should be gone after finalize, size = %d", sz)
 	}
 }
 

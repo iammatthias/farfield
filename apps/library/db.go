@@ -69,6 +69,17 @@ func openDB(path string) (*sql.DB, error) {
 	if _, err := db.Exec(uploadsSchema); err != nil {
 		return nil, err
 	}
+	// Self-migrate: the async-finalize columns arrived after the first tus
+	// deployment created the uploads table.
+	for _, col := range []struct{ name, def string }{
+		{"status", "TEXT NOT NULL DEFAULT 'open'"},
+		{"book_cid", "TEXT NOT NULL DEFAULT ''"},
+		{"error", "TEXT NOT NULL DEFAULT ''"},
+	} {
+		if err := store.EnsureColumn(db, "uploads", col.name, col.def); err != nil {
+			return nil, err
+		}
+	}
 	// Self-migrate: add the collection column to databases created before it
 	// existed, then index it (the index can only be built once the column is).
 	if err := store.EnsureColumn(db, "books", "collection", "TEXT NOT NULL DEFAULT ''"); err != nil {
@@ -276,8 +287,23 @@ CREATE TABLE IF NOT EXISTS uploads (
 	length     INTEGER NOT NULL,
 	filename   TEXT NOT NULL DEFAULT '',
 	collection TEXT NOT NULL DEFAULT '',
+	status     TEXT NOT NULL DEFAULT 'open',
+	book_cid   TEXT NOT NULL DEFAULT '',
+	error      TEXT NOT NULL DEFAULT '',
 	created_at TEXT NOT NULL
 );`
+
+// Upload lifecycle: an upload is "open" while receiving chunks, flips to
+// "finalizing" once all bytes arrive (the EPUB is then ingested off the request
+// path), and ends "done" (BookCID set) or "error" (Error set). A failed
+// finalize keeps the staging bytes so the client can retry rather than losing
+// the whole upload.
+const (
+	uploadOpen       = "open"
+	uploadFinalizing = "finalizing"
+	uploadDone       = "done"
+	uploadError      = "error"
+)
 
 // Upload is one in-progress resumable upload.
 type Upload struct {
@@ -285,21 +311,26 @@ type Upload struct {
 	Length     int64
 	Filename   string
 	Collection string
+	Status     string
+	BookCID    string
+	Error      string
 	CreatedAt  string
 }
 
 func createUpload(db *sql.DB, u *Upload) error {
 	_, err := db.Exec(
-		`INSERT INTO uploads (id, length, filename, collection, created_at) VALUES (?, ?, ?, ?, ?)`,
-		u.ID, u.Length, u.Filename, u.Collection, u.CreatedAt)
+		`INSERT INTO uploads (id, length, filename, collection, status, created_at)
+		 VALUES (?, ?, ?, ?, ?, ?)`,
+		u.ID, u.Length, u.Filename, u.Collection, uploadOpen, u.CreatedAt)
 	return err
 }
 
 func getUpload(db *sql.DB, id string) (*Upload, error) {
 	var u Upload
 	err := db.QueryRow(
-		`SELECT id, length, filename, collection, created_at FROM uploads WHERE id = ?`, id).
-		Scan(&u.ID, &u.Length, &u.Filename, &u.Collection, &u.CreatedAt)
+		`SELECT id, length, filename, collection, status, book_cid, error, created_at
+		 FROM uploads WHERE id = ?`, id).
+		Scan(&u.ID, &u.Length, &u.Filename, &u.Collection, &u.Status, &u.BookCID, &u.Error, &u.CreatedAt)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, nil
 	}
@@ -307,6 +338,51 @@ func getUpload(db *sql.DB, id string) (*Upload, error) {
 		return nil, err
 	}
 	return &u, nil
+}
+
+// markFinalizing transitions an upload into "finalizing", but only from "open"
+// or "error" — so exactly one caller wins the right to start the (single)
+// background finalize, even under concurrent PATCHes. It reports whether this
+// call made the transition.
+func markFinalizing(db *sql.DB, id string) (bool, error) {
+	res, err := db.Exec(
+		`UPDATE uploads SET status = ?, error = '' WHERE id = ? AND status IN (?, ?)`,
+		uploadFinalizing, id, uploadOpen, uploadError)
+	if err != nil {
+		return false, err
+	}
+	n, _ := res.RowsAffected()
+	return n > 0, nil
+}
+
+func setUploadDone(db *sql.DB, id, cid string) error {
+	_, err := db.Exec(`UPDATE uploads SET status = ?, book_cid = ?, error = '' WHERE id = ?`,
+		uploadDone, cid, id)
+	return err
+}
+
+func setUploadError(db *sql.DB, id, msg string) error {
+	_, err := db.Exec(`UPDATE uploads SET status = ?, error = ? WHERE id = ?`, uploadError, msg, id)
+	return err
+}
+
+// uploadIDsByStatus lists the ids of uploads in a given status — used at startup
+// to resume finalizes that a crash interrupted.
+func uploadIDsByStatus(db *sql.DB, status string) ([]string, error) {
+	rows, err := db.Query(`SELECT id FROM uploads WHERE status = ?`, status)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var ids []string
+	for rows.Next() {
+		var id string
+		if err := rows.Scan(&id); err != nil {
+			return nil, err
+		}
+		ids = append(ids, id)
+	}
+	return ids, rows.Err()
 }
 
 func deleteUpload(db *sql.DB, id string) error {

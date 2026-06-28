@@ -118,6 +118,7 @@ func run(host, port string) error {
 		maxUpload: maxUploadLimit(),
 	}
 	s.pruneStaleUploads() // reclaim abandoned partial uploads from a prior run
+	s.resumeFinalizing()  // re-run finalizes a prior crash interrupted
 
 	return web.Serve(host, port, s.routes())
 }

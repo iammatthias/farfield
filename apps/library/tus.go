@@ -126,8 +126,10 @@ func (s *Server) handleTusCreate(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusCreated)
 }
 
-// handleTusHead reports how many bytes the server already holds, so a client can
-// resume from the right offset.
+// handleTusHead reports how many bytes the server holds and the finalize status,
+// so a client can resume an interrupted upload and poll for the eventual result.
+// Once the upload is "done" the new book's cid rides in X-Library-Cid; a failed
+// finalize reports "error" with the reason in X-Library-Error.
 func (s *Server) handleTusHead(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Tus-Resumable", tusVersion)
 	u, err := getUpload(s.db, r.PathValue("id"))
@@ -145,21 +147,30 @@ func (s *Server) handleTusHead(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	h := w.Header()
+	// After a successful finalize the staging file is gone; report the full
+	// length so a polling client sees a consistent offset.
+	if u.Status == uploadDone {
+		offset = u.Length
+		h.Set("X-Library-Cid", u.BookCID)
+	}
+	if u.Status == uploadError && u.Error != "" {
+		h.Set("X-Library-Error", u.Error)
+	}
 	h.Set("Upload-Offset", strconv.FormatInt(offset, 10))
 	h.Set("Upload-Length", strconv.FormatInt(u.Length, 10))
+	h.Set("X-Library-Status", u.Status)
 	h.Set("Cache-Control", "no-store")
 	w.WriteHeader(http.StatusOK)
 }
 
 // handleTusPatch appends one chunk at the declared offset. When the upload
-// reaches its full length the bytes are finalized into a book and the resulting
-// CID is returned in the X-Library-Cid response header.
+// reaches its full length, finalization (the potentially minutes-long R2 upload
+// and EPUB ingest) runs in the BACKGROUND — the PATCH returns immediately with
+// X-Library-Status: finalizing, so the response never blocks past the edge's
+// origin-response timeout. The client polls HEAD for the result (done + cid, or
+// error). PATCH is idempotent against an already-complete upload.
 func (s *Server) handleTusPatch(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Tus-Resumable", tusVersion)
-	if !strings.HasPrefix(r.Header.Get("Content-Type"), tusOctet) {
-		web.WriteError(w, http.StatusUnsupportedMediaType, "Content-Type must be "+tusOctet)
-		return
-	}
 	u, err := getUpload(s.db, r.PathValue("id"))
 	if err != nil {
 		s.tusFail(w, "read upload", err)
@@ -169,9 +180,24 @@ func (s *Server) handleTusPatch(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusNotFound)
 		return
 	}
-	offset, err := strconv.ParseInt(r.Header.Get("Upload-Offset"), 10, 64)
-	if err != nil {
-		web.WriteError(w, http.StatusBadRequest, "missing or invalid Upload-Offset")
+
+	// Settled or in flight: report state without touching bytes.
+	switch u.Status {
+	case uploadDone:
+		w.Header().Set("Upload-Offset", strconv.FormatInt(u.Length, 10))
+		w.Header().Set("X-Library-Status", uploadDone)
+		w.Header().Set("X-Library-Cid", u.BookCID)
+		w.WriteHeader(http.StatusNoContent)
+		return
+	case uploadFinalizing:
+		w.Header().Set("Upload-Offset", strconv.FormatInt(u.Length, 10))
+		w.Header().Set("X-Library-Status", uploadFinalizing)
+		w.WriteHeader(http.StatusNoContent)
+		return
+	}
+
+	if !strings.HasPrefix(r.Header.Get("Content-Type"), tusOctet) {
+		web.WriteError(w, http.StatusUnsupportedMediaType, "Content-Type must be "+tusOctet)
 		return
 	}
 	cur, err := s.stagingSize(u.ID)
@@ -179,40 +205,41 @@ func (s *Server) handleTusPatch(w http.ResponseWriter, r *http.Request) {
 		s.tusFail(w, "stat staging file", err)
 		return
 	}
-	if offset != cur {
-		web.WriteError(w, http.StatusConflict, "Upload-Offset does not match server state")
-		return
+	// Append only while bytes remain. A retry after a failed finalize (status
+	// "error", staging already full) falls through straight to re-finalizing.
+	if cur < u.Length {
+		offset, perr := strconv.ParseInt(r.Header.Get("Upload-Offset"), 10, 64)
+		if perr != nil {
+			web.WriteError(w, http.StatusBadRequest, "missing or invalid Upload-Offset")
+			return
+		}
+		if offset != cur {
+			web.WriteError(w, http.StatusConflict, "Upload-Offset does not match server state")
+			return
+		}
+		f, oerr := os.OpenFile(s.stagingPath(u.ID), os.O_APPEND|os.O_WRONLY, 0o644)
+		if oerr != nil {
+			s.tusFail(w, "open staging file", oerr)
+			return
+		}
+		// Never store past the declared length, even if the client over-sends.
+		written, copyErr := io.Copy(f, io.LimitReader(r.Body, u.Length-cur))
+		closeErr := f.Close()
+		if copyErr != nil || closeErr != nil {
+			s.tusFail(w, "write chunk", firstErr(copyErr, closeErr))
+			return
+		}
+		cur += written
 	}
 
-	f, err := os.OpenFile(s.stagingPath(u.ID), os.O_APPEND|os.O_WRONLY, 0o644)
-	if err != nil {
-		s.tusFail(w, "open staging file", err)
-		return
-	}
-	// Never store past the declared length, even if the client over-sends.
-	written, copyErr := io.Copy(f, io.LimitReader(r.Body, u.Length-cur))
-	closeErr := f.Close()
-	if copyErr != nil || closeErr != nil {
-		s.tusFail(w, "write chunk", firstErr(copyErr, closeErr))
-		return
-	}
-	newOffset := cur + written
-	w.Header().Set("Upload-Offset", strconv.FormatInt(newOffset, 10))
-	if newOffset < u.Length {
+	w.Header().Set("Upload-Offset", strconv.FormatInt(cur, 10))
+	if cur < u.Length {
 		w.WriteHeader(http.StatusNoContent)
 		return
 	}
-
-	// Complete: turn the assembled bytes into a book.
-	book, err := s.finalizeUpload(u)
-	if err != nil {
-		// All bytes arrived but they aren't a valid EPUB — drop the upload and
-		// tell the client why, rather than leaving a dead staging file behind.
-		s.discardUpload(u.ID)
-		web.WriteError(w, http.StatusBadRequest, err.Error())
-		return
-	}
-	w.Header().Set("X-Library-Cid", book.CID)
+	// All bytes received — ingest off the request path.
+	s.beginFinalize(u.ID)
+	w.Header().Set("X-Library-Status", uploadFinalizing)
 	w.WriteHeader(http.StatusNoContent)
 }
 
@@ -232,29 +259,79 @@ func (s *Server) handleTusDelete(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusNoContent)
 }
 
-// finalizeUpload reads the completed staging file and ingests it as a book,
-// then removes the staging file and upload row. The bytes are read into memory
-// for metadata extraction and content addressing — the same path a direct
-// POST /api/books takes.
-func (s *Server) finalizeUpload(u *Upload) (*Book, error) {
-	data, err := os.ReadFile(s.stagingPath(u.ID))
+// beginFinalize transitions the upload to "finalizing" and, if this caller won
+// that transition, ingests it in the background. markFinalizing makes the win
+// exclusive, so concurrent or repeated PATCHes never start two finalizes.
+func (s *Server) beginFinalize(id string) {
+	won, err := markFinalizing(s.db, id)
 	if err != nil {
-		return nil, err
+		slog.Error("tus mark finalizing", "id", id, "err", err)
+		return
+	}
+	if won {
+		go s.runFinalize(id)
+	}
+}
+
+// runFinalize ingests a fully-received upload into a book, off the request path.
+// A bad EPUB is a permanent failure (staging dropped). A storage/db failure is
+// transient: the status is set to "error" but the staging bytes are KEPT, so the
+// client can retry by re-issuing the final PATCH rather than re-uploading.
+func (s *Server) runFinalize(id string) {
+	u, err := getUpload(s.db, id)
+	if err != nil || u == nil {
+		slog.Error("tus finalize: load upload", "id", id, "err", err)
+		return
+	}
+	data, err := os.ReadFile(s.stagingPath(id))
+	if err != nil {
+		_ = setUploadError(s.db, id, "could not read staged upload")
+		slog.Error("tus finalize: read staging", "id", id, "err", err)
+		return
+	}
+	if _, _, _, perr := parseEPUB(data); perr != nil {
+		_ = setUploadError(s.db, id, perr.Error())
+		s.removeStaging(id) // permanent: the bytes will never be a valid EPUB
+		return
 	}
 	b, err := s.storeUpload(data, u.Filename, u.Collection)
 	if err != nil {
-		return nil, err
+		_ = setUploadError(s.db, id, err.Error()) // transient: keep staging for retry
+		slog.Error("tus finalize: store", "id", id, "err", err)
+		return
 	}
-	s.discardUpload(u.ID)
-	return b, nil
+	if err := setUploadDone(s.db, id, b.CID); err != nil {
+		slog.Error("tus finalize: mark done", "id", id, "err", err)
+		return
+	}
+	s.removeStaging(id)
+}
+
+// resumeFinalizing re-launches finalizes that a restart interrupted — their
+// staging bytes are complete on the data volume, only the ingest needs redoing.
+func (s *Server) resumeFinalizing() {
+	ids, err := uploadIDsByStatus(s.db, uploadFinalizing)
+	if err != nil {
+		slog.Warn("resume finalizing uploads", "err", err)
+		return
+	}
+	for _, id := range ids {
+		go s.runFinalize(id)
+	}
+}
+
+// removeStaging deletes one upload's staging file, tolerating an already-absent
+// file.
+func (s *Server) removeStaging(id string) {
+	if err := os.Remove(s.stagingPath(id)); err != nil && !os.IsNotExist(err) {
+		slog.Error("remove staging file", "id", id, "err", err)
+	}
 }
 
 // discardUpload removes an upload's staging file and row, logging but not
 // failing on cleanup errors.
 func (s *Server) discardUpload(id string) {
-	if err := os.Remove(s.stagingPath(id)); err != nil && !os.IsNotExist(err) {
-		slog.Error("remove staging file", "id", id, "err", err)
-	}
+	s.removeStaging(id)
 	if err := deleteUpload(s.db, id); err != nil {
 		slog.Error("delete upload row", "id", id, "err", err)
 	}

@@ -7,6 +7,7 @@ import (
 	"encoding/hex"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
 	"os"
 	"strings"
@@ -40,9 +41,23 @@ func NewR2(cfg R2Config) (*R2, error) {
 		}
 	}
 	return &R2{
-		cfg:    cfg,
-		host:   cfg.AccountID + ".r2.cloudflarestorage.com",
-		client: &http.Client{Timeout: 60 * time.Second},
+		cfg:  cfg,
+		host: cfg.AccountID + ".r2.cloudflarestorage.com",
+		// No overall client timeout: a large EPUB upload or download legitimately
+		// runs for minutes, and a wall-clock cap would sever a healthy transfer
+		// mid-stream (the original 60s cap was what killed big tus finalizes).
+		// Bound connection setup and time-to-first-byte instead, so a dead peer
+		// still fails fast without limiting a working large transfer.
+		client: &http.Client{
+			Transport: &http.Transport{
+				DialContext:           (&net.Dialer{Timeout: 10 * time.Second}).DialContext,
+				TLSHandshakeTimeout:   10 * time.Second,
+				ResponseHeaderTimeout: 60 * time.Second,
+				ExpectContinueTimeout: 1 * time.Second,
+				IdleConnTimeout:       90 * time.Second,
+				MaxIdleConns:          100,
+			},
+		},
 	}, nil
 }
 
