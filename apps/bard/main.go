@@ -56,7 +56,9 @@ func main() {
 		slog.Warn("pulse recording disabled: could not open database", "err", err)
 	} else {
 		defer db.Close()
-		handler = pulse.Middleware(db, "bard")(handler)
+		rec := pulse.New(db, "bard")
+		defer rec.Close()
+		handler = rec.Wrap(handler)
 	}
 
 	if err := web.Serve(host, port, web.LogRequests(web.Gzip(handler))); err != nil {

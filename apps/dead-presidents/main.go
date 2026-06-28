@@ -76,7 +76,9 @@ func main() {
 		slog.Warn("pulse recording disabled: could not open database", "err", err)
 	} else {
 		defer db.Close()
-		handler = pulse.Middleware(db, "dead-presidents")(handler)
+		rec := pulse.New(db, "dead-presidents")
+		defer rec.Close()
+		handler = rec.Wrap(handler)
 	}
 
 	// Gzip helps the text assets and model.json; model.bin is served as
