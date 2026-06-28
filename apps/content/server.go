@@ -36,6 +36,9 @@ type Server struct {
 	// endpoint) per client IP. Keyed callers are exempt; drafts stay 404 to
 	// anonymous callers (only the write key previews them).
 	rl *web.RateLimiter
+
+	// pulse records request telemetry; nil disables it (tests never start it).
+	pulse *pulse.Recorder
 }
 
 // publicReadPerMin caps anonymous hits to the public single-entry read endpoint
@@ -75,6 +78,8 @@ func run(host, port string) error {
 		contentPublic: store.Env("CONTENT_PUBLIC_URL", "http://127.0.0.1:8787"),
 	}
 
+	s.pulse = pulse.New(s.db, "content")
+	defer s.pulse.Close()
 	return web.Serve(host, port, s.routes())
 }
 
@@ -148,7 +153,7 @@ func (s *Server) routes() http.Handler {
 	// Everything content serves is text — HTML, JSON — so Gzip wraps the
 	// whole mux. Logging sits outside so the recorded status is the final one;
 	// pulse traffic recording sits innermost so logged timings stay real.
-	return web.CORS(web.LogRequests(web.Gzip(pulse.Middleware(s.db, "content")(mux))),
+	return web.CORS(web.LogRequests(web.Gzip(s.pulse.Wrap(mux))),
 		"GET", "POST", "PUT", "DELETE", "OPTIONS")
 }
 

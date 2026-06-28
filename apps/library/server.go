@@ -58,6 +58,8 @@ type Server struct {
 	// tusDir is the on-disk staging area for in-progress resumable uploads.
 	tusDir    string
 	maxUpload int64
+	// pulse records request telemetry; nil disables it (tests never start it).
+	pulse *pulse.Recorder
 }
 
 // openStore selects the byte-store backend from the environment.
@@ -120,6 +122,8 @@ func run(host, port string) error {
 	s.pruneStaleUploads() // reclaim abandoned partial uploads from a prior run
 	s.resumeFinalizing()  // re-run finalizes a prior crash interrupted
 
+	s.pulse = pulse.New(s.db, "library")
+	defer s.pulse.Close()
 	return web.Serve(host, port, s.routes())
 }
 
@@ -173,7 +177,7 @@ func (s *Server) routes() http.Handler {
 	// logged timings stay real. The tus OPTIONS shim sits outermost so the tus
 	// capability probe is answered with the protocol headers before the generic
 	// CORS handler turns every OPTIONS into a bare 204.
-	return s.tusOptionsShim(web.CORS(web.LogRequests(pulse.Middleware(s.db, "library")(mux)),
+	return s.tusOptionsShim(web.CORS(web.LogRequests(s.pulse.Wrap(mux)),
 		"GET", "POST", "PUT", "PATCH", "DELETE", "HEAD", "OPTIONS"))
 }
 

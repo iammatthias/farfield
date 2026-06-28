@@ -35,6 +35,8 @@ type Server struct {
 	auth      *web.Auth
 	rd        *web.Renderer
 	maxUpload int64
+	// pulse records request telemetry; nil disables it (tests never start it).
+	pulse *pulse.Recorder
 }
 
 // openStore selects the byte-store backend from the environment.
@@ -94,6 +96,8 @@ func run(host, port string) error {
 		maxUpload: defaultMaxUpload,
 	}
 
+	s.pulse = pulse.New(s.db, "blobs")
+	defer s.pulse.Close()
 	return web.Serve(host, port, s.routes())
 }
 
@@ -135,7 +139,7 @@ func (s *Server) routes() http.Handler {
 	// No Gzip here: blobs serves raw, often already-compressed bytes (images),
 	// and the immutable blob responses are better left untouched. Pulse traffic
 	// recording sits innermost so logged timings stay real.
-	return web.CORS(web.LogRequests(pulse.Middleware(s.db, "blobs")(mux)),
+	return web.CORS(web.LogRequests(s.pulse.Wrap(mux)),
 		"GET", "POST", "PUT", "DELETE", "OPTIONS")
 }
 

@@ -38,6 +38,9 @@ type Server struct {
 	publicURL string        // absolute HTTPS base for manifest/ipa/icon URLs
 	limiter   *tokenLimiter // failed token lookups, per client IP
 	ownerUDID string        // SIDELOAD_OWNER_UDID — kept in every app's whitelist
+
+	// pulse records request telemetry; nil disables it (tests never start it).
+	pulse *pulse.Recorder
 }
 
 // run wires up dependencies and serves until interrupted.
@@ -73,6 +76,8 @@ func run(host, port string) error {
 
 	go s.sweepLoop()
 
+	s.pulse = pulse.New(s.db, "sideload")
+	defer s.pulse.Close()
 	return web.Serve(host, port, s.routes())
 }
 
@@ -170,7 +175,7 @@ func (s *Server) routes() http.Handler {
 	// Gzip self-skips octet-stream and Range, so wrapping the whole mux leaves
 	// .ipa byte serving untouched while compressing HTML/JSON. Logging sits
 	// outside for the final status; pulse innermost so timings stay real.
-	return web.CORS(web.LogRequests(web.Gzip(pulse.Middleware(s.db, "sideload")(mux))),
+	return web.CORS(web.LogRequests(web.Gzip(s.pulse.Wrap(mux))),
 		"GET", "POST", "DELETE", "OPTIONS")
 }
 

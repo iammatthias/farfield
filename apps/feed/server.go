@@ -41,6 +41,9 @@ type Server struct {
 	// of the server. Blob CIDs are content-addressed and immutable, so a
 	// cached entry never goes stale.
 	blobCache sync.Map // cid → blobLookup
+
+	// pulse records request telemetry; nil disables it (tests never start it).
+	pulse *pulse.Recorder
 }
 
 // pageSize is how many posts one admin index page or default API list holds.
@@ -88,6 +91,8 @@ func run(host, port string) error {
 		contentPublic: store.Env("CONTENT_PUBLIC_URL", "http://127.0.0.1:8787"),
 	}
 
+	s.pulse = pulse.New(s.db, "feed")
+	defer s.pulse.Close()
 	return web.Serve(host, port, s.routes())
 }
 
@@ -141,7 +146,7 @@ func (s *Server) routes() http.Handler {
 	// blobs service — so Gzip wraps the whole mux. Logging sits outside so
 	// the recorded status is the final one; pulse traffic recording sits
 	// innermost so logged timings stay real.
-	return web.CORS(web.LogRequests(web.Gzip(pulse.Middleware(s.db, "feed")(mux))),
+	return web.CORS(web.LogRequests(web.Gzip(s.pulse.Wrap(mux))),
 		"GET", "POST", "PUT", "DELETE", "OPTIONS")
 }
 

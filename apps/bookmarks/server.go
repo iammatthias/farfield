@@ -27,6 +27,8 @@ type Server struct {
 	auth *web.Auth
 	rd   *web.Renderer
 	http *http.Client
+	// pulse records request telemetry; nil disables it (tests never start it).
+	pulse *pulse.Recorder
 }
 
 // run wires up the service and serves until interrupted.
@@ -58,6 +60,8 @@ func run(host, port string) error {
 		http: &http.Client{Timeout: fetchTimeout + 5*time.Second},
 	}
 
+	s.pulse = pulse.New(s.db, "bookmarks")
+	defer s.pulse.Close()
 	return web.Serve(host, port, s.routes())
 }
 
@@ -96,7 +100,7 @@ func (s *Server) routes() http.Handler {
 	// Everything bookmarks serves is text — HTML, JSON — so Gzip wraps the
 	// whole mux. Logging sits outside so the recorded status is the final one;
 	// pulse traffic recording sits innermost so logged timings stay real.
-	return web.CORS(web.LogRequests(web.Gzip(pulse.Middleware(s.db, "bookmarks")(mux))),
+	return web.CORS(web.LogRequests(web.Gzip(s.pulse.Wrap(mux))),
 		"GET", "POST", "PUT", "DELETE", "OPTIONS")
 }
 

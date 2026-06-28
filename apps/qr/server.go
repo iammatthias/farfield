@@ -34,6 +34,9 @@ type Server struct {
 	// CID-keyed entry never goes stale — edits simply miss into a new key.
 	mu       sync.RWMutex
 	svgCache map[string]string
+
+	// pulse records request telemetry; nil disables it (tests never start it).
+	pulse *pulse.Recorder
 }
 
 // maxSVGCache bounds the memo map. Stale CIDs accumulate as codes are
@@ -72,6 +75,8 @@ func run(host, port string) error {
 	}
 	s.rd = &web.Renderer{Templates: tmpl, AssetVer: theme.Version}
 
+	s.pulse = pulse.New(s.db, "qr")
+	defer s.pulse.Close()
 	return web.Serve(host, port, s.routes())
 }
 
@@ -116,7 +121,7 @@ func (s *Server) routes() http.Handler {
 	// Everything qr serves is text — HTML, JSON, SVG — so Gzip wraps the
 	// whole mux. Logging sits outside so the recorded status is the final one;
 	// pulse traffic recording sits innermost so logged timings stay real.
-	return web.CORS(web.LogRequests(web.Gzip(pulse.Middleware(s.db, "qr")(mux))),
+	return web.CORS(web.LogRequests(web.Gzip(s.pulse.Wrap(mux))),
 		"GET", "POST", "PUT", "DELETE", "OPTIONS")
 }
 

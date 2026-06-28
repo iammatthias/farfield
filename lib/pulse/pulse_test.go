@@ -100,8 +100,9 @@ func waitForRows(t *testing.T, db *sql.DB, n int) {
 // the recorded row — and that excluded paths record nothing.
 func TestMiddlewareRecordsRow(t *testing.T) {
 	db := testDB(t)
-	mw := Middleware(db, "testapp")
-	h := mw(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	rec := New(db, "testapp")
+	t.Cleanup(rec.Close)
+	h := rec.Wrap(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusTeapot)
 	}))
 
@@ -156,7 +157,9 @@ func TestMiddlewareRecordsRow(t *testing.T) {
 // TestStatusDefaultsTo200 covers handlers that never call WriteHeader.
 func TestStatusDefaultsTo200(t *testing.T) {
 	db := testDB(t)
-	h := Middleware(db, "testapp")(http.HandlerFunc(
+	rec := New(db, "testapp")
+	t.Cleanup(rec.Close)
+	h := rec.Wrap(http.HandlerFunc(
 		func(w http.ResponseWriter, r *http.Request) { w.Write([]byte("ok")) }))
 	h.ServeHTTP(httptest.NewRecorder(), httptest.NewRequest("GET", "/", nil))
 	waitForRows(t, db, 1)

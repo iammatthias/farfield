@@ -38,6 +38,9 @@ type Server struct {
 	db      *sql.DB
 	fetcher *fetcher
 	rd      *web.Renderer
+
+	// pulse records request telemetry; nil disables it (tests never start it).
+	pulse *pulse.Recorder
 }
 
 // backfillCommand warms the NASA cache from the configured photo start
@@ -102,6 +105,8 @@ func run(host, port string) error {
 	// a fresh deploy is populated without blocking startup.
 	go s.backfillOnStartup()
 
+	s.pulse = pulse.New(s.db, "daily")
+	defer s.pulse.Close()
 	return web.Serve(host, port, s.routes())
 }
 
@@ -185,7 +190,7 @@ func (s *Server) routes() http.Handler {
 	// are hot-linked from NASA — so Gzip wraps the whole mux. The default CORS
 	// method list (GET, OPTIONS) matches this read-only API. Pulse traffic
 	// recording sits innermost so logged timings stay real.
-	return web.CORS(web.LogRequests(web.Gzip(pulse.Middleware(s.db, "daily")(mux))))
+	return web.CORS(web.LogRequests(web.Gzip(s.pulse.Wrap(mux))))
 }
 
 // ── archive paging ─────────────────────────────────────────────────────────

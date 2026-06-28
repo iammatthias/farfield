@@ -44,6 +44,9 @@ type Server struct {
 	publicURL string        // absolute base for URLs the API returns
 	limiter   *tokenLimiter // failed token attempts, per IP+paste
 	chromaCSS template.CSS  // highlight stylesheet, embedded into view pages
+
+	// pulse records request telemetry; nil disables it (tests never start it).
+	pulse *pulse.Recorder
 }
 
 // run wires up dependencies and serves until interrupted.
@@ -70,6 +73,8 @@ func run(host, port string) error {
 	// from accumulating dead rows nobody reads.
 	go s.sweepLoop()
 
+	s.pulse = pulse.New(s.db, "scrap")
+	defer s.pulse.Close()
 	return web.Serve(host, port, s.routes())
 }
 
@@ -143,7 +148,7 @@ func (s *Server) routes() http.Handler {
 	// Everything scrap serves is text, so Gzip wraps the whole mux. Logging
 	// sits outside so the recorded status is the final one; pulse traffic
 	// recording sits innermost so logged timings stay real.
-	return web.CORS(web.LogRequests(web.Gzip(pulse.Middleware(s.db, "scrap")(mux))),
+	return web.CORS(web.LogRequests(web.Gzip(s.pulse.Wrap(mux))),
 		"GET", "POST", "DELETE", "OPTIONS")
 }
 

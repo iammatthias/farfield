@@ -61,26 +61,50 @@ const retention = 14 * 24 * time.Hour
 // new events are dropped — the request path never blocks on SQLite.
 const chanSize = 256
 
-// Middleware returns a middleware that records one requests row per handled
-// request into db, tagged for the named app. It self-creates the requests
-// table, then starts a single writer goroutine (so request handling never
-// blocks on SQLite) and a daily prune goroutine. If the table cannot be
-// created the middleware logs the error and degrades to a pass-through.
-func Middleware(db *sql.DB, app string) func(http.Handler) http.Handler {
+// New creates a traffic Recorder for the named app: it self-creates the
+// requests table, then starts a single writer goroutine (so request handling
+// never blocks on SQLite) and a daily prune goroutine. Wrap a handler with the
+// returned recorder to record one row per request; call Close on shutdown to
+// stop the goroutines and flush the queue. If the table cannot be created it
+// logs and returns nil — a nil Recorder's Wrap is a pass-through.
+func New(db *sql.DB, app string) *Recorder {
 	if _, err := db.Exec(schema); err != nil {
 		slog.Error("pulse: recording disabled, could not create requests table",
 			"app", app, "err", err)
-		return func(next http.Handler) http.Handler { return next }
+		return nil
 	}
-	rec := &recorder{
+	rec := &Recorder{
 		db:   db,
 		app:  app,
 		ch:   make(chan event, chanSize),
 		salt: newSalter(time.Now),
+		quit: make(chan struct{}),
 	}
+	rec.wg.Add(2)
 	go rec.writeLoop()
 	go rec.pruneLoop()
-	return rec.middleware
+	return rec
+}
+
+// Wrap returns next wrapped with request recording. A nil recorder returns next
+// unchanged, so an app (or a test) that never starts pulse is a clean
+// pass-through rather than a special case.
+func (rec *Recorder) Wrap(next http.Handler) http.Handler {
+	if rec == nil {
+		return next
+	}
+	return rec.middleware(next)
+}
+
+// Close stops the writer and prune goroutines, flushing whatever is already
+// queued, then returns. Safe on a nil recorder. Apps call it on shutdown, once
+// the HTTP server has stopped accepting requests, so no send races the drain.
+func (rec *Recorder) Close() {
+	if rec == nil {
+		return
+	}
+	close(rec.quit)
+	rec.wg.Wait()
 }
 
 // event is one recorded request, queued for the writer goroutine.
@@ -95,12 +119,15 @@ type event struct {
 	country   string
 }
 
-// recorder owns the write queue, the day salt, and drop accounting.
-type recorder struct {
+// Recorder owns the write queue, the day salt, and drop accounting. Its
+// goroutines run until Close, which stops them and flushes the queue.
+type Recorder struct {
 	db   *sql.DB
 	app  string
 	ch   chan event
 	salt *salter
+	quit chan struct{}
+	wg   sync.WaitGroup
 
 	drops    atomic.Int64 // events dropped since the last warning
 	lastWarn atomic.Int64 // unix time of the last drop warning
@@ -112,7 +139,7 @@ func skip(path string) bool {
 	return path == "/status" || strings.HasPrefix(path, "/static/")
 }
 
-func (rec *recorder) middleware(next http.Handler) http.Handler {
+func (rec *Recorder) middleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if skip(r.URL.Path) {
 			next.ServeHTTP(w, r)
@@ -140,38 +167,68 @@ func (rec *recorder) middleware(next http.Handler) http.Handler {
 	})
 }
 
-// writeLoop is the single writer: it drains the event channel into the
-// requests table. One goroutine per Middleware call, alive for the process.
-func (rec *recorder) writeLoop() {
-	for ev := range rec.ch {
-		_, err := rec.db.Exec(`INSERT INTO requests
-			(ts, path, method, status, latency_ms, vkey, ref_host, country)
-			VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
-			ev.ts, ev.path, ev.method, ev.status, ev.latencyMS,
-			ev.vkey, ev.refHost, ev.country)
-		if err != nil {
-			rec.noteDrop()
+// writeLoop is the single writer: it drains the event channel into the requests
+// table until Close signals quit, then flushes whatever is still queued and
+// exits. One goroutine per recorder.
+func (rec *Recorder) writeLoop() {
+	defer rec.wg.Done()
+	for {
+		select {
+		case ev := <-rec.ch:
+			rec.write(ev)
+		case <-rec.quit:
+			for { // flush the backlog so a clean shutdown loses nothing buffered
+				select {
+				case ev := <-rec.ch:
+					rec.write(ev)
+				default:
+					return
+				}
+			}
 		}
 	}
 }
 
-// pruneLoop deletes requests older than the retention window, once a day
-// (and once at startup). RFC 3339 UTC timestamps compare lexically, so a
-// plain string comparison is a correct time comparison.
-func (rec *recorder) pruneLoop() {
+// write inserts one recorded event, counting a drop on failure.
+func (rec *Recorder) write(ev event) {
+	_, err := rec.db.Exec(`INSERT INTO requests
+		(ts, path, method, status, latency_ms, vkey, ref_host, country)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+		ev.ts, ev.path, ev.method, ev.status, ev.latencyMS,
+		ev.vkey, ev.refHost, ev.country)
+	if err != nil {
+		rec.noteDrop()
+	}
+}
+
+// pruneLoop deletes requests older than the retention window, once at startup
+// and once a day after, until Close. RFC 3339 UTC timestamps compare lexically,
+// so a plain string comparison is a correct time comparison.
+func (rec *Recorder) pruneLoop() {
+	defer rec.wg.Done()
+	ticker := time.NewTicker(24 * time.Hour)
+	defer ticker.Stop()
+	rec.prune()
 	for {
-		cutoff := time.Now().UTC().Add(-retention).Format(time.RFC3339)
-		if _, err := rec.db.Exec(
-			`DELETE FROM requests WHERE ts < ?`, cutoff); err != nil {
-			slog.Warn("pulse: prune failed", "app", rec.app, "err", err)
+		select {
+		case <-rec.quit:
+			return
+		case <-ticker.C:
+			rec.prune()
 		}
-		time.Sleep(24 * time.Hour)
+	}
+}
+
+func (rec *Recorder) prune() {
+	cutoff := time.Now().UTC().Add(-retention).Format(time.RFC3339)
+	if _, err := rec.db.Exec(`DELETE FROM requests WHERE ts < ?`, cutoff); err != nil {
+		slog.Warn("pulse: prune failed", "app", rec.app, "err", err)
 	}
 }
 
 // noteDrop counts a dropped (or failed) event and logs at most once a minute
 // so a sustained overflow cannot flood the logs.
-func (rec *recorder) noteDrop() {
+func (rec *Recorder) noteDrop() {
 	n := rec.drops.Add(1)
 	now := time.Now().Unix()
 	last := rec.lastWarn.Load()

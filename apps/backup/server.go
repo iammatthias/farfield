@@ -30,6 +30,8 @@ type Server struct {
 	// snapMu single-flights snapshot runs: the scheduler tick and the admin
 	// button can never run concurrently against the same registry.
 	snapMu sync.Mutex
+	// pulse records request telemetry; nil disables it (tests never start it).
+	pulse *pulse.Recorder
 }
 
 func run(host, port string) error {
@@ -69,6 +71,8 @@ func run(host, port string) error {
 		slog.Info("snapshot scheduler disabled (BACKUP_INTERVAL=0)")
 	}
 
+	s.pulse = pulse.New(s.db, "backup")
+	defer s.pulse.Close()
 	return web.Serve(host, port, s.routes())
 }
 
@@ -122,7 +126,7 @@ func (s *Server) routes() http.Handler {
 	// Everything backup serves is text — HTML, JSON — so Gzip wraps the
 	// whole mux. Logging sits outside so the recorded status is the final one;
 	// pulse traffic recording sits innermost so logged timings stay real.
-	return web.LogRequests(web.Gzip(pulse.Middleware(s.db, "backup")(mux)))
+	return web.LogRequests(web.Gzip(s.pulse.Wrap(mux)))
 }
 
 // ── handlers ───────────────────────────────────────────────────────────────
