@@ -31,10 +31,16 @@ const defaultMaxUpload = 100 << 20 // 100 MiB
 
 // Server holds the running OPDS service.
 type Server struct {
-	db        *sql.DB
-	store     ByteStore
-	auth      *web.Auth
-	rd        *web.Renderer
+	db    *sql.DB
+	store ByteStore
+	auth  *web.Auth
+	rd    *web.Renderer
+	// uploadKey is an optional second credential (LIBRARY_UPLOAD_KEY) accepted
+	// only by the book-upload and regroup endpoints — a narrower key to hand a
+	// helper that adds and organizes books but must not delete them or read the
+	// catalog (which the full LIBRARY_API_KEY, doubling as the catalog password,
+	// would grant). Empty disables it; the full key still works everywhere.
+	uploadKey string
 	maxUpload int64
 }
 
@@ -91,6 +97,7 @@ func run(host, port string) error {
 			CookieSecure: store.Env("COOKIE_SECURE", "false") == "true",
 		},
 		rd:        &web.Renderer{Templates: tmpl, AssetVer: theme.Version},
+		uploadKey: store.Env("LIBRARY_UPLOAD_KEY", ""),
 		maxUpload: defaultMaxUpload,
 	}
 
@@ -122,8 +129,12 @@ func (s *Server) routes() http.Handler {
 	mux.HandleFunc("GET /opds/download/{cid}", s.requireCatalogAuth(s.handleDownload))
 	mux.HandleFunc("GET /opds/cover/{cid}", s.requireCatalogAuth(s.handleCover))
 
-	// JSON write API — API-key-gated.
-	mux.HandleFunc("POST /api/books", s.auth.RequireAPIKey(s.handleUploadJSON))
+	// JSON write API. Upload and regroup accept either the full LIBRARY_API_KEY
+	// or the narrower LIBRARY_UPLOAD_KEY (the "intern" key). Delete stays on the
+	// full key only, so the upload key can add and organize books but never
+	// remove them.
+	mux.HandleFunc("POST /api/books", s.requireUploadKey(s.handleUploadJSON))
+	mux.HandleFunc("PUT /api/books/{cid}/collection", s.requireUploadKey(s.handleAPISetCollection))
 	mux.HandleFunc("DELETE /api/books/{cid}", s.auth.RequireAPIKey(s.handleAPIDelete))
 
 	// Public health + shared theme stylesheet.
@@ -600,6 +611,36 @@ func (s *Server) handleUploadJSON(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	web.WriteJSON(w, http.StatusCreated, b)
+}
+
+// handleAPISetCollection regroups one existing book: it sets the book's
+// collection to the `?collection=` value, or clears it (uncategorized) when the
+// value is empty. This is the API path for organizing the library after upload —
+// re-uploading the same EPUB keeps its original collection, so moving a book
+// between folders goes through here. Folders are implicit: a collection exists
+// exactly when some book names it.
+func (s *Server) handleAPISetCollection(w http.ResponseWriter, r *http.Request) {
+	id := r.PathValue("cid")
+	if !validCID(id) {
+		web.WriteError(w, http.StatusBadRequest, "malformed cid")
+		return
+	}
+	b, err := getBook(s.db, id)
+	if err != nil {
+		web.WriteError(w, http.StatusInternalServerError, "could not read book")
+		return
+	}
+	if b == nil {
+		web.WriteError(w, http.StatusNotFound, "book not found")
+		return
+	}
+	collection := strings.TrimSpace(r.URL.Query().Get("collection"))
+	if err := updateBooksCollection(s.db, []string{id}, collection); err != nil {
+		web.WriteError(w, http.StatusInternalServerError, "could not set collection")
+		return
+	}
+	b.Collection = collection
+	web.WriteJSON(w, http.StatusOK, b)
 }
 
 func (s *Server) handleAPIDelete(w http.ResponseWriter, r *http.Request) {

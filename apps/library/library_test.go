@@ -119,6 +119,67 @@ func newTestServer(t *testing.T) *Server {
 	}
 }
 
+func TestUploadKeyScope(t *testing.T) {
+	s := newTestServer(t)
+	s.uploadKey = "intern" // the full LIBRARY_API_KEY is "secret"
+	srv := httptest.NewServer(s.routes())
+	defer srv.Close()
+
+	do := func(method, path, key string, body io.Reader) int {
+		req, _ := http.NewRequest(method, srv.URL+path, body)
+		if key != "" {
+			req.Header.Set("X-API-Key", key)
+		}
+		resp, err := srv.Client().Do(req)
+		if err != nil {
+			t.Fatalf("%s %s: %v", method, path, err)
+		}
+		resp.Body.Close()
+		return resp.StatusCode
+	}
+
+	// Upload: the upload key is accepted; no key / wrong key is rejected.
+	if got := do("POST", "/api/books?collection=Shelf", "intern", bytes.NewReader(buildEPUB(t, "Scoped", "Intern", nil))); got != http.StatusCreated {
+		t.Errorf("upload with upload key = %d, want 201", got)
+	}
+	if got := do("POST", "/api/books", "", nil); got != http.StatusUnauthorized {
+		t.Errorf("upload with no key = %d, want 401", got)
+	}
+	if got := do("POST", "/api/books", "wrong", nil); got != http.StatusUnauthorized {
+		t.Errorf("upload with wrong key = %d, want 401", got)
+	}
+
+	books, err := listBooks(s.db)
+	if err != nil || len(books) != 1 {
+		t.Fatalf("listBooks: %v (n=%d)", err, len(books))
+	}
+	bookCID := books[0].CID
+
+	// Regroup: the upload key may move a book between folders.
+	if got := do("PUT", "/api/books/"+bookCID+"/collection?collection=Moved", "intern", nil); got != http.StatusOK {
+		t.Errorf("regroup with upload key = %d, want 200", got)
+	}
+	if b, _ := getBook(s.db, bookCID); b == nil || b.Collection != "Moved" {
+		t.Fatalf("collection after regroup = %v, want Moved", b)
+	}
+
+	// Catalog: the upload key is NOT a catalog credential.
+	cat, _ := http.NewRequest("GET", srv.URL+"/opds", nil)
+	cat.SetBasicAuth("x", "intern")
+	if resp, _ := srv.Client().Do(cat); resp.StatusCode != http.StatusUnauthorized {
+		resp.Body.Close()
+		t.Errorf("catalog with upload key = %d, want 401 (scoped out)", resp.StatusCode)
+	}
+
+	// Delete: the upload key must NOT delete; the full key can.
+	if got := do("DELETE", "/api/books/"+bookCID, "intern", nil); got != http.StatusUnauthorized {
+		t.Errorf("delete with upload key = %d, want 401 (scoped out)", got)
+	}
+	if got := do("DELETE", "/api/books/"+bookCID, "secret", nil); got != http.StatusOK {
+		t.Errorf("delete with full key = %d, want 200", got)
+	}
+}
+
 func TestParseEPUB(t *testing.T) {
 	cover := []byte("\x89PNG\r\n\x1a\nFAKECOVERBYTES")
 	data := buildEPUB(t, "The Go Programming Language", "Donovan and Kernighan", cover)
