@@ -19,9 +19,19 @@ The `backup` service is internal (tailnet-only) and has no public API.
 
 ## Conventions
 
-- **Reads are public** — no auth — and send `Access-Control-Allow-Origin: *`,
-  so the browser can fetch them directly.
-- **Writes need a key** — `X-API-Key: <key>` (or `Authorization: Bearer <key>`).
+- **Reads are bearer-token-gated** per app — send the app's read key as
+  `X-API-Key: <key>` (or `Authorization: Bearer <key>`); the write key also
+  reads. Responses still send `Access-Control-Allow-Origin: *`, so a browser
+  holding the token can fetch directly. Each gate is opt-in: open until the
+  app's `<APP>_READ_KEY` is set, enforced once it is (prod sets them).
+- **Some routes stay public** — things a browser or scanner loads directly and
+  can't attach a header to: blob bytes `/blobs/{cid}` (+ `/meta`), QR scan and
+  redirect `/qr/{id}` + `/r/{id}`, the daily artifacts, every `/status`, and the
+  single-record **"view source"** reads `feed /api/posts/{slug}` and
+  `content /api/entries/{slug}` — public but rate-limited per client IP (keyed
+  callers exempt; a draft stays `404`). The enumerating lists stay gated.
+- **Writes need the write key** — `X-API-Key: <key>` (or `Authorization: Bearer
+  <key>`), a separate higher-privilege token.
 - **Keys vs CIDs.** Every record has a stable **key** — its `slug` — and a
   **CID**, a CIDv1 (sha-256) hash of its *content*. The key never
   changes; the CID changes whenever the content does. Use the CID for
@@ -30,7 +40,8 @@ The `backup` service is internal (tailnet-only) and has no public API.
   `ETag`. Send `If-None-Match: "<cid>"` to get `304 Not Modified` when
   unchanged. Blob bytes are immutable and cached forever.
 - Timestamps are RFC3339 UTC strings.
-- The public API returns **published entries only**; drafts never appear.
+- The read API returns **published entries only**; the **write** key additionally
+  previews drafts (a draft is a `404` without it).
 
 ## content — `https://content.farfield.systems`
 
