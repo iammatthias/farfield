@@ -66,6 +66,9 @@ func openDB(path string) (*sql.DB, error) {
 	if _, err := db.Exec(store.SessionSchema); err != nil {
 		return nil, err
 	}
+	if _, err := db.Exec(uploadsSchema); err != nil {
+		return nil, err
+	}
 	// Self-migrate: add the collection column to databases created before it
 	// existed, then index it (the index can only be built once the column is).
 	if err := store.EnsureColumn(db, "books", "collection", "TEXT NOT NULL DEFAULT ''"); err != nil {
@@ -261,4 +264,76 @@ func deleteBook(db *sql.DB, cid string) (*Book, error) {
 		return nil, err
 	}
 	return b, nil
+}
+
+// uploadsSchema tracks in-progress resumable (tus) uploads. The partial bytes
+// live in a staging file on disk keyed by id; this row carries the declared
+// length and the EPUB's eventual filename/collection until the upload completes
+// and becomes a book (or is pruned for going stale).
+const uploadsSchema = `
+CREATE TABLE IF NOT EXISTS uploads (
+	id         TEXT PRIMARY KEY,
+	length     INTEGER NOT NULL,
+	filename   TEXT NOT NULL DEFAULT '',
+	collection TEXT NOT NULL DEFAULT '',
+	created_at TEXT NOT NULL
+);`
+
+// Upload is one in-progress resumable upload.
+type Upload struct {
+	ID         string
+	Length     int64
+	Filename   string
+	Collection string
+	CreatedAt  string
+}
+
+func createUpload(db *sql.DB, u *Upload) error {
+	_, err := db.Exec(
+		`INSERT INTO uploads (id, length, filename, collection, created_at) VALUES (?, ?, ?, ?, ?)`,
+		u.ID, u.Length, u.Filename, u.Collection, u.CreatedAt)
+	return err
+}
+
+func getUpload(db *sql.DB, id string) (*Upload, error) {
+	var u Upload
+	err := db.QueryRow(
+		`SELECT id, length, filename, collection, created_at FROM uploads WHERE id = ?`, id).
+		Scan(&u.ID, &u.Length, &u.Filename, &u.Collection, &u.CreatedAt)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	return &u, nil
+}
+
+func deleteUpload(db *sql.DB, id string) error {
+	_, err := db.Exec(`DELETE FROM uploads WHERE id = ?`, id)
+	return err
+}
+
+// pruneUploads deletes upload rows created before the cutoff and returns their
+// ids so the caller can remove the matching staging files.
+func pruneUploads(db *sql.DB, cutoff string) ([]string, error) {
+	rows, err := db.Query(`SELECT id FROM uploads WHERE created_at < ?`, cutoff)
+	if err != nil {
+		return nil, err
+	}
+	var ids []string
+	for rows.Next() {
+		var id string
+		if err := rows.Scan(&id); err != nil {
+			rows.Close()
+			return nil, err
+		}
+		ids = append(ids, id)
+	}
+	rows.Close()
+	if len(ids) == 0 {
+		return nil, nil
+	}
+	_, err = db.Exec(`DELETE FROM uploads WHERE created_at < ?`, cutoff)
+	return ids, err
 }

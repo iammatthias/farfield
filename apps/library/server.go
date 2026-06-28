@@ -55,6 +55,8 @@ type Server struct {
 	// catalog (which the full LIBRARY_API_KEY, doubling as the catalog password,
 	// would grant). Empty disables it; the full key still works everywhere.
 	uploadKey string
+	// tusDir is the on-disk staging area for in-progress resumable uploads.
+	tusDir    string
 	maxUpload int64
 }
 
@@ -112,8 +114,10 @@ func run(host, port string) error {
 		},
 		rd:        &web.Renderer{Templates: tmpl, AssetVer: theme.Version},
 		uploadKey: store.Env("LIBRARY_UPLOAD_KEY", ""),
+		tusDir:    store.Env("LIBRARY_TUS_DIR", "tus-staging"),
 		maxUpload: maxUploadLimit(),
 	}
+	s.pruneStaleUploads() // reclaim abandoned partial uploads from a prior run
 
 	return web.Serve(host, port, s.routes())
 }
@@ -151,15 +155,25 @@ func (s *Server) routes() http.Handler {
 	mux.HandleFunc("PUT /api/books/{cid}/collection", s.requireUploadKey(s.handleAPISetCollection))
 	mux.HandleFunc("DELETE /api/books/{cid}", s.auth.RequireAPIKey(s.handleAPIDelete))
 
+	// tus resumable upload — chunked so a large EPUB clears the per-request body
+	// limit at the edge. Same upload-key scope as POST /api/books; OPTIONS is
+	// answered by the shim wrapping the whole stack (see below).
+	mux.HandleFunc("POST /api/upload/tus", s.requireUploadKey(s.handleTusCreate))
+	mux.HandleFunc("HEAD /api/upload/tus/{id}", s.requireUploadKey(s.handleTusHead))
+	mux.HandleFunc("PATCH /api/upload/tus/{id}", s.requireUploadKey(s.handleTusPatch))
+	mux.HandleFunc("DELETE /api/upload/tus/{id}", s.requireUploadKey(s.handleTusDelete))
+
 	// Public health + shared theme stylesheet.
 	mux.HandleFunc("GET /status", s.handleStatus)
 	mux.HandleFunc("GET /static/styles.css", theme.CSSHandler())
 
 	// No Gzip: library's hot paths serve raw EPUB bytes and cover images,
 	// which are already compressed. Pulse traffic recording sits innermost so
-	// logged timings stay real.
-	return web.CORS(web.LogRequests(pulse.Middleware(s.db, "library")(mux)),
-		"GET", "POST", "PUT", "DELETE", "OPTIONS")
+	// logged timings stay real. The tus OPTIONS shim sits outermost so the tus
+	// capability probe is answered with the protocol headers before the generic
+	// CORS handler turns every OPTIONS into a bare 204.
+	return s.tusOptionsShim(web.CORS(web.LogRequests(pulse.Middleware(s.db, "library")(mux)),
+		"GET", "POST", "PUT", "PATCH", "DELETE", "HEAD", "OPTIONS"))
 }
 
 // storeUpload validates EPUB bytes, extracts metadata and the cover, writes

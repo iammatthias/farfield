@@ -4,6 +4,7 @@ import (
 	"archive/zip"
 	"bytes"
 	"database/sql"
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"image"
@@ -14,6 +15,7 @@ import (
 	"net/http/httptest"
 	"net/url"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -115,6 +117,7 @@ func newTestServer(t *testing.T) *Server {
 		store:     bs,
 		auth:      &web.Auth{DB: db, Password: "pw", APIKey: "secret"},
 		rd:        &web.Renderer{Templates: tmpl, AssetVer: "test"},
+		tusDir:    t.TempDir(),
 		maxUpload: defaultMaxUpload,
 	}
 }
@@ -190,6 +193,126 @@ func TestUploadKeyScope(t *testing.T) {
 	}
 	if got := do("DELETE", "/api/books/"+bookCID, "secret", nil); got != http.StatusOK {
 		t.Errorf("delete with full key = %d, want 200", got)
+	}
+}
+
+func TestTusResumableUpload(t *testing.T) {
+	s := newTestServer(t)
+	s.uploadKey = "intern"
+	srv := httptest.NewServer(s.routes())
+	defer srv.Close()
+	client := srv.Client()
+
+	epub := buildEPUB(t, "Big Book", "Author", nil)
+	meta := "filename " + base64.StdEncoding.EncodeToString([]byte("big.epub")) +
+		",collection " + base64.StdEncoding.EncodeToString([]byte("Big Shelf"))
+
+	// Create the upload.
+	req, _ := http.NewRequest("POST", srv.URL+"/api/upload/tus", nil)
+	req.Header.Set("X-API-Key", "intern")
+	req.Header.Set("Upload-Length", strconv.Itoa(len(epub)))
+	req.Header.Set("Upload-Metadata", meta)
+	resp, err := client.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if resp.StatusCode != http.StatusCreated {
+		t.Fatalf("create = %d, want 201", resp.StatusCode)
+	}
+	loc := resp.Header.Get("Location")
+	resp.Body.Close()
+	if loc == "" {
+		t.Fatal("create returned no Location")
+	}
+	uploadURL := srv.URL + loc
+
+	patch := func(offset int, chunk []byte) *http.Response {
+		req, _ := http.NewRequest("PATCH", uploadURL, bytes.NewReader(chunk))
+		req.Header.Set("X-API-Key", "intern")
+		req.Header.Set("Content-Type", tusOctet)
+		req.Header.Set("Upload-Offset", strconv.Itoa(offset))
+		r, err := client.Do(req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return r
+	}
+
+	// First chunk.
+	half := len(epub) / 2
+	r1 := patch(0, epub[:half])
+	if r1.StatusCode != http.StatusNoContent {
+		t.Fatalf("patch 1 = %d, want 204", r1.StatusCode)
+	}
+	if got := r1.Header.Get("Upload-Offset"); got != strconv.Itoa(half) {
+		t.Errorf("offset after chunk 1 = %q, want %d", got, half)
+	}
+	r1.Body.Close()
+
+	// HEAD reports the resume offset.
+	hreq, _ := http.NewRequest("HEAD", uploadURL, nil)
+	hreq.Header.Set("X-API-Key", "intern")
+	hresp, _ := client.Do(hreq)
+	if got := hresp.Header.Get("Upload-Offset"); got != strconv.Itoa(half) {
+		t.Errorf("HEAD offset = %q, want %d", got, half)
+	}
+	hresp.Body.Close()
+
+	// Final chunk completes the upload and returns the new book's cid.
+	r2 := patch(half, epub[half:])
+	if r2.StatusCode != http.StatusNoContent {
+		t.Fatalf("patch 2 = %d, want 204", r2.StatusCode)
+	}
+	bookCID := r2.Header.Get("X-Library-Cid")
+	r2.Body.Close()
+	if bookCID == "" {
+		t.Fatal("completion returned no X-Library-Cid")
+	}
+
+	b, err := getBook(s.db, bookCID)
+	if err != nil || b == nil {
+		t.Fatalf("getBook(%s): %v", bookCID, err)
+	}
+	if b.Collection != "Big Shelf" || b.Title != "Big Book" || b.Filename != "big.epub" {
+		t.Errorf("book = %+v, want collection/title/filename from the upload", b)
+	}
+	// The staging row is cleaned up on completion.
+	if u, _ := getUpload(s.db, strings.TrimPrefix(loc, "/api/upload/tus/")); u != nil {
+		t.Error("upload row should be deleted after completion")
+	}
+}
+
+func TestTusAuthAndLimits(t *testing.T) {
+	s := newTestServer(t)
+	s.uploadKey = "intern"
+	s.maxUpload = 1 << 20 // 1 MiB
+	srv := httptest.NewServer(s.routes())
+	defer srv.Close()
+
+	create := func(key, length string) int {
+		req, _ := http.NewRequest("POST", srv.URL+"/api/upload/tus", nil)
+		if key != "" {
+			req.Header.Set("X-API-Key", key)
+		}
+		if length != "" {
+			req.Header.Set("Upload-Length", length)
+		}
+		resp, err := srv.Client().Do(req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		resp.Body.Close()
+		return resp.StatusCode
+	}
+
+	if got := create("", "100"); got != http.StatusUnauthorized {
+		t.Errorf("create without key = %d, want 401", got)
+	}
+	if got := create("intern", strconv.Itoa(2<<20)); got != http.StatusRequestEntityTooLarge {
+		t.Errorf("oversize create = %d, want 413", got)
+	}
+	if got := create("intern", "0"); got != http.StatusBadRequest {
+		t.Errorf("zero-length create = %d, want 400", got)
 	}
 }
 
