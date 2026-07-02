@@ -25,8 +25,19 @@
       display: flex; flex-direction: column; gap: 0.6rem;
       word-break: break-word;
     }
-    .post-body-line { white-space: pre-wrap; }
-    .post-body-line.blank { min-height: 0.6rem; }
+    /* Markdown blocks: vertical rhythm comes from the flex gap. */
+    .post-body p, .post-body ul, .post-body ol,
+    .post-body blockquote, .post-body pre,
+    .post-body h1, .post-body h2, .post-body h3, .post-body h4 { margin: 0; }
+    .post-body ul, .post-body ol { padding-left: 1.3rem; }
+    .post-body blockquote {
+      border-left: 2px solid var(--hairline);
+      padding-left: 0.8rem; opacity: 0.8;
+    }
+    .post-body code { font-family: var(--font-mono); font-size: 0.85em; background: var(--wash); padding: 0.1em 0.3em; }
+    .post-body pre { background: var(--wash); padding: 0.6rem 0.8rem; overflow-x: auto; }
+    .post-body pre code { background: transparent; padding: 0; }
+    .post-body h1, .post-body h2, .post-body h3, .post-body h4 { font-size: 1rem; }
     .blob-media.inline { display: inline-block; vertical-align: middle; max-width: 100%; }
     .blob-media.standalone { display: block; max-width: 100%; }
     .blob-media { border-radius: 0.5rem; }

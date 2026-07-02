@@ -75,7 +75,7 @@ func TestRenderPostBodyResolvesBlobEmbeds(t *testing.T) {
 
 	for _, want := range []string{
 		`<img class="blob-media standalone" src="https://public.example/blobs/bimg" alt="" loading="lazy" decoding="async">`,
-		"Hello &lt;b&gt;world&lt;/b&gt; ",
+		"Hello",
 		`<img class="blob-media inline" src="https://public.example/blobs/bimg" alt="" loading="lazy" decoding="async">`,
 		`<video class="blob-media standalone" controls preload="metadata" src="https://public.example/blobs/bvid"></video>`,
 		`<audio class="blob-media inline" controls preload="metadata" src="https://public.example/blobs/baud"></audio>`,
@@ -85,7 +85,30 @@ func TestRenderPostBodyResolvesBlobEmbeds(t *testing.T) {
 			t.Fatalf("rendered body missing %q:\n%s", want, out)
 		}
 	}
+	// Raw HTML in the source must never pass through as markup.
+	if strings.Contains(out, "<b>world</b>") {
+		t.Fatalf("raw HTML leaked into rendered body:\n%s", out)
+	}
 	if counts["bimg"] != 1 || counts["bvid"] != 1 || counts["baud"] != 1 || counts["bfile"] != 1 {
 		t.Fatalf("metadata fetch counts = %#v, want each CID once", counts)
+	}
+}
+
+func TestRenderPostBodyMarkdown(t *testing.T) {
+	renderer := newBodyRenderer(context.Background(), "http://127.0.0.1:0", "https://public.example", &sync.Map{})
+	out := string(renderer.render(
+		"A [link](https://example.com) and **bold** text.\nsecond line\n\n- one\n- two\n\n`code` and https://auto.example"))
+
+	for _, want := range []string{
+		`<a href="https://example.com">link</a>`,
+		`<strong>bold</strong>`,
+		`<br>`, // hard wraps: a single newline stays a line break
+		`<li>one</li>`,
+		`<code>code</code>`,
+		`<a href="https://auto.example">https://auto.example</a>`, // GFM autolink
+	} {
+		if !strings.Contains(out, want) {
+			t.Fatalf("markdown body missing %q:\n%s", want, out)
+		}
 	}
 }

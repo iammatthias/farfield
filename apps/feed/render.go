@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -11,6 +12,10 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/yuin/goldmark"
+	"github.com/yuin/goldmark/extension"
+	ghtml "github.com/yuin/goldmark/renderer/html"
 )
 
 var blobMetaClient = &http.Client{Timeout: 10 * time.Second}
@@ -68,37 +73,67 @@ func newBodyRenderer(ctx context.Context, metaBase, publicBase string, shared *s
 	}
 }
 
-func (r *bodyRenderer) render(body string) template.HTML {
-	lines := strings.Split(body, "\n")
-	out := make([]string, 0, len(lines))
-	for _, line := range lines {
-		trimmed := strings.TrimSpace(line)
-		if trimmed == "" {
-			out = append(out, `<div class="post-body-line blank"></div>`)
-			continue
-		}
-		if cid := standaloneBlobCID(trimmed); cid != "" {
-			out = append(out, `<div class="post-body-line standalone">`+r.renderEmbed(cid, true)+`</div>`)
-			continue
-		}
-		out = append(out, `<div class="post-body-line">`+r.renderInline(line)+`</div>`)
-	}
-	return template.HTML(strings.Join(out, ""))
-}
+// md renders post bodies as markdown — GFM (autolinked URLs, strikethrough,
+// tables) with hard wraps, so a single newline stays a line break the way a
+// short note expects. Raw HTML in the source is omitted (goldmark's safe
+// default), so a body can never inject markup.
+var md = goldmark.New(
+	goldmark.WithExtensions(extension.GFM),
+	goldmark.WithRendererOptions(ghtml.WithHardWraps()),
+)
 
-func (r *bodyRenderer) renderInline(line string) string {
-	var b strings.Builder
-	for line != "" {
-		start, end, cid, ok := nextBlobToken(line)
-		if !ok {
-			b.WriteString(template.HTMLEscapeString(line))
-			break
-		}
-		b.WriteString(template.HTMLEscapeString(line[:start]))
-		b.WriteString(r.renderEmbed(cid, false))
-		line = line[end:]
+// render turns a post body into HTML: blob:// embeds are swapped for
+// markdown-inert placeholders, the rest of the body goes through the markdown
+// renderer, and the embeds — which need mime-aware <img>/<video>/<audio> tags
+// markdown cannot express — are substituted back into the output.
+func (r *bodyRenderer) render(body string) template.HTML {
+	type embed struct {
+		cid        string
+		standalone bool
 	}
-	return b.String()
+	var embeds []embed
+	placeholder := func(i int) string { return fmt.Sprintf("ffblobembed%dq", i) }
+
+	lines := strings.Split(body, "\n")
+	for i, line := range lines {
+		if cid := standaloneBlobCID(strings.TrimSpace(line)); cid != "" {
+			lines[i] = placeholder(len(embeds))
+			embeds = append(embeds, embed{cid: cid, standalone: true})
+			continue
+		}
+		var b strings.Builder
+		for line != "" {
+			start, end, cid, ok := nextBlobToken(line)
+			if !ok {
+				b.WriteString(line)
+				break
+			}
+			b.WriteString(line[:start])
+			b.WriteString(placeholder(len(embeds)))
+			embeds = append(embeds, embed{cid: cid})
+			line = line[end:]
+		}
+		lines[i] = b.String()
+	}
+
+	src := strings.Join(lines, "\n")
+	var buf bytes.Buffer
+	var html string
+	if err := md.Convert([]byte(src), &buf); err != nil {
+		html = "<p>" + template.HTMLEscapeString(src) + "</p>"
+	} else {
+		html = buf.String()
+	}
+
+	for i, e := range embeds {
+		p := placeholder(i)
+		if e.standalone {
+			// A block embed gets unwrapped from the paragraph markdown put it in.
+			html = strings.ReplaceAll(html, "<p>"+p+"</p>", r.renderEmbed(e.cid, true))
+		}
+		html = strings.ReplaceAll(html, p, r.renderEmbed(e.cid, e.standalone))
+	}
+	return template.HTML(html)
 }
 
 func standaloneBlobCID(s string) string {
