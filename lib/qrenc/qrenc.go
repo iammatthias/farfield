@@ -1,4 +1,7 @@
-package main
+// Package qrenc is a standard-library-only QR encoder — model 2, byte mode,
+// versions 1-40, all four error-correction levels — rendering to SVG. It is
+// shared by the qr and sideload apps.
+package qrenc
 
 // QR Code encoder — byte mode, versions 1-40, EC levels L/M/Q/H.
 // Pure standard library; no external QR dependency. Renders to SVG.
@@ -406,10 +409,10 @@ func charCountBits(version int) int {
 	return 16
 }
 
-// pickVersion returns the smallest version 1-40 whose data capacity fits
+// PickVersion returns the smallest version 1-40 whose data capacity fits
 // dataLen bytes at the given EC level, accounting for the mode and
 // length-indicator overhead.
-func pickVersion(dataLen int, ec ECLevel) (int, error) {
+func PickVersion(dataLen int, ec ECLevel) (int, error) {
 	for v := 1; v <= 40; v++ {
 		dataCw := versionTable[v-1][ec].totalDataCodewords()
 		// 4 bits mode + N bits char count + 8*dataLen + 4 bits terminator,
@@ -952,7 +955,7 @@ func Encode(payload []byte, ec ECLevel) ([][]byte, int, error) {
 	if len(payload) == 0 {
 		return nil, 0, errors.New("empty payload")
 	}
-	version, err := pickVersion(len(payload), ec)
+	version, err := PickVersion(len(payload), ec)
 	if err != nil {
 		return nil, 0, err
 	}

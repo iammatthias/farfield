@@ -1,0 +1,20 @@
+{{define "title"}}Key issued · farfield keys{{end}}
+{{define "content"}}
+  {{template "topbar" .}}
+  <h2>Key issued</h2>
+  <p>Copy it now — only its hash is stored, so this token is shown exactly once.</p>
+  <div class="token-box">
+    <code>{{.Token}}</code>
+    <div class="token-meta">
+      <dl>
+        <dt>Name</dt><dd>{{.Key.Name}}</dd>
+        <dt>App</dt><dd>{{.Key.App}}</dd>
+        <dt>Scope</dt><dd>{{.Key.Scope}}</dd>
+        <dt>Expires</dt><dd>{{if .Key.ExpiresAt}}{{day .Key.ExpiresAt}}{{else}}never{{end}}</dd>
+      </dl>
+    </div>
+  </div>
+  <p>Send it as <code>X-API-Key: &lt;token&gt;</code> or
+     <code>Authorization: Bearer &lt;token&gt;</code>.</p>
+  <p><a href="/">Back to keys</a></p>
+{{end}}

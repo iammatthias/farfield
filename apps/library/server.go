@@ -18,6 +18,7 @@ import (
 	"time"
 
 	"github.com/iammatthias/farfield/lib/cid"
+	"github.com/iammatthias/farfield/lib/keys"
 	"github.com/iammatthias/farfield/lib/pulse"
 	"github.com/iammatthias/farfield/lib/store"
 	"github.com/iammatthias/farfield/lib/theme"
@@ -121,6 +122,8 @@ func run(host, port string) error {
 	}
 	s.pruneStaleUploads() // reclaim abandoned partial uploads from a prior run
 	s.resumeFinalizing()  // re-run finalizes a prior crash interrupted
+
+	defer keys.Attach(s.auth, "library")() // admin-issued keys, when KEYS_DB_PATH is set
 
 	s.pulse = pulse.New(s.db, "library")
 	defer s.pulse.Close()

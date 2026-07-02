@@ -38,6 +38,7 @@ services:
       - PASSWORD=${PASSWORD:-changeme}
       - BLOBS_API_KEY=${BLOBS_API_KEY:-}
       - BLOBS_READ_KEY=${BLOBS_READ_KEY:-}
+      - KEYS_DB_PATH=/data/keys.sqlite
       - R2_ACCOUNT_ID=${R2_ACCOUNT_ID:-}
       - R2_BUCKET=${R2_BUCKET:-}
       - R2_ACCESS_KEY_ID=${R2_ACCESS_KEY_ID:-}
@@ -65,6 +66,7 @@ services:
       - LIBRARY_UPLOAD_KEY=${LIBRARY_UPLOAD_KEY:-}
       - LIBRARY_MAX_UPLOAD=${LIBRARY_MAX_UPLOAD:-}
       - LIBRARY_TUS_DIR=/data/tus-staging
+      - KEYS_DB_PATH=/data/keys.sqlite
       - R2_ACCOUNT_ID=${R2_ACCOUNT_ID:-}
       - R2_BUCKET=${R2_BUCKET:-}
       - R2_ACCESS_KEY_ID=${R2_ACCESS_KEY_ID:-}
@@ -91,6 +93,7 @@ services:
       - PASSWORD=${PASSWORD:-changeme}
       - CONTENT_API_KEY=${CONTENT_API_KEY:-}
       - CONTENT_READ_KEY=${CONTENT_READ_KEY:-}
+      - KEYS_DB_PATH=/data/keys.sqlite
       - BLOBS_URL=http://blobs:8789
       - BLOBS_API_KEY=${BLOBS_API_KEY:-}
       - BLOBS_PUBLIC_URL=${BLOBS_PUBLIC_URL:-https://blobs.farfield.systems}
@@ -117,6 +120,7 @@ services:
       - PASSWORD=${PASSWORD:-changeme}
       - FEED_API_KEY=${FEED_API_KEY:-}
       - FEED_READ_KEY=${FEED_READ_KEY:-}
+      - KEYS_DB_PATH=/data/keys.sqlite
       - BLOBS_URL=http://blobs:8789
       - BLOBS_API_KEY=${BLOBS_API_KEY:-}
       - CONTENT_URL=http://content:8787
@@ -220,6 +224,7 @@ services:
       - PASSWORD=${PASSWORD:-changeme}
       - BOOKMARKS_API_KEY=${BOOKMARKS_API_KEY:-}
       - BOOKMARKS_READ_KEY=${BOOKMARKS_READ_KEY:-}
+      - KEYS_DB_PATH=/data/keys.sqlite
       - COOKIE_SECURE=true
     volumes:
       - ./data:/data
@@ -238,6 +243,7 @@ services:
       - QR_DB_PATH=/data/qr.sqlite
       - QR_API_KEY=${QR_API_KEY:-}
       - QR_READ_KEY=${QR_READ_KEY:-}
+      - KEYS_DB_PATH=/data/keys.sqlite
       - QR_PUBLIC_URL=${QR_PUBLIC_URL:-https://qr.farfield.systems}
       - PASSWORD=${PASSWORD:-changeme}
       - COOKIE_SECURE=true
@@ -257,6 +263,7 @@ services:
       - SCRAP_PORT=8799
       - SCRAP_DB_PATH=/data/scrap.sqlite
       - SCRAP_API_KEY=${SCRAP_API_KEY:-}
+      - KEYS_DB_PATH=/data/keys.sqlite
       - SCRAP_PUBLIC_URL=${SCRAP_PUBLIC_URL:-https://scrap.farfield.systems}
       - PASSWORD=${PASSWORD:-changeme}
       - COOKIE_SECURE=true
@@ -277,8 +284,26 @@ services:
       - SIDELOAD_DB_PATH=/data/sideload.sqlite
       - SIDELOAD_DIR=/data/sideload-blobs
       - SIDELOAD_API_KEY=${SIDELOAD_API_KEY:-}
+      - KEYS_DB_PATH=/data/keys.sqlite
       - SIDELOAD_OWNER_UDID=${SIDELOAD_OWNER_UDID:-}
       - SIDELOAD_PUBLIC_URL=${SIDELOAD_PUBLIC_URL:-https://sideload.farfield.systems}
+      - PASSWORD=${PASSWORD:-changeme}
+      - COOKIE_SECURE=true
+    volumes:
+      - ./data:/data
+
+  keys:
+    <<: *defaults
+    build:
+      context: .
+      args: { APP: keys }
+    image: farfield-keys
+    ports:
+      - "${KEYS_PORT:-8801}:8801"
+    environment:
+      - HOST=0.0.0.0
+      - KEYS_PORT=8801
+      - KEYS_DB_PATH=/data/keys.sqlite
       - PASSWORD=${PASSWORD:-changeme}
       - COOKIE_SECURE=true
     volumes:

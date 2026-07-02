@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/iammatthias/farfield/lib/cid"
+	"github.com/iammatthias/farfield/lib/keys"
 	"github.com/iammatthias/farfield/lib/pulse"
 	"github.com/iammatthias/farfield/lib/store"
 	"github.com/iammatthias/farfield/lib/theme"
@@ -59,6 +60,8 @@ func run(host, port string) error {
 		rd:   &web.Renderer{Templates: tmpl, AssetVer: theme.Version},
 		http: &http.Client{Timeout: fetchTimeout + 5*time.Second},
 	}
+
+	defer keys.Attach(s.auth, "bookmarks")() // admin-issued keys, when KEYS_DB_PATH is set
 
 	s.pulse = pulse.New(s.db, "bookmarks")
 	defer s.pulse.Close()

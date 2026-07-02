@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/iammatthias/farfield/lib/cid"
+	"github.com/iammatthias/farfield/lib/keys"
 	"github.com/iammatthias/farfield/lib/pulse"
 	"github.com/iammatthias/farfield/lib/store"
 	"github.com/iammatthias/farfield/lib/theme"
@@ -77,6 +78,8 @@ func run(host, port string) error {
 		blobsPublic:   store.Env("BLOBS_PUBLIC_URL", "http://127.0.0.1:8789"),
 		contentPublic: store.Env("CONTENT_PUBLIC_URL", "http://127.0.0.1:8787"),
 	}
+
+	defer keys.Attach(s.auth, "content")() // admin-issued keys, when KEYS_DB_PATH is set
 
 	s.pulse = pulse.New(s.db, "content")
 	defer s.pulse.Close()

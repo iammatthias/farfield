@@ -1,16 +1,15 @@
-module github.com/iammatthias/farfield/apps/bookmarks
+module github.com/iammatthias/farfield/lib/keys
 
 go 1.25.0
 
 require (
-	github.com/iammatthias/farfield/lib/cid v0.0.0
-	github.com/iammatthias/farfield/lib/keys v0.0.0
-	github.com/iammatthias/farfield/lib/pulse v0.0.0
 	github.com/iammatthias/farfield/lib/store v0.0.0
-	github.com/iammatthias/farfield/lib/theme v0.0.0
 	github.com/iammatthias/farfield/lib/web v0.0.0
-	modernc.org/sqlite v1.50.1
 )
+
+// The library itself registers no driver; modernc.org/sqlite is pulled in by
+// the tests alone (the importing app registers the driver, like lib/store).
+require modernc.org/sqlite v1.50.1
 
 require (
 	github.com/dustin/go-humanize v1.0.1 // indirect
@@ -27,11 +26,7 @@ require (
 
 // The lib/* modules are never published — resolve them from the local tree.
 replace (
-	github.com/iammatthias/farfield/lib/auth => ../../lib/auth
-	github.com/iammatthias/farfield/lib/cid => ../../lib/cid
-	github.com/iammatthias/farfield/lib/keys => ../../lib/keys
-	github.com/iammatthias/farfield/lib/pulse => ../../lib/pulse
-	github.com/iammatthias/farfield/lib/store => ../../lib/store
-	github.com/iammatthias/farfield/lib/theme => ../../lib/theme
-	github.com/iammatthias/farfield/lib/web => ../../lib/web
+	github.com/iammatthias/farfield/lib/auth => ../auth
+	github.com/iammatthias/farfield/lib/store => ../store
+	github.com/iammatthias/farfield/lib/web => ../web
 )

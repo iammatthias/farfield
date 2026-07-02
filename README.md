@@ -16,6 +16,10 @@ moderating content, plus a public JSON API the website reads.
 | `daily`   | `daily.farfield.systems`   | daily artifacts: the photo, from NASA APOD     |
 | `bookmarks`| `bookmarks.farfield.systems`| curated public/private link list with OG metadata |
 | `qr`      | `qr.farfield.systems`      | direct and editable-proxy QR codes              |
+| `scrap`   | `scrap.farfield.systems`   | pastes with magic-link view tokens              |
+| `sideload`| `sideload.farfield.systems`| ad-hoc iOS build distribution                   |
+| `pulse`   | `pulse.farfield.systems`   | uptime checks + per-app traffic rollups         |
+| `keys`    | `keys.farfield.systems`    | issue/revoke scoped API keys for every app      |
 | `backup`  | tailnet-only               | snapshots every app's database into R2         |
 
 ## Stack
@@ -44,10 +48,14 @@ Three ideas run through every app:
 
 ```
 go.work          Workspace — joins every module below.
+lib/web          HTTP plumbing: server lifecycle, auth gates, middleware, JSON, templates.
 lib/auth         Password verify, session tokens, cookies.
-lib/store        Env loading, short-IDs, sessions table.
+lib/store        Env loading, short-IDs, sessions table, OpenDB pragmas.
 lib/theme        Shared CSS + editor JS, embedded.
 lib/cid          Content-addressed identifiers (CIDv1).
+lib/pulse        Per-request traffic recording.
+lib/keys         Admin-issued, scoped API keys (shared keys.sqlite).
+lib/qrenc        QR encoder → SVG.
 lib/backup       Snapshot + content-addressed push/pull.
 apps/*           One module per deployable service.
 docs/API.md      The website-facing API contract.

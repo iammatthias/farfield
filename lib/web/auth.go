@@ -11,6 +11,13 @@ import (
 	"github.com/iammatthias/farfield/lib/store"
 )
 
+// KeyChecker resolves an admin-issued token for an app to its scope —
+// keys.ScopeRead / ScopeUpload / ScopeWrite. lib/keys implements it; the
+// interface lives here so lib/web never depends on the key store.
+type KeyChecker interface {
+	Check(token, app string) (scope string, ok bool)
+}
+
 // Auth bundles the credentials and session storage an app's gated routes
 // share. Zero-value fields fail closed: an empty Password rejects every
 // login, an empty APIKey refuses every API write.
@@ -18,12 +25,30 @@ import (
 // ReadKey is the optional read-only bearer token. It is the one deliberately
 // fail-open field: when empty, RequireReadKey leaves read endpoints public
 // (their pre-token behavior), so a read token is opt-in per deployment.
+//
+// Keys + App optionally layer admin-issued keys (the keys app, lib/keys) on
+// top of the env keys: a presented token that resolves for App is honored by
+// the same gates, write scope where the APIKey is accepted and read-or-write
+// scope where the ReadKey is. Env keys keep working unchanged. Assign Keys
+// only from a successfully opened store — a typed-nil in the interface would
+// read as configured.
 type Auth struct {
 	DB           *sql.DB
 	Password     string
 	APIKey       string
 	ReadKey      string
 	CookieSecure bool
+	Keys         KeyChecker
+	App          string
+}
+
+// keyScope resolves the request's bearer token against the admin-issued key
+// store, when one is attached.
+func (a *Auth) keyScope(r *http.Request) (string, bool) {
+	if a.Keys == nil {
+		return "", false
+	}
+	return a.Keys.Check(APIKeyFrom(r), a.App)
 }
 
 // RequireSession guards the HTML admin UI. An invalid or absent session
@@ -41,18 +66,19 @@ func (a *Auth) RequireSession(next http.HandlerFunc) http.HandlerFunc {
 }
 
 // RequireAPIKey guards the JSON write endpoints. A missing or wrong key
-// yields a 401. When no key is configured, writes are refused outright.
+// yields a 401. When neither an env key nor a key store is configured,
+// writes are refused outright.
 func (a *Auth) RequireAPIKey(next http.HandlerFunc) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		if a.APIKey == "" {
+		if a.APIKey == "" && a.Keys == nil {
 			WriteError(w, http.StatusServiceUnavailable, "no API key configured")
 			return
 		}
-		if !auth.VerifyAPIKey(APIKeyFrom(r), a.APIKey) {
-			WriteError(w, http.StatusUnauthorized, "missing or invalid API key")
+		if a.HasWriteKey(r) {
+			next(w, r)
 			return
 		}
-		next(w, r)
+		WriteError(w, http.StatusUnauthorized, "missing or invalid API key")
 	}
 }
 
@@ -67,9 +93,7 @@ func (a *Auth) RequireReadKey(next http.HandlerFunc) http.HandlerFunc {
 			next(w, r)
 			return
 		}
-		key := APIKeyFrom(r)
-		if auth.VerifyAPIKey(key, a.ReadKey) ||
-			(a.APIKey != "" && auth.VerifyAPIKey(key, a.APIKey)) {
+		if a.HasReadKey(r) {
 			next(w, r)
 			return
 		}
@@ -77,25 +101,35 @@ func (a *Auth) RequireReadKey(next http.HandlerFunc) http.HandlerFunc {
 	}
 }
 
-// HasWriteKey reports whether the request carries the valid write APIKey — the
-// privileged credential that unlocks writes and, for read endpoints, drafts.
-// It is false when no APIKey is configured.
+// HasWriteKey reports whether the request carries a valid write credential —
+// the env APIKey or an admin-issued write-scoped key. That is the privileged
+// tier that unlocks writes and, for read endpoints, drafts. It is false when
+// neither source is configured.
 func (a *Auth) HasWriteKey(r *http.Request) bool {
-	return a.APIKey != "" && auth.VerifyAPIKey(APIKeyFrom(r), a.APIKey)
+	if a.APIKey != "" && auth.VerifyAPIKey(APIKeyFrom(r), a.APIKey) {
+		return true
+	}
+	scope, ok := a.keyScope(r)
+	return ok && scope == "write"
 }
 
 // HasReadKey reports whether the request presents a credential the read gate
-// accepts: the read key, or the write key (which implies read). Unlike
-// RequireReadKey, an unconfigured key is NOT treated as "open" here — with
-// nothing to match, no request counts as privileged. It exists to exempt
-// trusted, keyed callers from rate limiting on otherwise-public endpoints.
+// accepts: the read key, the write key (which implies read), or an
+// admin-issued key with read or write scope. Unlike RequireReadKey, an
+// unconfigured key is NOT treated as "open" here — with nothing to match, no
+// request counts as privileged. It backs RequireReadKey and exempts trusted,
+// keyed callers from rate limiting on otherwise-public endpoints.
 func (a *Auth) HasReadKey(r *http.Request) bool {
 	key := APIKeyFrom(r)
 	if key == "" {
 		return false
 	}
-	return (a.ReadKey != "" && auth.VerifyAPIKey(key, a.ReadKey)) ||
-		(a.APIKey != "" && auth.VerifyAPIKey(key, a.APIKey))
+	if (a.ReadKey != "" && auth.VerifyAPIKey(key, a.ReadKey)) ||
+		(a.APIKey != "" && auth.VerifyAPIKey(key, a.APIKey)) {
+		return true
+	}
+	scope, ok := a.keyScope(r)
+	return ok && (scope == "read" || scope == "write")
 }
 
 // APIKeyFrom reads the API key from either an X-API-Key header or an

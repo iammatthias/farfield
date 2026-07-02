@@ -13,7 +13,9 @@ import (
 	"sync"
 
 	"github.com/iammatthias/farfield/lib/cid"
+	"github.com/iammatthias/farfield/lib/keys"
 	"github.com/iammatthias/farfield/lib/pulse"
+	"github.com/iammatthias/farfield/lib/qrenc"
 	"github.com/iammatthias/farfield/lib/store"
 	"github.com/iammatthias/farfield/lib/theme"
 	"github.com/iammatthias/farfield/lib/web"
@@ -74,6 +76,8 @@ func run(host, port string) error {
 		return err
 	}
 	s.rd = &web.Renderer{Templates: tmpl, AssetVer: theme.Version}
+
+	defer keys.Attach(s.auth, "qr")() // admin-issued keys, when KEYS_DB_PATH is set
 
 	s.pulse = pulse.New(s.db, "qr")
 	defer s.pulse.Close()
@@ -273,7 +277,7 @@ func validateCode(c *Code) string {
 	if !validMode(c.Mode) {
 		return "Mode must be 'direct' or 'proxy'."
 	}
-	ec, ok := ParseECLevel(c.EC)
+	ec, ok := qrenc.ParseECLevel(c.EC)
 	if !ok {
 		return "Error-correction level must be one of L, M, Q, H."
 	}
@@ -281,7 +285,7 @@ func validateCode(c *Code) string {
 	// oversized payload is rejected here instead of persisting a code that
 	// 500s at render time. Proxy payloads are short server URLs; skip them.
 	if c.Mode == ModeDirect {
-		if _, err := pickVersion(len(c.Target), ec); err != nil {
+		if _, err := qrenc.PickVersion(len(c.Target), ec); err != nil {
 			return "Target is too large to encode as a QR code at this error-correction level."
 		}
 	}
@@ -295,7 +299,7 @@ func validateCode(c *Code) string {
 // pipeline (Reed-Solomon + 8 mask trials) is the most expensive work in the
 // service, so repeat renders of the same code hit the cache.
 func (s *Server) encodeFor(c *Code) (string, int, error) {
-	ec, _ := ParseECLevel(c.EC)
+	ec, _ := qrenc.ParseECLevel(c.EC)
 	payload := c.Target
 	if c.Mode == ModeProxy {
 		payload = s.publicURL + "/r/" + c.ID
@@ -309,12 +313,12 @@ func (s *Server) encodeFor(c *Code) (string, int, error) {
 		if ok {
 			// The version is a cheap pure table lookup — recompute instead of
 			// caching a second value alongside the SVG.
-			v, err := pickVersion(len(payload), ec)
+			v, err := qrenc.PickVersion(len(payload), ec)
 			return svg, v, err
 		}
 	}
 
-	svg, v, err := EncodeSVG([]byte(payload), ec)
+	svg, v, err := qrenc.EncodeSVG([]byte(payload), ec)
 	if err != nil {
 		return "", 0, err
 	}

@@ -1,0 +1,59 @@
+{{define "title"}}Keys · farfield keys{{end}}
+{{define "content"}}
+  {{template "topbar" .}}
+  <p class="summary">
+    <span>Total {{.Total}}</span>
+    <span>Active {{.Active}}</span>
+  </p>
+  {{if .Keys}}
+    <div class="table-wrap">
+      <table class="admin">
+        <thead>
+          <tr>
+            <th>Name</th>
+            <th>App</th>
+            <th>Scope</th>
+            <th>Key</th>
+            <th>Created</th>
+            <th>Expires</th>
+            <th>Last used</th>
+            <th>Status</th>
+            <th>Actions</th>
+          </tr>
+        </thead>
+        <tbody>
+          {{range .Keys}}
+            <tr>
+              <td>{{.Name}}</td>
+              <td class="mono">{{.App}}</td>
+              <td class="mono">{{.Scope}}</td>
+              <td class="mono">{{.Hint}}…</td>
+              <td class="mono">{{day .CreatedAt}}</td>
+              <td class="mono">{{if .ExpiresAt}}{{day .ExpiresAt}}{{else}}—{{end}}</td>
+              <td class="mono">{{if .LastUsed}}{{day .LastUsed}}{{else}}never{{end}}</td>
+              <td>
+                {{if eq .Status "Active"}}<span class="badge live">Active</span>
+                {{else}}<span class="badge draft">{{.Status}}</span>{{end}}
+              </td>
+              <td class="actions">
+                {{if eq .Status "Active"}}
+                  <form method="post" action="/keys/{{.ID}}/revoke"
+                        onsubmit="return confirm('Revoke this key? Anything using it stops working immediately.')">
+                    <button class="danger" type="submit">Revoke</button>
+                  </form>
+                {{else}}
+                  <form method="post" action="/keys/{{.ID}}/delete"
+                        onsubmit="return confirm('Delete this key record?')">
+                    <button class="danger" type="submit">Delete</button>
+                  </form>
+                {{end}}
+              </td>
+            </tr>
+          {{end}}
+        </tbody>
+      </table>
+    </div>
+  {{else}}
+    <p class="muted">No keys yet. <a href="/new">Issue one.</a></p>
+  {{end}}
+{{end}}

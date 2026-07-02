@@ -15,7 +15,9 @@ single-binary services; the website reads three of them.
 | qr        | `https://qr.farfield.systems`        | direct and editable-proxy QR codes      |
 | apex      | `https://farfield.systems`           | the standalone landing page (not an API)|
 
-The `backup` service is internal (tailnet-only) and has no public API.
+The `backup` service is internal (tailnet-only) and has no public API. The
+`keys` service (`https://keys.farfield.systems`) is the admin credential
+minter — a password-gated UI, no public API beyond `/status`.
 
 ## Conventions
 
@@ -24,6 +26,13 @@ The `backup` service is internal (tailnet-only) and has no public API.
   reads. Responses still send `Access-Control-Allow-Origin: *`, so a browser
   holding the token can fetch directly. Each gate is opt-in: open until the
   app's `<APP>_READ_KEY` is set, enforced once it is (prod sets them).
+- **Keys come from two places.** Env keys (`<APP>_API_KEY`, `<APP>_READ_KEY`)
+  are the bootstrap/break-glass tier, set per deployment. On top of them the
+  **keys app** mints revocable, scoped keys (`ffk_…` tokens; scope
+  read/upload/write, per app or `*`, optional expiry) into a shared store
+  every keyed app honors at the same gates. Prefer minted keys for anything
+  handed to a third party or an agent — they revoke instantly without a
+  redeploy.
 - **Some routes stay public** — things a browser or scanner loads directly and
   can't attach a header to: blob bytes `/blobs/{cid}` (+ `/meta`), QR scan and
   redirect `/qr/{id}` + `/r/{id}`, the daily artifacts, every `/status`, and the

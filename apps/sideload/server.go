@@ -16,7 +16,9 @@ import (
 	"strings"
 	"time"
 
+	"github.com/iammatthias/farfield/lib/keys"
 	"github.com/iammatthias/farfield/lib/pulse"
+	"github.com/iammatthias/farfield/lib/qrenc"
 	"github.com/iammatthias/farfield/lib/store"
 	"github.com/iammatthias/farfield/lib/theme"
 	"github.com/iammatthias/farfield/lib/web"
@@ -36,7 +38,7 @@ type Server struct {
 	rd        *web.Renderer
 	blobs     *blobStore
 	publicURL string        // absolute HTTPS base for manifest/ipa/icon URLs
-	limiter   *tokenLimiter // failed token lookups, per client IP
+	limiter   *web.FailLimiter // failed token lookups, per client IP
 	ownerUDID string        // SIDELOAD_OWNER_UDID — kept in every app's whitelist
 
 	// pulse records request telemetry; nil disables it (tests never start it).
@@ -76,6 +78,8 @@ func run(host, port string) error {
 
 	go s.sweepLoop()
 
+	defer keys.Attach(s.auth, "sideload")() // admin-issued keys, when KEYS_DB_PATH is set
+
 	s.pulse = pulse.New(s.db, "sideload")
 	defer s.pulse.Close()
 	return web.Serve(host, port, s.routes())
@@ -92,7 +96,7 @@ func newServer(db *sql.DB, blobs *blobStore, password, apiKey string, cookieSecu
 			CookieSecure: cookieSecure,
 		},
 		publicURL: strings.TrimRight(publicURL, "/"),
-		limiter:   newTokenLimiter(20, time.Minute),
+		limiter:   web.NewFailLimiter(20, time.Minute),
 	}
 }
 
@@ -780,8 +784,8 @@ func (s *Server) regBundle(w http.ResponseWriter, r *http.Request) (string, bool
 		s.renderRegGone(w)
 		return "", false
 	}
-	ip := clientIP(r)
-	if s.limiter.blocked(ip) {
+	ip := web.ClientIP(r)
+	if s.limiter.Blocked(ip) {
 		s.renderRegGone(w)
 		return "", false
 	}
@@ -791,7 +795,7 @@ func (s *Server) regBundle(w http.ResponseWriter, r *http.Request) (string, bool
 		return "", false
 	}
 	if bundle == "" {
-		s.limiter.fail(ip)
+		s.limiter.Fail(ip)
 		s.renderRegGone(w)
 		return "", false
 	}
@@ -851,8 +855,8 @@ func (s *Server) handleEnrollCapture(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "registration closed", http.StatusGone)
 		return
 	}
-	ip := clientIP(r)
-	if s.limiter.blocked(ip) {
+	ip := web.ClientIP(r)
+	if s.limiter.Blocked(ip) {
 		http.Error(w, "too many attempts", http.StatusTooManyRequests)
 		return
 	}
@@ -863,7 +867,7 @@ func (s *Server) handleEnrollCapture(w http.ResponseWriter, r *http.Request) {
 	}
 	attrs, err := parseDeviceAttrs(body)
 	if err != nil {
-		s.limiter.fail(ip)
+		s.limiter.Fail(ip)
 		slog.Warn("enrol parse", "err", err)
 		http.Error(w, "could not read device info", http.StatusBadRequest)
 		return
@@ -892,15 +896,15 @@ func (s *Server) handleRegisterSubmit(w http.ResponseWriter, r *http.Request) {
 		s.renderRegGone(w)
 		return
 	}
-	ip := clientIP(r)
-	if s.limiter.blocked(ip) {
+	ip := web.ClientIP(r)
+	if s.limiter.Blocked(ip) {
 		http.Redirect(w, r, "/register/"+token+"?error="+url.QueryEscape("Too many attempts. Wait a minute."), http.StatusSeeOther)
 		return
 	}
 	_ = r.ParseForm()
 	udid, ok := normalizeUDID(r.FormValue("udid"))
 	if !ok {
-		s.limiter.fail(ip)
+		s.limiter.Fail(ip)
 		http.Redirect(w, r, "/register/"+token+"?error="+url.QueryEscape("That doesn't look like a UDID."), http.StatusSeeOther)
 		return
 	}
@@ -973,7 +977,7 @@ func (s *Server) handleBuild(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	pageURL := s.publicURL + "/b/" + b.ID
-	qrSVG, _, err := EncodeSVG([]byte(pageURL), ECMedium)
+	qrSVG, _, err := qrenc.EncodeSVG([]byte(pageURL), qrenc.ECMedium)
 	if err != nil {
 		slog.Warn("qr encode", "err", err)
 		qrSVG = ""
@@ -1118,8 +1122,8 @@ func (s *Server) loadToken(r *http.Request) (*Token, int) {
 	if !tokenPattern.MatchString(raw) {
 		return nil, http.StatusNotFound
 	}
-	ip := clientIP(r)
-	if s.limiter.blocked(ip) {
+	ip := web.ClientIP(r)
+	if s.limiter.Blocked(ip) {
 		return nil, http.StatusTooManyRequests
 	}
 	t, err := getToken(s.db, raw)
@@ -1128,7 +1132,7 @@ func (s *Server) loadToken(r *http.Request) (*Token, int) {
 		return nil, http.StatusInternalServerError
 	}
 	if t == nil {
-		s.limiter.fail(ip)
+		s.limiter.Fail(ip)
 		return nil, http.StatusNotFound
 	}
 	return t, http.StatusOK
@@ -1200,7 +1204,7 @@ func (s *Server) handleIPA(w http.ResponseWriter, r *http.Request) {
 	// byte and the token was still startable when it began — so a multi-range
 	// download counts once, on the request that finishes it.
 	if r.Method == http.MethodGet && wasStartable && deliversLast {
-		if err := recordInstall(s.db, tok, r.UserAgent(), clientIP(r)); err != nil {
+		if err := recordInstall(s.db, tok, r.UserAgent(), web.ClientIP(r)); err != nil {
 			slog.Warn("record install", "err", err)
 		} else {
 			slog.Info("install delivered", "build", b.ID, "kind", tok.Kind,

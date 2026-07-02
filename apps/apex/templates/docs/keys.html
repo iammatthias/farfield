@@ -1,0 +1,37 @@
+{{define "content"}}
+  <h1>keys</h1>
+  <p class="meta"><code>keys.farfield.systems</code></p>
+
+  <p>The credential admin — the one place API keys for every farfield app are <strong>issued, scoped, and revoked</strong>. Keys minted here land in a shared SQLite store (<code>keys.sqlite</code> on the <code>/data</code> volume) that every keyed app reads through <code>lib/keys</code>: a new key works within a request, a revoked key stops within a request, no restarts, no redeploys.</p>
+
+  <p>Admin-issued keys are deliberately <strong>opaque random tokens, not JWTs</strong>. Everything runs on one host over one bind mount, so a database row gives instant revocation, per-key audit (created / last used), and scoping with zero new dependencies — where a signed token would need TTLs, refresh flows, or a revocation list to approximate the same thing. Only each token's SHA-256 is stored; the plaintext is shown exactly once, at mint time.</p>
+
+  <h2>Scopes</h2>
+  <p>A key names one app (or <code>*</code> for all) and carries one scope:</p>
+  <div class="endpoint">
+    <span class="method">read</span>
+    <div class="returns">the token-gated read endpoints — lists, details, drafts stay hidden</div>
+  </div>
+  <div class="endpoint">
+    <span class="method">upload</span>
+    <div class="returns">the library's book upload/regroup endpoints only — no delete, no catalog reads</div>
+  </div>
+  <div class="endpoint">
+    <span class="method">write</span>
+    <div class="returns">full API writes; implies read (and upload, for the library)</div>
+  </div>
+  <p>An optional expiry (in days) auto-retires a key; revocation is immediate either way. Env keys (<code>&lt;APP&gt;_API_KEY</code>, <code>&lt;APP&gt;_READ_KEY</code>) keep working unchanged as the bootstrap / break-glass tier.</p>
+
+  <h2>Authentication</h2>
+  <p>The admin UI is session-gated behind the shared <code>PASSWORD</code>, with brute-force limiting on the login form. There is deliberately no JSON write API: a credential minter should not itself be drivable by a credential. <code>/status</code> stays public.</p>
+
+  <h2>API</h2>
+  <div class="endpoint">
+    <span class="method">GET</span>
+    <span class="path">/status</span>
+    <div class="returns"><code>{ "service", "ok", "keys", "active" }</code></div>
+  </div>
+
+  <h2>Using an issued key</h2>
+  <p>Send it exactly like an env key — <code>X-API-Key: &lt;token&gt;</code> or <code>Authorization: Bearer &lt;token&gt;</code> — against the app it was issued for. Tokens are recognizable by their <code>ffk_</code> prefix.</p>
+{{end}}

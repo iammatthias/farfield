@@ -50,6 +50,23 @@ func OfReader(r io.Reader) (string, int64, error) {
 	return "b" + strings.ToLower(b32.EncodeToString(buf)), n, nil
 }
 
+// WellFormed reports whether s looks like a CID — only the lowercase base32
+// alphabet, bounded length — so a CID taken from a request path can never be
+// a path-traversal payload. It is deliberately looser than Valid: use it to
+// sanitize identifiers headed for the filesystem or shell-adjacent contexts,
+// and Valid to verify a value really is a farfield CIDv1.
+func WellFormed(s string) bool {
+	if len(s) < 2 || len(s) > 80 {
+		return false
+	}
+	for _, c := range s {
+		if !((c >= 'a' && c <= 'z') || (c >= '0' && c <= '9')) {
+			return false
+		}
+	}
+	return true
+}
+
 // Valid reports whether s is a well-formed farfield CID: the 'b' multibase
 // prefix, base32-decodable, and carrying the v1/raw/sha2-256/32-byte header.
 func Valid(s string) bool {

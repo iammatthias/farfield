@@ -10,6 +10,7 @@ use (
 	./apps/daily
 	./apps/dead-presidents
 	./apps/feed
+	./apps/keys
 	./apps/library
 	./apps/pulse
 	./apps/qr
@@ -18,7 +19,9 @@ use (
 	./lib/auth
 	./lib/backup
 	./lib/cid
+	./lib/keys
 	./lib/pulse
+	./lib/qrenc
 	./lib/store
 	./lib/theme
 	./lib/web

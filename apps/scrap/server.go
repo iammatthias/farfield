@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"github.com/iammatthias/farfield/lib/auth"
+	"github.com/iammatthias/farfield/lib/keys"
 	"github.com/iammatthias/farfield/lib/pulse"
 	"github.com/iammatthias/farfield/lib/store"
 	"github.com/iammatthias/farfield/lib/theme"
@@ -42,7 +43,7 @@ type Server struct {
 	auth      *web.Auth
 	rd        *web.Renderer
 	publicURL string        // absolute base for URLs the API returns
-	limiter   *tokenLimiter // failed token attempts, per IP+paste
+	limiter   *web.FailLimiter // failed token attempts, per IP+paste
 	chromaCSS template.CSS  // highlight stylesheet, embedded into view pages
 
 	// pulse records request telemetry; nil disables it (tests never start it).
@@ -73,6 +74,8 @@ func run(host, port string) error {
 	// from accumulating dead rows nobody reads.
 	go s.sweepLoop()
 
+	defer keys.Attach(s.auth, "scrap")() // admin-issued keys, when KEYS_DB_PATH is set
+
 	s.pulse = pulse.New(s.db, "scrap")
 	defer s.pulse.Close()
 	return web.Serve(host, port, s.routes())
@@ -90,7 +93,7 @@ func newServer(db *sql.DB, password, apiKey string, cookieSecure bool, publicURL
 			CookieSecure: cookieSecure,
 		},
 		publicURL: strings.TrimRight(publicURL, "/"),
-		limiter:   newTokenLimiter(5, time.Minute),
+		limiter:   web.NewFailLimiter(5, time.Minute),
 		chromaCSS: highlightCSS(),
 	}
 }
@@ -257,8 +260,8 @@ func (s *Server) gate(r *http.Request, id string) (*Paste, gateResult) {
 		if len(tokens) == 0 {
 			return nil, gateLocked
 		}
-		key := clientIP(r) + "|" + p.ID
-		if s.limiter.blocked(key) {
+		key := web.ClientIP(r) + "|" + p.ID
+		if s.limiter.Blocked(key) {
 			return nil, gateLimited
 		}
 		for _, t := range tokens {
@@ -271,7 +274,7 @@ func (s *Server) gate(r *http.Request, id string) (*Paste, gateResult) {
 				return p, gateOK
 			}
 		}
-		s.limiter.fail(key)
+		s.limiter.Fail(key)
 		return nil, gateForbidden
 	}
 	return p, gateOK
@@ -407,8 +410,8 @@ func (s *Server) handleUnlock(w http.ResponseWriter, r *http.Request) {
 	}
 	_ = r.ParseForm()
 	token := r.FormValue("token")
-	key := clientIP(r) + "|" + id
-	if s.limiter.blocked(key) {
+	key := web.ClientIP(r) + "|" + id
+	if s.limiter.Blocked(key) {
 		s.renderLocked(w, id, http.StatusTooManyRequests,
 			"Too many attempts. Wait a minute.")
 		return
@@ -420,7 +423,7 @@ func (s *Server) handleUnlock(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if !ok {
-		s.limiter.fail(key)
+		s.limiter.Fail(key)
 		s.renderLocked(w, id, http.StatusForbidden, "Wrong token.")
 		return
 	}

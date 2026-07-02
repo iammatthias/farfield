@@ -1,0 +1,30 @@
+{{define "title"}}New key · farfield keys{{end}}
+{{define "content"}}
+  {{template "topbar" .}}
+  <h2>Issue a key</h2>
+  {{with .Error}}<p class="error">{{.}}</p>{{end}}
+  <form method="post" action="/keys">
+    <div class="field">
+      <label for="name">Name</label>
+      <input type="text" id="name" name="name" required autofocus
+             placeholder="who or what this key is for — e.g. intern, ios-shortcut">
+    </div>
+    <div class="field">
+      <label for="app">App</label>
+      <select id="app" name="app">
+        {{range .Apps}}<option value="{{.}}">{{if eq . "*"}}* — every app{{else}}{{.}}{{end}}</option>{{end}}
+      </select>
+    </div>
+    <div class="field">
+      <label for="scope">Scope</label>
+      <select id="scope" name="scope">
+        {{range .Scopes}}<option value="{{.Value}}">{{.Label}}</option>{{end}}
+      </select>
+    </div>
+    <div class="field">
+      <label for="expires_days">Expires after (days, empty = never)</label>
+      <input type="number" id="expires_days" name="expires_days" min="1" placeholder="never">
+    </div>
+    <div class="actions"><button type="submit">Issue key</button></div>
+  </form>
+{{end}}

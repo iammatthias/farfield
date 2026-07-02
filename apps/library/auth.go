@@ -30,12 +30,13 @@ func (s *Server) requireCatalogAuth(next http.HandlerFunc) http.HandlerFunc {
 	}
 }
 
-// requireUploadKey guards the book-upload and regroup endpoints. It accepts the
-// full LIBRARY_API_KEY or the narrower LIBRARY_UPLOAD_KEY (the "intern" key),
-// presented as X-API-Key or Authorization: Bearer. The upload key is honoured
-// only here — never by delete or the catalog — so it can add and organize books
-// without the power to remove them or read the library. When no upload key is
-// configured, only the full key passes.
+// requireUploadKey guards the book-upload and regroup endpoints. It accepts
+// the full LIBRARY_API_KEY, the narrower LIBRARY_UPLOAD_KEY (the "intern"
+// key), or an admin-issued key with upload or write scope — presented as
+// X-API-Key or Authorization: Bearer. Upload credentials are honoured only
+// here — never by delete or the catalog — so they can add and organize books
+// without the power to remove them or read the library. When nothing broader
+// is configured, only the full key passes.
 func (s *Server) requireUploadKey(next http.HandlerFunc) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		key := web.APIKeyFrom(r)
@@ -44,6 +45,13 @@ func (s *Server) requireUploadKey(next http.HandlerFunc) http.HandlerFunc {
 				(s.uploadKey != "" && auth.VerifyAPIKey(key, s.uploadKey))) {
 			next(w, r)
 			return
+		}
+		if s.auth.Keys != nil {
+			if scope, ok := s.auth.Keys.Check(key, s.auth.App); ok &&
+				(scope == "upload" || scope == "write") {
+				next(w, r)
+				return
+			}
 		}
 		web.WriteError(w, http.StatusUnauthorized, "missing or invalid API key")
 	}
