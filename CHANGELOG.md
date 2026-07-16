@@ -7,6 +7,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 ## [Unreleased]
 
 ### Added
+- Blob hygiene: blobs' `/hygiene` scans every entry, series, and post for blob:// references and reports referenced blobs (with their references), orphans (deletable in place), and dangling refs; generated thumbnails are excluded as derived, and delete affordances hide if any source scan fails.
+- Login pages carry each app's tile mark; the editor gains a keyboard cheat sheet (⌘/ or the ? toolbar button).
 - Series galleries reorder by dragging thumbnails on the edit page — the markdown rewrites itself (alt text preserved) and autosaves.
 - Fleet search: content's `/search` (linked from the fleet menu) ranks entries, series, feed posts, and public bookmarks with on-device semantic embeddings — the corpus aggregates server-side over the read APIs, ranking never leaves the browser.
 - Fleet single sign-on: set a shared `SESSION_SECRET` (and `SESSION_COOKIE_DOMAIN` for subdomain deployments) and one login works across every admin app via signed, stateless session cookies; logout anywhere ends the fleet session. Apps without the secret keep their own database sessions.

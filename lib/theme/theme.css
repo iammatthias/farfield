@@ -421,6 +421,37 @@ td.nowrap, th.nowrap { white-space: nowrap; }
 }
 .search-row input { max-width: 24rem; }
 
+/* keyboard cheat sheet — a small centered panel over the editor */
+dialog.doc-keys {
+	width: min(22rem, 92vw); margin: auto;
+	padding: 0; border: 1px solid var(--hairline); border-radius: var(--r-m);
+	background: var(--panel); color: var(--ink);
+	box-shadow: var(--shadow-m);
+}
+dialog.doc-keys::backdrop { background: color-mix(in srgb, var(--ink) 25%, transparent); }
+.doc-keys-list {
+	display: grid; grid-template-columns: auto 1fr;
+	gap: 0.5rem 1rem; margin: 0; padding: 1rem 1.1rem 1.2rem;
+	font-size: 0.88rem;
+}
+.doc-keys-list dt { text-align: right; }
+.doc-keys-list dd { margin: 0; opacity: 0.8; }
+.doc-keys-list kbd {
+	font: 500 0.78rem/1.4 var(--font-mono);
+	background: var(--wash); border-radius: 4px; padding: 0.1rem 0.4rem;
+	white-space: nowrap;
+}
+
+/* login mark — the app's tile, same mark as its favicon */
+.login-mark {
+	width: 3.4rem; height: 3.4rem; margin-bottom: 1rem;
+	display: flex; align-items: center; justify-content: center;
+	background: var(--ink); color: var(--surface);
+	border-radius: 14px;
+	font: 600 1.3rem/1 var(--font-mono);
+	box-shadow: var(--shadow-s);
+}
+
 /* series reorder tray — wraps inside the rail */
 .rail-order { margin-top: 1rem; }
 .rail-order [data-series-tray] { margin: 0.5rem 0 0.4rem; }
