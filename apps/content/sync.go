@@ -219,6 +219,10 @@ func loadVault(dir string) (map[string]vaultFile, error) {
 			return nil, err
 		}
 		for _, f := range files {
+			// Conflict siblings are review artifacts, not entries.
+			if strings.HasSuffix(f, ".remote.md") {
+				continue
+			}
 			e, err := entryFromFile(f, c.Name())
 			if err != nil {
 				return nil, fmt.Errorf("%s: %w", f, err)

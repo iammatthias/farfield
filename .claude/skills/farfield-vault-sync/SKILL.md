@@ -31,7 +31,17 @@ entry's remote CID + local hash at last sync:
 - new remote entry → written into the vault
 - deletions NEVER propagate — a vanished side is reported, nothing is removed
 
-## Running it
+## The Obsidian plugin (primary UX)
+
+`obsidian-plugin/farfield-sync/` is the in-app version — same merge, same
+state file, hash byte-compatible with Go (a cross-tool test proved parity).
+Installed at `<vault>/.obsidian/plugins/farfield-sync/`; settings (URL, write
+key, conflict preference, auto-sync interval) live in its `data.json`, which
+is gitignored in the vault because it holds the key. Ribbon icon / command
+palette syncs on demand; auto-sync runs while Obsidian is open. The CLI
+below remains for scripting and bulk reconciliation.
+
+## Running the CLI
 
 ```sh
 cd apps/content && go build -o /tmp/ff-content .

@@ -335,3 +335,37 @@ func TestFirstSyncSeedsEqualEntries(t *testing.T) {
 		t.Error("equal entry must not be pushed")
 	}
 }
+
+func TestSyncIgnoresConflictSiblings(t *testing.T) {
+	_, c, dir := newSyncTest(t)
+	mustWrite(t, dir, "posts/1700000000008-a.md", `---
+title: A
+slug: 1700000000008-a
+published: false
+created: 2024-02-02 10:00
+updated: 2024-02-02 10:00
+tags: []
+excerpt: ""
+---
+
+body
+`)
+	// A leftover conflict sibling carries the same slug in its frontmatter —
+	// it must be ignored, not treated as a duplicate entry.
+	mustWrite(t, dir, "posts/1700000000008-a.remote.md", `---
+title: A remote
+slug: 1700000000008-a
+published: false
+created: 2024-02-02 10:00
+updated: 2024-02-02 10:00
+tags: []
+excerpt: ""
+---
+
+remote body
+`)
+	var out strings.Builder
+	if err := syncVault(c, dir, false, "manual", false, &out); err != nil {
+		t.Fatalf("sibling must be ignored: %v\n%s", err, out.String())
+	}
+}

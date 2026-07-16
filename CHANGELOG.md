@@ -7,6 +7,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 ## [Unreleased]
 
 ### Added
+- Farfield Sync Obsidian plugin (`obsidian-plugin/farfield-sync`): the vault syncs from inside Obsidian — ribbon/command/auto-interval, settings-held credentials, same three-way merge and state file as the CLI with byte-compatible hashing (mobile-capable, no build step).
 - `content sync-vault`: bidirectional Obsidian vault sync — three-way merge with a state file, push/pull/conflict handling, verified ipfs→blob ref migration, and quiet state seeding for already-identical entries. The create API honors a provided `createdAt` so vault-authored dates survive.
 - Blob hygiene: blobs' `/hygiene` scans every entry, series, and post for blob:// references and reports referenced blobs (with their references), orphans (deletable in place), and dangling refs; generated thumbnails are excluded as derived, and delete affordances hide if any source scan fails.
 - Login pages carry each app's tile mark; the editor gains a keyboard cheat sheet (⌘/ or the ? toolbar button).
