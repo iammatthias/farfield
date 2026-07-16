@@ -4,15 +4,16 @@ import (
 	"database/sql"
 	"embed"
 	"encoding/json"
+	"html/template"
 	"log/slog"
 	"net/http"
 	"strconv"
 	"strings"
-	"sync"
 	"time"
 
 	"github.com/iammatthias/farfield/lib/cid"
 	"github.com/iammatthias/farfield/lib/keys"
+	"github.com/iammatthias/farfield/lib/markdown"
 	"github.com/iammatthias/farfield/lib/pulse"
 	"github.com/iammatthias/farfield/lib/store"
 	"github.com/iammatthias/farfield/lib/theme"
@@ -38,13 +39,21 @@ type Server struct {
 	// endpoint) per client IP. Keyed callers are exempt.
 	rl *web.RateLimiter
 
-	// blobCache memoizes successful blob metadata lookups for the lifetime
-	// of the server. Blob CIDs are content-addressed and immutable, so a
-	// cached entry never goes stale.
-	blobCache sync.Map // cid → blobLookup
+	// md renders post bodies — shared farfield markdown with hard wraps, so a
+	// single newline stays a line break the way a short note expects. It lives
+	// for the server's lifetime: the renderer memoizes successful blob metadata
+	// lookups forever (CIDs are content-addressed and immutable).
+	md *markdown.Renderer
 
 	// pulse records request telemetry; nil disables it (tests never start it).
 	pulse *pulse.Recorder
+}
+
+// postView is the feed template shape: the original post fields plus rendered
+// HTML for the body.
+type postView struct {
+	Post
+	BodyHTML template.HTML
 }
 
 // pageSize is how many posts one admin index page or default API list holds.
@@ -91,6 +100,9 @@ func run(host, port string) error {
 		blobsPublic:   store.Env("BLOBS_PUBLIC_URL", "http://127.0.0.1:8789"),
 		contentPublic: store.Env("CONTENT_PUBLIC_URL", "http://127.0.0.1:8787"),
 	}
+	// Feed does not resolve series:// refs (Series nil) — a bare series ref
+	// stays literal text, same as it always has.
+	s.md = &markdown.Renderer{MetaBase: s.blobsURL, PublicBase: s.blobsPublic, HardWraps: true}
 
 	defer keys.Attach(s.auth, "feed")() // admin-issued keys, when KEYS_DB_PATH is set
 
@@ -112,6 +124,11 @@ func (s *Server) routes() http.Handler {
 	mux.HandleFunc("GET /posts/{slug}/edit", s.auth.RequireSession(s.handleEditPost))
 	mux.HandleFunc("POST /posts/{slug}", s.auth.RequireSession(s.handleUpdatePost))
 	mux.HandleFunc("POST /posts/{slug}/delete", s.auth.RequireSession(s.handleDeletePost))
+
+	// Editor rendering endpoints — session-gated, used by the document editor
+	// for its live preview and its markdown→editable-HTML round trips.
+	mux.HandleFunc("POST /preview", s.auth.RequireSession(s.handlePreview))
+	mux.HandleFunc("POST /editdoc", s.auth.RequireSession(s.handleEditdoc))
 
 	// Login — public HTML.
 	mux.HandleFunc("GET /login", s.handleLoginForm)
@@ -181,16 +198,15 @@ func (s *Server) handleIndex(w http.ResponseWriter, r *http.Request) {
 		posts = posts[:pageSize]
 		older = posts[len(posts)-1].CreatedAt
 	}
-	renderer := newBodyRenderer(r.Context(), s.blobsURL, s.blobsPublic, &s.blobCache)
 	views := make([]postView, 0, len(posts))
 	for _, p := range posts {
-		views = append(views, postView{Post: p, BodyHTML: renderer.render(p.Body)})
+		views = append(views, postView{Post: p, BodyHTML: s.md.Render(r.Context(), p.Body)})
 	}
 	s.rd.Render(w, "index.html", map[string]any{"Posts": views, "Older": older})
 }
 
 func (s *Server) handleNewPost(w http.ResponseWriter, r *http.Request) {
-	s.renderPostForm(w, &Post{}, true, "/posts", "")
+	s.renderPostForm(w, r, &Post{}, true, "/posts", "")
 }
 
 func (s *Server) handleCreatePost(w http.ResponseWriter, r *http.Request) {
@@ -200,14 +216,14 @@ func (s *Server) handleCreatePost(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if p.Body == "" {
-		s.renderPostForm(w, p, true, "/posts", "A post needs a body.")
+		s.postSaveError(w, r, p, true, "/posts", "A post needs a body.")
 		return
 	}
 	if err := insertPost(s.db, p); err != nil {
 		s.fail(w, "create post", err)
 		return
 	}
-	http.Redirect(w, r, "/", http.StatusSeeOther)
+	s.postSaved(w, r, p)
 }
 
 func (s *Server) handleEditPost(w http.ResponseWriter, r *http.Request) {
@@ -220,7 +236,7 @@ func (s *Server) handleEditPost(w http.ResponseWriter, r *http.Request) {
 		http.NotFound(w, r)
 		return
 	}
-	s.renderPostForm(w, p, false, "/posts/"+p.Slug, "")
+	s.renderPostForm(w, r, p, false, "/posts/"+p.Slug, "")
 }
 
 func (s *Server) handleUpdatePost(w http.ResponseWriter, r *http.Request) {
@@ -230,9 +246,9 @@ func (s *Server) handleUpdatePost(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "bad form", http.StatusBadRequest)
 		return
 	}
+	p.Slug = slug
 	if p.Body == "" {
-		p.Slug = slug
-		s.renderPostForm(w, p, false, "/posts/"+slug, "A post needs a body.")
+		s.postSaveError(w, r, p, false, "/posts/"+slug, "A post needs a body.")
 		return
 	}
 	ok, err := updatePost(s.db, slug, p)
@@ -244,7 +260,32 @@ func (s *Server) handleUpdatePost(w http.ResponseWriter, r *http.Request) {
 		http.NotFound(w, r)
 		return
 	}
+	s.postSaved(w, r, p)
+}
+
+// postSaved answers a successful create or update: JSON with the post's
+// canonical URLs for the editor's async saves, a redirect to the feed for a
+// plain form post.
+func (s *Server) postSaved(w http.ResponseWriter, r *http.Request, p *Post) {
+	if wantsJSON(r) {
+		web.WriteJSON(w, http.StatusOK, map[string]any{
+			"slug":    p.Slug,
+			"action":  "/posts/" + p.Slug,
+			"editURL": "/posts/" + p.Slug + "/edit",
+		})
+		return
+	}
 	http.Redirect(w, r, "/", http.StatusSeeOther)
+}
+
+// postSaveError answers a failed create or update: a JSON error for the
+// editor's async saves, the re-rendered form for a plain post.
+func (s *Server) postSaveError(w http.ResponseWriter, r *http.Request, p *Post, isNew bool, action, msg string) {
+	if wantsJSON(r) {
+		web.WriteError(w, http.StatusBadRequest, msg)
+		return
+	}
+	s.renderPostForm(w, r, p, isNew, action, msg)
 }
 
 func (s *Server) handleDeletePost(w http.ResponseWriter, r *http.Request) {
@@ -253,6 +294,42 @@ func (s *Server) handleDeletePost(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	http.Redirect(w, r, "/", http.StatusSeeOther)
+}
+
+// ── editor rendering endpoints ─────────────────────────────────────────────
+
+// maxPreviewBody caps the preview/editdoc request body — far above any real
+// post, well below abuse.
+const maxPreviewBody = 2 << 20
+
+// handlePreview renders posted markdown to HTML for the editor's live
+// preview. Session-gated: it renders exactly what the feed would.
+func (s *Server) handlePreview(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		Body string `json:"body"`
+	}
+	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, maxPreviewBody)).Decode(&req); err != nil {
+		web.WriteError(w, http.StatusBadRequest, "invalid JSON")
+		return
+	}
+	web.WriteJSON(w, http.StatusOK, map[string]any{
+		"html": string(s.md.Render(r.Context(), req.Body)),
+	})
+}
+
+// handleEditdoc renders posted markdown to the constrained editable HTML the
+// document editor manipulates in place. Session-gated like the preview.
+func (s *Server) handleEditdoc(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		Body string `json:"body"`
+	}
+	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, maxPreviewBody)).Decode(&req); err != nil {
+		web.WriteError(w, http.StatusBadRequest, "invalid JSON")
+		return
+	}
+	web.WriteJSON(w, http.StatusOK, map[string]any{
+		"html": string(s.md.RenderEditable(r.Context(), req.Body)),
+	})
 }
 
 // ── login ──────────────────────────────────────────────────────────────────
@@ -398,11 +475,32 @@ func splitTags(s string) []string {
 	return out
 }
 
-func (s *Server) renderPostForm(w http.ResponseWriter, p *Post, isNew bool, action, errMsg string) {
+// bodyHTML renders a stored body for the edit page's document card; an empty
+// body stays empty so the template shows the placeholder.
+func (s *Server) bodyHTML(r *http.Request, body string) template.HTML {
+	if strings.TrimSpace(body) == "" {
+		return ""
+	}
+	return s.md.Render(r.Context(), body)
+}
+
+// wordCount is the edit page's initial word count; the editor recounts live.
+func wordCount(body string) int {
+	return len(strings.Fields(body))
+}
+
+// wantsJSON reports whether the client asked for a JSON response — the
+// editor's async saves do, browser form posts don't.
+func wantsJSON(r *http.Request) bool {
+	return strings.Contains(r.Header.Get("Accept"), "application/json")
+}
+
+func (s *Server) renderPostForm(w http.ResponseWriter, r *http.Request, p *Post, isNew bool, action, errMsg string) {
 	s.rd.Render(w, "post_form.html", map[string]any{
 		"Post": p, "IsNew": isNew, "Action": action, "Error": errMsg,
 		"TagsText":    strings.Join(p.Tags, ", "),
 		"BlobsPublic": s.blobsPublic, "ContentPublic": s.contentPublic,
+		"BodyHTML": s.bodyHTML(r, p.Body), "Words": wordCount(p.Body),
 	})
 }
 

@@ -4,10 +4,15 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>{{block "title" .}}farfield · feed{{end}}</title>
-  <meta name="theme-color" content="#fafaf7">
+  <meta name="theme-color" content="#fcfbf8" media="(prefers-color-scheme: light)">
+  <meta name="theme-color" content="#181613" media="(prefers-color-scheme: dark)">
+  <link rel="icon" href="data:image/svg+xml,<svg%20xmlns='http://www.w3.org/2000/svg'%20viewBox='0%200%2064%2064'><rect%20width='64'%20height='64'%20rx='14'%20fill='%231f1b16'/><text%20x='32'%20y='42'%20font-family='ui-monospace,Menlo,monospace'%20font-size='26'%20font-weight='600'%20text-anchor='middle'%20fill='%23fcfbf8'>fe</text></svg>">
   <link rel="stylesheet" href="/static/styles.css?v={{.AssetVer}}">
   <style>
     .container { max-width: 46rem; }
+    /* The composer page carries the document-first edit layout, which needs
+       the theme's full-width canvas — the 46rem cap suits only the stream. */
+    .container:has(.edit-layout) { max-width: 72rem; }
 
     /* feed — a ruled stream of dated notes */
     .post { padding: 1.4rem 0; border-bottom: 1px solid var(--hairline); }
@@ -17,9 +22,7 @@
       margin-bottom: 0.5rem;
       font-family: var(--font-mono); font-size: 0.75rem;
     }
-    .post-meta .when {
-      text-transform: uppercase; letter-spacing: 0.06em; opacity: 0.55;
-    }
+    .post-meta .when { opacity: 0.55; }
     .post-meta .tag { opacity: 0.55; }
     .post-body {
       display: flex; flex-direction: column; gap: 0.6rem;
@@ -40,7 +43,7 @@
     .post-body h1, .post-body h2, .post-body h3, .post-body h4 { font-size: 1rem; }
     .blob-media.inline { display: inline-block; vertical-align: middle; max-width: 100%; }
     .blob-media.standalone { display: block; max-width: 100%; }
-    .blob-media { border-radius: 0.5rem; }
+    .blob-media { border-radius: var(--r-s); }
     .post-body audio.blob-media.inline, .post-body video.blob-media.inline { width: min(100%, 32rem); }
     .blob-file { word-break: break-all; }
     .post-actions {
@@ -70,5 +73,6 @@
     <a href="/new">New post</a>
     <a href="/logout">Log out</a>
   </nav>
+    {{.FleetNav}}
 </header>
 {{end}}
