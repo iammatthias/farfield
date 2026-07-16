@@ -6,6 +6,7 @@ import (
 	"io/fs"
 	"log/slog"
 	"net/http"
+	"os"
 	"path"
 )
 
@@ -40,6 +41,11 @@ func ParseTemplates(fsys fs.FS, funcs template.FuncMap) (map[string]*template.Te
 type Renderer struct {
 	Templates map[string]*template.Template
 	AssetVer  string // stamped into every page as .AssetVer for cache-busted asset URLs
+
+	// Funcs mirrors the FuncMap the app passed to ParseTemplates — only
+	// needed so dev-mode live reloads (FARFIELD_DEV_TEMPLATES) can re-parse
+	// with the same functions. Apps with a nil FuncMap can ignore it.
+	Funcs template.FuncMap
 }
 
 // Render writes a page. data may be nil; map data gets AssetVer injected.
@@ -50,10 +56,22 @@ func (rd *Renderer) Render(w http.ResponseWriter, page string, data map[string]a
 		http.Error(w, "internal error", http.StatusInternalServerError)
 		return
 	}
+	// Dev mode: FARFIELD_DEV_TEMPLATES points at the app directory (the one
+	// containing templates/) — pages re-parse from disk on every render, so
+	// template edits show on reload without a rebuild. Parse errors log and
+	// fall back to the embedded template.
+	if dir := os.Getenv("FARFIELD_DEV_TEMPLATES"); dir != "" {
+		if live, err := ParseTemplates(os.DirFS(dir), rd.Funcs); err != nil {
+			slog.Warn("dev templates", "err", err)
+		} else if lt, ok := live[page]; ok {
+			t = lt
+		}
+	}
 	if data == nil {
 		data = map[string]any{}
 	}
 	data["AssetVer"] = rd.AssetVer
+	data["FleetNav"] = fleetNav()
 	var buf bytes.Buffer
 	if err := t.ExecuteTemplate(&buf, "base", data); err != nil {
 		slog.Error("render failed", "page", page, "err", err)
