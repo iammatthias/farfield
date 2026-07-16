@@ -1,37 +1,68 @@
 {{define "title"}}{{if .IsNew}}New series{{else}}Edit series{{end}} · farfield{{end}}
 {{define "content"}}
   {{template "topbar" .}}
-  <h2 style="font-size:1rem">{{if .IsNew}}New series{{else}}Edit series{{end}}</h2>
-  {{with .Error}}<p class="error">{{.}}</p>{{end}}
 
-  <form method="post" action="{{.Action}}">
-    {{if .IsNew}}
-      <div class="field">
-        <label for="slug">Slug</label>
-        <input type="text" id="slug" name="slug" value="{{.Series.Slug}}">
-        <p class="hint">The key entries reference as series://&lt;slug&gt;.
-          Leave blank to derive it from the title. Immutable once set.</p>
-      </div>
-    {{else}}
-      <div class="field">
-        <label>Slug</label>
-        <p><code>{{.Series.Slug}}</code> <span class="hint">— immutable</span></p>
-      </div>
-    {{end}}
+  <form method="post" action="{{.Action}}" data-async>
+    <div class="cluster">
+      <span class="label">{{if .IsNew}}New series{{else}}Edit series{{end}}</span>
+    </div>
+    {{with .Error}}<p class="error">{{.}}</p>{{end}}
+
     <div class="field">
-      <label for="title">Title</label>
-      <input type="text" id="title" name="title" value="{{.Series.Title}}">
-      <p class="hint">Optional — only for your reference in the series list.</p>
+      <input class="title-input" type="text" id="title" name="title"
+        value="{{.Series.Title}}" placeholder="Untitled series" autocomplete="off">
     </div>
-    <div class="field">
-      <label for="body">Body (markdown)</label>
-      <textarea id="body" name="body">{{.Series.Body}}</textarea>
-      <p class="hint">Rendered inline wherever an entry embeds this series.
-        Images go inline as blob://&lt;cid&gt;.</p>
+
+    <div class="edit-layout">
+      <div class="edit-main">
+        <div class="doc-card{{if not .BodyHTML}} empty{{end}}" data-doc-open
+             role="button" tabindex="0" aria-label="Open the document editor">
+          <span class="doc-open-hint">Open editor</span>
+          {{if .BodyHTML}}
+            <div class="prose doc-card-prose">{{.BodyHTML}}</div>
+          {{else}}
+            <p>Nothing here yet — click here to add images.</p>
+          {{end}}
+        </div>
+
+        <div class="field doc-fallback">
+          <label for="body">Body (markdown)</label>
+          <textarea id="body" name="body">{{.Series.Body}}</textarea>
+          <p class="hint">Rendered inline wherever an entry embeds this series.
+            Images go inline as blob://&lt;cid&gt;.</p>
+        </div>
+      </div>
+
+      <aside class="edit-rail">
+        <div class="rail-panel">
+          {{if .IsNew}}
+            <div class="field">
+              <label for="slug">Slug</label>
+              <input type="text" id="slug" name="slug" value="{{.Series.Slug}}"
+                placeholder="derived from the title">
+              <p class="hint">The key entries reference as series://&lt;slug&gt;.
+                Immutable once set.</p>
+            </div>
+          {{else}}
+            <div class="field">
+              <label>Slug</label>
+              <p><code>{{.Series.Slug}}</code> <span class="hint">— immutable</span></p>
+            </div>
+          {{end}}
+        </div>
+        <div class="rail-actions">
+          <button type="submit">{{if .IsNew}}Create series{{else}}Save &amp; close{{end}}</button>
+          <a href="/series">Cancel</a>
+        </div>
+        <div class="rail-meta">
+          <span class="doc-words mono muted">{{.Words}} words</span>
+          <span class="save-note"></span>
+        </div>
+      </aside>
     </div>
-    <div class="actions">
-      <button type="submit">{{if .IsNew}}Create series{{else}}Save changes{{end}}</button>
-      <a href="/series">Cancel</a>
-    </div>
+
+    <script>window.FARFIELD={blobs:"{{.BlobsPublic}}",content:"{{.ContentPublic}}",preview:"/preview",editdoc:"/editdoc",embeds:["blob"]};</script>
   </form>
+
+  <script src="/static/editor.js?v={{.AssetVer}}" defer></script>
 {{end}}

@@ -34,6 +34,7 @@ func readTestServer(t *testing.T) (*Server, pubDraft) {
 			ReadKey:  "read-secret",
 		},
 		rd: &web.Renderer{Templates: tmpl, AssetVer: theme.Version},
+		md: newRenderer(db, "http://127.0.0.1:0", ""),
 	}
 	if err := insertCollection(db, &Collection{Slug: "blog", Name: "Blog"}); err != nil {
 		t.Fatalf("collection: %v", err)

@@ -76,7 +76,8 @@ CREATE TABLE IF NOT EXISTS entries (
 	published     INTEGER NOT NULL DEFAULT 0,
 	created_at    TEXT NOT NULL,
 	updated_at    TEXT NOT NULL,
-	cid           TEXT NOT NULL DEFAULT ''
+	cid           TEXT NOT NULL DEFAULT '',
+	deleted_at    TEXT NOT NULL DEFAULT ''
 );
 CREATE INDEX IF NOT EXISTS entries_by_collection ON entries (collection_id, created_at DESC);
 CREATE INDEX IF NOT EXISTS entries_by_created ON entries (created_at DESC);
@@ -103,6 +104,9 @@ func openDB(path string) (*sql.DB, error) {
 	if _, err := db.Exec(store.SessionSchema); err != nil {
 		return nil, err
 	}
+	if _, err := db.Exec(revisionSchema); err != nil {
+		return nil, err
+	}
 	// Migrate pre-rename databases: the series stable key went rkey -> slug.
 	if err := store.RenameColumn(db, "series", "rkey", "slug"); err != nil {
 		return nil, err
@@ -114,7 +118,17 @@ func openDB(path string) (*sql.DB, error) {
 	if err := store.EnsureColumn(db, "series", "cid", "TEXT NOT NULL DEFAULT ''"); err != nil {
 		return nil, err
 	}
+	// Migrate pre-trash databases: deleted_at marks soft-deleted entries
+	// ('' = live). Reads filter on it; the trash page lists the rest.
+	if err := store.EnsureColumn(db, "entries", "deleted_at", "TEXT NOT NULL DEFAULT ''"); err != nil {
+		return nil, err
+	}
 	if err := backfillCIDs(db); err != nil {
+		return nil, err
+	}
+	// The trash empties itself: anything soft-deleted more than
+	// trashRetention ago is hard-deleted on startup (revisions cascade).
+	if err := purgeTrash(db); err != nil {
 		return nil, err
 	}
 	return db, nil
@@ -231,10 +245,12 @@ func scanCollection(row interface{ Scan(...any) error }) (*Collection, error) {
 }
 
 // listCollections returns every collection with its entry count, by name.
+// The count skips trashed entries so it matches what the lists show.
 func listCollections(db *sql.DB) ([]Collection, error) {
 	rows, err := db.Query(`
 		SELECT c.id, c.slug, c.name, c.description, c.created_at,
-		       (SELECT COUNT(*) FROM entries e WHERE e.collection_id = c.id)
+		       (SELECT COUNT(*) FROM entries e
+		        WHERE e.collection_id = c.id AND e.deleted_at = '')
 		FROM collections c ORDER BY c.name COLLATE NOCASE`)
 	if err != nil {
 		return nil, err
@@ -376,7 +392,9 @@ func listEntriesFull(db *sql.DB, collection string, status entryStatus, limit, o
 func queryEntries(db *sql.DB, cols, collection string, status entryStatus, limit, offset int) ([]Entry, error) {
 	q := `SELECT ` + cols + `
 	      FROM entries e JOIN collections c ON c.id = e.collection_id`
-	var where []string
+	// Trashed entries are invisible to every list; the trash page has its
+	// own query (listTrash).
+	where := []string{"e.deleted_at = ''"}
 	var args []any
 	if collection != "" {
 		where = append(where, "c.slug = ?")
@@ -415,10 +433,10 @@ func queryEntries(db *sql.DB, cols, collection string, status entryStatus, limit
 }
 
 // countEntries returns the number of entries, optionally filtered to one
-// collection and by published state.
+// collection and by published state. Trashed entries never count.
 func countEntries(db *sql.DB, collection string, status entryStatus) (int, error) {
 	q := `SELECT COUNT(*) FROM entries e`
-	var where []string
+	where := []string{"e.deleted_at = ''"}
 	var args []any
 	if collection != "" {
 		q += ` JOIN collections c ON c.id = e.collection_id`
@@ -440,9 +458,11 @@ func countEntries(db *sql.DB, collection string, status entryStatus) (int, error
 // "<count>-<max updated_at>" — used to derive a list-level ETag without loading
 // any bodies. collection filters by collection slug ("" = all); status scopes
 // the fingerprint so a draft change cannot reuse a published list's ETag.
+// Trashed entries are excluded, matching the lists the fingerprint stands
+// for; the count moves on a trash or restore, so the ETag moves with it.
 func entriesFingerprint(db *sql.DB, collection string, status entryStatus) (string, error) {
 	q := `SELECT COUNT(*) || '-' || COALESCE(MAX(e.updated_at), '') FROM entries e`
-	var where []string
+	where := []string{"e.deleted_at = ''"}
 	var args []any
 	if collection != "" {
 		q += ` JOIN collections c ON c.id = e.collection_id`
@@ -468,12 +488,13 @@ func seriesFingerprint(db *sql.DB) (string, error) {
 	return fp, err
 }
 
-// getEntry returns an entry by slug, or (nil, nil) if absent.
+// getEntry returns an entry by slug, or (nil, nil) if absent. A trashed
+// entry reads as absent — to every caller it is gone until restored.
 func getEntry(db *sql.DB, slug string) (*Entry, error) {
 	e, err := scanEntry(db.QueryRow(
 		`SELECT `+entryCols+`
 		 FROM entries e JOIN collections c ON c.id = e.collection_id
-		 WHERE e.slug = ?`, slug))
+		 WHERE e.slug = ? AND e.deleted_at = ''`, slug))
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, nil
 	}
@@ -510,11 +531,13 @@ func insertEntry(db *sql.DB, e *Entry) error {
 		return err
 	}
 	e.ID, _ = res.LastInsertId()
+	saveRevision(db, e)
 	return nil
 }
 
 // updateEntry replaces an entry, identified by its current slug. e carries the
-// new values (including a possibly-changed collection and slug).
+// new values (including a possibly-changed collection and slug). A trashed
+// entry is not editable — like every read, the update sees it as missing.
 func updateEntry(db *sql.DB, currentSlug string, e *Entry) error {
 	collID, err := collectionID(db, e.Collection)
 	if err != nil {
@@ -525,7 +548,7 @@ func updateEntry(db *sql.DB, currentSlug string, e *Entry) error {
 	res, err := db.Exec(
 		`UPDATE entries SET collection_id = ?, slug = ?, title = ?, excerpt = ?,
 		   body = ?, tags = ?, published = ?, updated_at = ?, cid = ?
-		 WHERE slug = ?`,
+		 WHERE slug = ? AND deleted_at = ''`,
 		collID, e.Slug, e.Title, e.Excerpt, e.Body, encodeTags(e.Tags),
 		e.Published, e.UpdatedAt, e.CID, currentSlug)
 	if err != nil {
@@ -537,17 +560,100 @@ func updateEntry(db *sql.DB, currentSlug string, e *Entry) error {
 	if n, _ := res.RowsAffected(); n == 0 {
 		return sql.ErrNoRows
 	}
+	saveRevision(db, e)
 	return nil
 }
 
-// deleteEntry removes an entry by slug.
+// deleteEntry soft-deletes an entry by slug: the row moves to the trash
+// (deleted_at set) instead of being removed. With revisions covering edits
+// and the trash covering deletes, no entry admin action is destructive
+// anymore — everything is reversible until the trash purge.
+//
+// The trashed row keeps its slug, so the UNIQUE constraint stops a new entry
+// from reusing it until the row is purged. Slugs are stamped with their
+// creation millisecond, so a real collision is vanishingly unlikely — not
+// worth freeing the slug early for.
 func deleteEntry(db *sql.DB, slug string) (bool, error) {
-	res, err := db.Exec(`DELETE FROM entries WHERE slug = ?`, slug)
+	res, err := db.Exec(
+		`UPDATE entries SET deleted_at = ? WHERE slug = ? AND deleted_at = ''`,
+		store.NowRFC3339(), slug)
 	if err != nil {
 		return false, err
 	}
 	n, _ := res.RowsAffected()
 	return n > 0, nil
+}
+
+// ── trash ──────────────────────────────────────────────────────────────────
+
+// trashRetention is how long a soft-deleted entry stays restorable; the
+// startup purge removes anything older for good.
+const trashRetention = 30 * 24 * time.Hour
+
+// TrashedEntry is a trash-page row: just enough identity to recognise the
+// entry and act on it.
+type TrashedEntry struct {
+	Slug       string
+	Title      string
+	Collection string
+	DeletedAt  string
+}
+
+// listTrash returns soft-deleted entries, most recently deleted first.
+func listTrash(db *sql.DB) ([]TrashedEntry, error) {
+	rows, err := db.Query(`
+		SELECT e.slug, e.title, c.slug, e.deleted_at
+		FROM entries e JOIN collections c ON c.id = e.collection_id
+		WHERE e.deleted_at != '' ORDER BY e.deleted_at DESC`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []TrashedEntry
+	for rows.Next() {
+		var t TrashedEntry
+		if err := rows.Scan(&t.Slug, &t.Title, &t.Collection, &t.DeletedAt); err != nil {
+			return nil, err
+		}
+		out = append(out, t)
+	}
+	return out, rows.Err()
+}
+
+// restoreEntry returns a trashed entry to the live lists. It also touches
+// updated_at so the list fingerprints (and their ETags) can never alias a
+// trash-then-restore back to a stale cached list.
+func restoreEntry(db *sql.DB, slug string) (bool, error) {
+	res, err := db.Exec(
+		`UPDATE entries SET deleted_at = '', updated_at = ? WHERE slug = ? AND deleted_at != ''`,
+		store.NowRFC3339(), slug)
+	if err != nil {
+		return false, err
+	}
+	n, _ := res.RowsAffected()
+	return n > 0, nil
+}
+
+// hardDeleteEntry removes a trashed entry's row for good — its revisions
+// cascade away with it. Only rows already in the trash qualify, so a stray
+// call can never skip the trash and destroy a live entry.
+func hardDeleteEntry(db *sql.DB, slug string) (bool, error) {
+	res, err := db.Exec(`DELETE FROM entries WHERE slug = ? AND deleted_at != ''`, slug)
+	if err != nil {
+		return false, err
+	}
+	n, _ := res.RowsAffected()
+	return n > 0, nil
+}
+
+// purgeTrash hard-deletes entries trashed more than trashRetention ago —
+// run once at startup, so the trash never grows without bound. deleted_at
+// holds RFC 3339 UTC strings, which order correctly as text.
+func purgeTrash(db *sql.DB) error {
+	cutoff := time.Now().UTC().Add(-trashRetention).Format(time.RFC3339)
+	_, err := db.Exec(
+		`DELETE FROM entries WHERE deleted_at != '' AND deleted_at < ?`, cutoff)
+	return err
 }
 
 // getOrCreateCollection returns the collection with the given slug, creating
@@ -569,7 +675,9 @@ func getOrCreateCollection(db *sql.DB, slug, name string) (*Collection, error) {
 
 // importEntry inserts or replaces an entry, keyed by slug, preserving the
 // created/updated timestamps it carries — unlike insertEntry, which stamps
-// them with the current time.
+// them with the current time. Importing is an explicit request for the
+// content to exist, so a re-import of a trashed slug pulls the row back out
+// of the trash rather than silently updating a hidden row.
 func importEntry(db *sql.DB, e *Entry) error {
 	collID, err := collectionID(db, e.Collection)
 	if err != nil {
@@ -590,7 +698,8 @@ func importEntry(db *sql.DB, e *Entry) error {
 		   collection_id=excluded.collection_id, title=excluded.title,
 		   excerpt=excluded.excerpt, body=excluded.body, tags=excluded.tags,
 		   published=excluded.published, created_at=excluded.created_at,
-		   updated_at=excluded.updated_at, cid=excluded.cid`,
+		   updated_at=excluded.updated_at, cid=excluded.cid,
+		   deleted_at=''`,
 		collID, e.Slug, e.Title, e.Excerpt, e.Body, encodeTags(e.Tags),
 		e.Published, e.CreatedAt, e.UpdatedAt, e.CID)
 	return err

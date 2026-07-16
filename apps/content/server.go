@@ -14,13 +14,14 @@ import (
 
 	"github.com/iammatthias/farfield/lib/cid"
 	"github.com/iammatthias/farfield/lib/keys"
+	"github.com/iammatthias/farfield/lib/markdown"
 	"github.com/iammatthias/farfield/lib/pulse"
 	"github.com/iammatthias/farfield/lib/store"
 	"github.com/iammatthias/farfield/lib/theme"
 	"github.com/iammatthias/farfield/lib/web"
 )
 
-//go:embed templates
+//go:embed templates static
 var assets embed.FS
 
 // Server holds the running content service.
@@ -32,6 +33,11 @@ type Server struct {
 	blobsKey      string // blobs API key — kept server-side
 	blobsPublic   string // browser-facing blobs URL — injected into the editor
 	contentPublic string // browser-facing content URL — injected into the editor
+	siteURLTmpl   string // public page URL pattern with {collection}/{slug} holes; "" = no view-on-site link
+
+	// md renders markdown bodies for the admin UI — the document preview on
+	// the edit page and the editor's live preview endpoint.
+	md *markdown.Renderer
 
 	// rl rate-limits the public, ungated single-entry read (the "view source"
 	// endpoint) per client IP. Keyed callers are exempt; drafts stay 404 to
@@ -77,7 +83,10 @@ func run(host, port string) error {
 		blobsKey:      store.Env("BLOBS_API_KEY", ""),
 		blobsPublic:   store.Env("BLOBS_PUBLIC_URL", "http://127.0.0.1:8789"),
 		contentPublic: store.Env("CONTENT_PUBLIC_URL", "http://127.0.0.1:8787"),
+		siteURLTmpl:   store.Env("SITE_URL_TEMPLATE", ""), // e.g. https://example.com/{collection}/{slug}
 	}
+
+	s.md = newRenderer(s.db, s.blobsURL, s.blobsPublic)
 
 	defer keys.Attach(s.auth, "content")() // admin-issued keys, when KEYS_DB_PATH is set
 
@@ -101,10 +110,14 @@ func (s *Server) routes() http.Handler {
 	mux.HandleFunc("POST /collections/{slug}/delete", s.auth.RequireSession(s.handleDeleteCollection))
 	mux.HandleFunc("GET /entries", s.auth.RequireSession(s.handleEntries))
 	mux.HandleFunc("GET /entries/new", s.auth.RequireSession(s.handleNewEntry))
+	mux.HandleFunc("GET /entries/trash", s.auth.RequireSession(s.handleTrash))
 	mux.HandleFunc("POST /entries", s.auth.RequireSession(s.handleCreateEntry))
 	mux.HandleFunc("GET /entries/{slug}/edit", s.auth.RequireSession(s.handleEditEntry))
 	mux.HandleFunc("POST /entries/{slug}", s.auth.RequireSession(s.handleUpdateEntry))
 	mux.HandleFunc("POST /entries/{slug}/delete", s.auth.RequireSession(s.handleDeleteEntry))
+	mux.HandleFunc("POST /entries/{slug}/restore", s.auth.RequireSession(s.handleRestoreEntry))
+	mux.HandleFunc("POST /entries/{slug}/destroy", s.auth.RequireSession(s.handleDestroyEntry))
+	mux.HandleFunc("POST /entries/{slug}/revisions/{id}/restore", s.auth.RequireSession(s.handleRestoreRevision))
 	mux.HandleFunc("GET /series", s.auth.RequireSession(s.handleSeriesList))
 	mux.HandleFunc("GET /series/new", s.auth.RequireSession(s.handleNewSeries))
 	mux.HandleFunc("POST /series", s.auth.RequireSession(s.handleCreateSeries))
@@ -144,6 +157,8 @@ func (s *Server) routes() http.Handler {
 	// Editor embedding — session-gated proxy so service keys stay server-side.
 	// The list reads (blob gallery, series picker) proxy the now-token-gated
 	// sibling APIs so the editor page never needs a read token.
+	mux.HandleFunc("POST /preview", s.auth.RequireSession(s.handlePreview))
+	mux.HandleFunc("POST /editdoc", s.auth.RequireSession(s.handleEditdoc))
 	mux.HandleFunc("POST /embed/blob", s.auth.RequireSession(s.handleEmbedBlob))
 	mux.HandleFunc("POST /embed/series", s.auth.RequireSession(s.handleEmbedSeries))
 	mux.HandleFunc("GET /embed/blobs", s.auth.RequireSession(s.handleEmbedBlobsList))
@@ -152,6 +167,14 @@ func (s *Server) routes() http.Handler {
 	// Shared theme stylesheet and editor script.
 	mux.HandleFunc("GET /static/styles.css", theme.CSSHandler())
 	mux.HandleFunc("GET /static/editor.js", theme.EditorJSHandler())
+
+	// App-local static assets. The vendored semantic-search engine is
+	// versioned by URL (?v=) and immutable; everything else revalidates.
+	// The exact patterns above outrank this subtree.
+	mux.Handle("GET /static/", staticHandler())
+
+	// Search corpus for the entries page — session-gated like the page.
+	mux.HandleFunc("GET /search-data", s.auth.RequireSession(s.handleSearchData))
 
 	// Everything content serves is text — HTML, JSON — so Gzip wraps the
 	// whole mux. Logging sits outside so the recorded status is the final one;
@@ -287,20 +310,20 @@ func (s *Server) handleNewEntry(w http.ResponseWriter, r *http.Request) {
 		http.Redirect(w, r, "/collections/new", http.StatusSeeOther)
 		return
 	}
-	s.renderEntryForm(w, &Entry{Published: false}, collections, true, "/entries", "")
+	s.renderEntryForm(w, r, &Entry{Published: false}, collections, true, "/entries", "")
 }
 
 func (s *Server) handleCreateEntry(w http.ResponseWriter, r *http.Request) {
 	e := entryFromForm(r)
 	if e.Title == "" || e.Slug == "" || e.Collection == "" {
-		s.reRenderEntryForm(w, e, true, "/entries", "Title and collection are required.")
+		s.entrySaveError(w, r, e, true, "/entries", "Title and collection are required.")
 		return
 	}
 	if err := insertEntry(s.db, e); err != nil {
-		s.reRenderEntryForm(w, e, true, "/entries", err.Error())
+		s.entrySaveError(w, r, e, true, "/entries", err.Error())
 		return
 	}
-	http.Redirect(w, r, "/entries", http.StatusSeeOther)
+	s.entrySaved(w, r, e)
 }
 
 func (s *Server) handleEditEntry(w http.ResponseWriter, r *http.Request) {
@@ -318,14 +341,41 @@ func (s *Server) handleEditEntry(w http.ResponseWriter, r *http.Request) {
 		s.fail(w, "list collections", err)
 		return
 	}
-	s.renderEntryForm(w, e, collections, false, "/entries/"+e.Slug, "")
+	s.renderEntryForm(w, r, e, collections, false, "/entries/"+e.Slug, "")
+}
+
+// handleRestoreRevision copies a saved revision's title and body back onto
+// the entry. The restore is itself a normal save, so it lands in history too
+// — restoring can never destroy state.
+func (s *Server) handleRestoreRevision(w http.ResponseWriter, r *http.Request) {
+	e, err := getEntry(s.db, r.PathValue("slug"))
+	if err != nil {
+		s.fail(w, "get entry", err)
+		return
+	}
+	revID, _ := strconv.ParseInt(r.PathValue("id"), 10, 64)
+	rev, err := getRevision(s.db, revID)
+	if err != nil {
+		s.fail(w, "get revision", err)
+		return
+	}
+	if e == nil || rev == nil || rev.EntryID != e.ID {
+		http.NotFound(w, r)
+		return
+	}
+	e.Title, e.Body = rev.Title, rev.Body
+	if err := updateEntry(s.db, e.Slug, e); err != nil {
+		s.fail(w, "restore revision", err)
+		return
+	}
+	http.Redirect(w, r, "/entries/"+e.Slug+"/edit", http.StatusSeeOther)
 }
 
 func (s *Server) handleUpdateEntry(w http.ResponseWriter, r *http.Request) {
 	current := r.PathValue("slug")
 	e := entryFromForm(r)
 	if e.Title == "" || e.Slug == "" || e.Collection == "" {
-		s.reRenderEntryForm(w, e, false, "/entries/"+current, "Title and collection are required.")
+		s.entrySaveError(w, r, e, false, "/entries/"+current, "Title and collection are required.")
 		return
 	}
 	if err := updateEntry(s.db, current, e); err != nil {
@@ -333,18 +383,82 @@ func (s *Server) handleUpdateEntry(w http.ResponseWriter, r *http.Request) {
 			http.NotFound(w, r)
 			return
 		}
-		s.reRenderEntryForm(w, e, false, "/entries/"+current, err.Error())
+		s.entrySaveError(w, r, e, false, "/entries/"+current, err.Error())
+		return
+	}
+	s.entrySaved(w, r, e)
+}
+
+// entrySaved answers a successful create or update: JSON with the entry's
+// canonical URLs for the editor's async saves (the slug may have changed),
+// a redirect to the list for a plain form post.
+func (s *Server) entrySaved(w http.ResponseWriter, r *http.Request, e *Entry) {
+	if wantsJSON(r) {
+		web.WriteJSON(w, http.StatusOK, map[string]any{
+			"slug":    e.Slug,
+			"action":  "/entries/" + e.Slug,
+			"editURL": "/entries/" + e.Slug + "/edit",
+		})
 		return
 	}
 	http.Redirect(w, r, "/entries", http.StatusSeeOther)
 }
 
+// entrySaveError answers a failed create or update: a JSON error for the
+// editor's async saves, the re-rendered form for a plain post.
+func (s *Server) entrySaveError(w http.ResponseWriter, r *http.Request, e *Entry, isNew bool, action, msg string) {
+	if wantsJSON(r) {
+		web.WriteError(w, http.StatusBadRequest, msg)
+		return
+	}
+	s.reRenderEntryForm(w, r, e, isNew, action, msg)
+}
+
+// handleDeleteEntry moves an entry to the trash. The delete is soft — with
+// revisions covering edits and the trash covering deletes, no entry admin
+// action is destructive anymore; "delete forever" lives on the trash page.
 func (s *Server) handleDeleteEntry(w http.ResponseWriter, r *http.Request) {
 	if _, err := deleteEntry(s.db, r.PathValue("slug")); err != nil {
 		s.fail(w, "delete entry", err)
 		return
 	}
 	http.Redirect(w, r, "/entries", http.StatusSeeOther)
+}
+
+// ── HTML admin: trash ──────────────────────────────────────────────────────
+
+// handleTrash lists soft-deleted entries with per-row restore and
+// delete-forever actions. Trashed rows older than trashRetention are purged
+// at startup.
+func (s *Server) handleTrash(w http.ResponseWriter, r *http.Request) {
+	trashed, err := listTrash(s.db)
+	if err != nil {
+		s.fail(w, "list trash", err)
+		return
+	}
+	s.rd.Render(w, "trash.html", map[string]any{
+		"Entries": trashed, "RetentionDays": int(trashRetention.Hours() / 24),
+	})
+}
+
+// handleRestoreEntry returns a trashed entry to the live lists.
+func (s *Server) handleRestoreEntry(w http.ResponseWriter, r *http.Request) {
+	if _, err := restoreEntry(s.db, r.PathValue("slug")); err != nil {
+		s.fail(w, "restore entry", err)
+		return
+	}
+	http.Redirect(w, r, "/entries/trash", http.StatusSeeOther)
+}
+
+// handleDestroyEntry hard-deletes a trashed entry — the one genuinely
+// destructive entry action left, and it only works on rows already in the
+// trash (a live entry must be trashed first).
+func (s *Server) handleDestroyEntry(w http.ResponseWriter, r *http.Request) {
+	if _, err := hardDeleteEntry(s.db, r.PathValue("slug")); err != nil {
+		s.fail(w, "destroy entry", err)
+		return
+	}
+	http.Redirect(w, r, "/entries/trash", http.StatusSeeOther)
 }
 
 // entryFromForm reads an Entry from a posted admin form.
@@ -557,6 +671,10 @@ func (s *Server) handleAPIUpdateEntry(w http.ResponseWriter, r *http.Request) {
 	web.WriteJSON(w, http.StatusOK, e)
 }
 
+// handleAPIDeleteEntry trashes an entry, like the admin delete — soft, so no
+// API action is destructive either. The response shape is unchanged: to the
+// caller the entry is deleted (and reads as gone); restore and purge live in
+// the admin trash page.
 func (s *Server) handleAPIDeleteEntry(w http.ResponseWriter, r *http.Request) {
 	existed, err := deleteEntry(s.db, r.PathValue("slug"))
 	if err != nil {
@@ -578,22 +696,63 @@ func (s *Server) renderCollectionForm(w http.ResponseWriter, c *Collection, isNe
 	})
 }
 
-func (s *Server) renderEntryForm(w http.ResponseWriter, e *Entry, collections []Collection, isNew bool, action, errMsg string) {
+func (s *Server) renderEntryForm(w http.ResponseWriter, r *http.Request, e *Entry, collections []Collection, isNew bool, action, errMsg string) {
 	s.rd.Render(w, "entry_form.html", map[string]any{
 		"Entry": e, "Collections": collections, "IsNew": isNew,
 		"Action": action, "Error": errMsg, "TagsText": strings.Join(e.Tags, ", "),
 		"BlobsPublic": s.blobsPublic, "ContentPublic": s.contentPublic,
+		"BodyHTML": s.bodyHTML(r, e.Body), "Words": wordCount(e.Body),
+		"Revisions": s.revisionViews(e), "SiteURL": s.siteURL(e),
 	})
 }
 
+// siteURL is the entry's public page — SITE_URL_TEMPLATE with {collection}
+// and {slug} filled in. Empty when the template is unset (feature off) or the
+// entry is unpublished (a draft has no public page yet), so the template just
+// checks .SiteURL.
+func (s *Server) siteURL(e *Entry) string {
+	if s.siteURLTmpl == "" || !e.Published {
+		return ""
+	}
+	return strings.NewReplacer(
+		"{collection}", e.Collection,
+		"{slug}", e.Slug,
+	).Replace(s.siteURLTmpl)
+}
+
+// revisionViews shapes an entry's history for the edit page rail.
+func (s *Server) revisionViews(e *Entry) []map[string]any {
+	if e.ID == 0 {
+		return nil
+	}
+	revs, err := listRevisions(s.db, e.ID, 10)
+	if err != nil {
+		slog.Warn("list revisions", "slug", e.Slug, "err", err)
+		return nil
+	}
+	views := make([]map[string]any, 0, len(revs))
+	for _, rv := range revs {
+		when := rv.SavedAt
+		if t, err := time.Parse(time.RFC3339, rv.SavedAt); err == nil {
+			when = t.Local().Format("Jan 2 15:04")
+		}
+		views = append(views, map[string]any{
+			"ID": rv.ID, "When": when,
+			"Words":   revisionWords(rv.Body),
+			"Current": rv.CID == e.CID,
+		})
+	}
+	return views
+}
+
 // reRenderEntryForm re-shows the entry form after a failed submit.
-func (s *Server) reRenderEntryForm(w http.ResponseWriter, e *Entry, isNew bool, action, errMsg string) {
+func (s *Server) reRenderEntryForm(w http.ResponseWriter, r *http.Request, e *Entry, isNew bool, action, errMsg string) {
 	collections, err := listCollections(s.db)
 	if err != nil {
 		s.fail(w, "list collections", err)
 		return
 	}
-	s.renderEntryForm(w, e, collections, isNew, action, errMsg)
+	s.renderEntryForm(w, r, e, collections, isNew, action, errMsg)
 }
 
 // fail logs an internal error and returns a 500.
@@ -621,7 +780,7 @@ func (s *Server) handleSeriesList(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleNewSeries(w http.ResponseWriter, r *http.Request) {
-	s.renderSeriesForm(w, &Series{}, true, "/series", "")
+	s.renderSeriesForm(w, r, &Series{}, true, "/series", "")
 }
 
 func (s *Server) handleCreateSeries(w http.ResponseWriter, r *http.Request) {
@@ -633,11 +792,11 @@ func (s *Server) handleCreateSeries(w http.ResponseWriter, r *http.Request) {
 		Body:  r.FormValue("body"),
 	}
 	if se.Slug == "" {
-		s.renderSeriesForm(w, se, true, "/series", "A series needs a slug or a title.")
+		s.seriesSaveError(w, r, se, true, "/series", "A series needs a slug or a title.")
 		return
 	}
 	if existing, _ := getSeries(s.db, se.Slug); existing != nil {
-		s.renderSeriesForm(w, se, true, "/series", "That slug is already taken.")
+		s.seriesSaveError(w, r, se, true, "/series", "That slug is already taken.")
 		return
 	}
 	now := store.NowRFC3339()
@@ -646,7 +805,7 @@ func (s *Server) handleCreateSeries(w http.ResponseWriter, r *http.Request) {
 		s.fail(w, "create series", err)
 		return
 	}
-	http.Redirect(w, r, "/series", http.StatusSeeOther)
+	s.seriesSaved(w, r, se)
 }
 
 func (s *Server) handleEditSeries(w http.ResponseWriter, r *http.Request) {
@@ -659,7 +818,7 @@ func (s *Server) handleEditSeries(w http.ResponseWriter, r *http.Request) {
 		http.NotFound(w, r)
 		return
 	}
-	s.renderSeriesForm(w, se, false, "/series/"+se.Slug, "")
+	s.renderSeriesForm(w, r, se, false, "/series/"+se.Slug, "")
 }
 
 func (s *Server) handleUpdateSeries(w http.ResponseWriter, r *http.Request) {
@@ -680,7 +839,29 @@ func (s *Server) handleUpdateSeries(w http.ResponseWriter, r *http.Request) {
 		s.fail(w, "update series", err)
 		return
 	}
+	s.seriesSaved(w, r, se)
+}
+
+// seriesSaved and seriesSaveError mirror the entry save responses for the
+// series form's async saves.
+func (s *Server) seriesSaved(w http.ResponseWriter, r *http.Request, se *Series) {
+	if wantsJSON(r) {
+		web.WriteJSON(w, http.StatusOK, map[string]any{
+			"slug":    se.Slug,
+			"action":  "/series/" + se.Slug,
+			"editURL": "/series/" + se.Slug + "/edit",
+		})
+		return
+	}
 	http.Redirect(w, r, "/series", http.StatusSeeOther)
+}
+
+func (s *Server) seriesSaveError(w http.ResponseWriter, r *http.Request, se *Series, isNew bool, action, msg string) {
+	if wantsJSON(r) {
+		web.WriteError(w, http.StatusBadRequest, msg)
+		return
+	}
+	s.renderSeriesForm(w, r, se, isNew, action, msg)
 }
 
 func (s *Server) handleDeleteSeries(w http.ResponseWriter, r *http.Request) {
@@ -691,9 +872,11 @@ func (s *Server) handleDeleteSeries(w http.ResponseWriter, r *http.Request) {
 	http.Redirect(w, r, "/series", http.StatusSeeOther)
 }
 
-func (s *Server) renderSeriesForm(w http.ResponseWriter, se *Series, isNew bool, action, errMsg string) {
+func (s *Server) renderSeriesForm(w http.ResponseWriter, r *http.Request, se *Series, isNew bool, action, errMsg string) {
 	s.rd.Render(w, "series_form.html", map[string]any{
 		"Series": se, "IsNew": isNew, "Action": action, "Error": errMsg,
+		"BlobsPublic": s.blobsPublic, "ContentPublic": s.contentPublic,
+		"BodyHTML": s.bodyHTML(r, se.Body), "Words": wordCount(se.Body),
 	})
 }
 

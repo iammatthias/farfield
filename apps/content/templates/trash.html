@@ -1,0 +1,46 @@
+{{define "title"}}Trash · farfield{{end}}
+{{define "content"}}
+  {{template "topbar" .}}
+
+  <div class="section-head">
+    <h2>Trash</h2>
+    <a href="/entries">← Entries</a>
+  </div>
+
+  {{if .Entries}}
+    <p class="muted">Deleted entries stay here for {{.RetentionDays}} days, then
+      they are purged for good.</p>
+    <div class="table-wrap entries-wrap">
+      <table class="rows entries">
+        <thead>
+          <tr><th>Title</th><th>Collection</th>
+            <th class="nowrap">Deleted</th><th></th></tr>
+        </thead>
+        <tbody>
+          {{range .Entries}}
+            <tr>
+              <td data-label="Title">{{.Title}}</td>
+              <td data-label="Collection">{{.Collection}}</td>
+              <td data-label="Deleted" class="nowrap muted">{{slice .DeletedAt 0 10}}</td>
+              <td data-label="" class="nowrap">
+                {{/* per-row forms are fine here — this page has no outer
+                     form, and forms must never nest */}}
+                <div class="trash-actions">
+                  <form method="post" action="/entries/{{.Slug}}/restore">
+                    <button type="submit">Restore</button>
+                  </form>
+                  <form method="post" action="/entries/{{.Slug}}/destroy"
+                        onsubmit="return confirm('Delete forever? This cannot be undone.')">
+                    <button class="danger" type="submit">Delete forever</button>
+                  </form>
+                </div>
+              </td>
+            </tr>
+          {{end}}
+        </tbody>
+      </table>
+    </div>
+  {{else}}
+    <p class="muted">The trash is empty.</p>
+  {{end}}
+{{end}}

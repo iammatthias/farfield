@@ -6,6 +6,7 @@ require (
 	github.com/iammatthias/farfield/lib/auth v0.0.0
 	github.com/iammatthias/farfield/lib/cid v0.0.0
 	github.com/iammatthias/farfield/lib/keys v0.0.0
+	github.com/iammatthias/farfield/lib/markdown v0.0.0
 	github.com/iammatthias/farfield/lib/pulse v0.0.0
 	github.com/iammatthias/farfield/lib/store v0.0.0
 	github.com/iammatthias/farfield/lib/theme v0.0.0
@@ -20,6 +21,7 @@ require (
 	github.com/mattn/go-isatty v0.0.20 // indirect
 	github.com/ncruces/go-strftime v1.0.0 // indirect
 	github.com/remyoudompheng/bigfft v0.0.0-20230129092748-24d4a6f8daec // indirect
+	github.com/yuin/goldmark v1.8.2 // indirect
 	golang.org/x/sys v0.42.0 // indirect
 	modernc.org/libc v1.72.3 // indirect
 	modernc.org/mathutil v1.7.1 // indirect
@@ -31,6 +33,7 @@ replace (
 	github.com/iammatthias/farfield/lib/auth => ../../lib/auth
 	github.com/iammatthias/farfield/lib/cid => ../../lib/cid
 	github.com/iammatthias/farfield/lib/keys => ../../lib/keys
+	github.com/iammatthias/farfield/lib/markdown => ../../lib/markdown
 	github.com/iammatthias/farfield/lib/pulse => ../../lib/pulse
 	github.com/iammatthias/farfield/lib/store => ../../lib/store
 	github.com/iammatthias/farfield/lib/theme => ../../lib/theme

@@ -4,8 +4,35 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>{{block "title" .}}farfield · content{{end}}</title>
-  <meta name="theme-color" content="#fafaf7">
+  <meta name="theme-color" content="#fcfbf8" media="(prefers-color-scheme: light)">
+  <meta name="theme-color" content="#181613" media="(prefers-color-scheme: dark)">
+  <link rel="icon" href="data:image/svg+xml,<svg%20xmlns='http://www.w3.org/2000/svg'%20viewBox='0%200%2064%2064'><rect%20width='64'%20height='64'%20rx='14'%20fill='%231f1b16'/><text%20x='32'%20y='42'%20font-family='ui-monospace,Menlo,monospace'%20font-size='26'%20font-weight='600'%20text-anchor='middle'%20fill='%23fcfbf8'>co</text></svg>">
   <link rel="stylesheet" href="/static/styles.css?v={{.AssetVer}}">
+  <style>
+    /* Entry tables become labelled cards on phones (the pattern library's
+       book list uses): the header row hides, each row turns into a panel,
+       and each cell carries its column name via data-label. */
+    @media (max-width: 46rem) {
+      .entries-wrap { overflow: visible; background: none; border: 0; border-radius: 0; box-shadow: none; }
+      table.entries thead { display: none; }
+      table.entries, table.entries tbody, table.entries tr, table.entries td { display: block; width: auto; }
+      table.entries tr {
+        background: var(--panel); border: 1px solid var(--hairline);
+        border-radius: var(--r-s); padding: 0.5rem 0.75rem; margin-bottom: 0.6rem;
+      }
+      /* the search page hides filtered rows via the hidden attribute; the
+         display overrides above must never resurrect them */
+      table.entries tr[hidden] { display: none; }
+      table.entries td { display: flex; gap: 0.7rem; align-items: baseline; padding: 0.18rem 0; border: 0; }
+      table.entries td::before {
+        content: attr(data-label); flex: 0 0 5rem;
+        font-size: 0.7rem; font-weight: 500; line-height: 1.7; opacity: 0.55;
+      }
+      table.entries td[data-label=""]::before { content: none; }
+    }
+    /* trash rows carry two actions — keep them on one line */
+    .trash-actions { display: flex; gap: 0.6rem; align-items: center; }
+  </style>
 </head>
 <body>
   <main class="container">
@@ -23,28 +50,29 @@
     <a href="/series">Series</a>
     <a href="/logout">Log out</a>
   </nav>
+  {{.FleetNav}}
 </header>
 {{end}}
 
 {{define "entry_table"}}
-<div class="table-wrap">
-  <table class="rows">
+<div class="table-wrap entries-wrap">
+  <table class="rows entries">
     <thead>
       <tr><th>Title</th><th>Collection</th><th>Status</th>
         <th class="nowrap">Created</th><th class="nowrap">Updated</th><th></th></tr>
     </thead>
     <tbody>
       {{range .Entries}}
-        <tr>
-          <td><a href="/entries/{{.Slug}}/edit">{{.Title}}</a></td>
-          <td>{{.Collection}}</td>
-          <td>{{if .Published}}<span class="badge live">published</span>
+        <tr data-slug="{{.Slug}}">
+          <td data-label="Title"><a href="/entries/{{.Slug}}/edit">{{.Title}}</a></td>
+          <td data-label="Collection">{{.Collection}}</td>
+          <td data-label="Status">{{if .Published}}<span class="badge live">published</span>
               {{else}}<span class="badge draft">draft</span>{{end}}</td>
-          <td class="nowrap muted">{{slice .CreatedAt 0 10}}</td>
-          <td class="nowrap muted">{{slice .UpdatedAt 0 10}}</td>
-          <td class="nowrap">
+          <td data-label="Created" class="nowrap muted">{{slice .CreatedAt 0 10}}</td>
+          <td data-label="Updated" class="nowrap muted">{{slice .UpdatedAt 0 10}}</td>
+          <td data-label="" class="nowrap">
             <form method="post" action="/entries/{{.Slug}}/delete"
-                  onsubmit="return confirm('Delete this entry?')">
+                  onsubmit="return confirm('Move this entry to the trash?')">
               <button class="danger" type="submit">Delete</button>
             </form>
           </td>

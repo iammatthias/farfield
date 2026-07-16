@@ -4,7 +4,13 @@
 
   <div class="section-head">
     <h2>Entries{{if .Filter}} · {{.Filter}}{{end}}</h2>
-    <a href="/entries/new">New entry</a>
+    <span><a class="muted" href="/entries/trash">Trash</a> · <a href="/entries/new">New entry</a></span>
+  </div>
+
+  <div class="search-row">
+    <input type="search" id="entry-search" placeholder="Search entries…"
+      autocomplete="off" aria-label="Search entries">
+    <span id="search-status" class="hint" aria-live="polite"></span>
   </div>
 
   {{if .Collections}}
@@ -20,4 +26,6 @@
   {{else}}
     <p class="muted">No entries{{if .Filter}} in this collection{{end}}.</p>
   {{end}}
+
+  <script type="module" src="/static/search.js"></script>
 {{end}}
