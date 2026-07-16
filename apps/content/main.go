@@ -7,6 +7,7 @@
 // Usage:
 //
 //	content                       serve the HTTP service (default)
+//	content sync-vault <dir>       bidirectional Obsidian vault sync — see sync.go
 //	content import-vault <dir>     import an Obsidian content vault — each
 //	                               subfolder is a collection, each .md file
 //	                               an entry with YAML frontmatter
@@ -42,6 +43,11 @@ func main() {
 	case "health":
 		// Probes /status — backs the Docker healthcheck (distroless: no curl).
 		os.Exit(web.Health(store.Env("CONTENT_PORT", "8787")))
+	case "sync-vault":
+		if err := runSyncVault(os.Args[2:]); err != nil {
+			slog.Error("sync-vault failed", "err", err)
+			os.Exit(1)
+		}
 	case "import-vault":
 		if len(os.Args) < 3 {
 			fmt.Fprintln(os.Stderr, "usage: content import-vault <dir>")
@@ -72,7 +78,7 @@ func main() {
 		}
 	default:
 		fmt.Fprintln(os.Stderr,
-			"usage: content [serve | health | import-vault <dir> | import-series <old-content-db> | reslug-series | reslug-entries]")
+			"usage: content [serve | health | sync-vault <dir> | import-vault <dir> | import-series <old-content-db> | reslug-series | reslug-entries]")
 		os.Exit(2)
 	}
 }

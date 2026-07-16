@@ -1,0 +1,69 @@
+---
+name: Farfield Vault Sync
+description: Bidirectional sync between the Obsidian content vault and the farfield content service via `content sync-vault`. Use when authoring flows touch the vault, when vault and production content drift, or when reconciling copy edits made in Obsidian against content.farfield.systems.
+---
+
+# Farfield Vault Sync
+
+## Overview
+
+The Obsidian vault at
+`~/Library/Mobile Documents/iCloud~md~obsidian/Documents/obsidian_cms` is the
+authoring surface for content.farfield.systems. Its `content/` directory maps
+1:1 onto the service: each subfolder is a collection, each `.md` file an
+entry, frontmatter is `title, slug, published, created, updated, tags,
+excerpt`. Files directly in `content/` (e.g. VOICE_DNA.md) are notes, not
+entries, and are ignored.
+
+`content sync-vault <content-dir>` (apps/content/sync.go) syncs both ways.
+
+## How it decides
+
+Three-way merge against `content/.farfield-sync.json`, which records each
+entry's remote CID + local hash at last sync:
+
+- local changed → push (PUT; server stamps updatedAt, file is rewritten to match)
+- remote changed → pull (file rewritten in vault frontmatter style)
+- both changed → conflict: `--prefer manual` (default) writes `<slug>.remote.md`
+  beside the file and exits nonzero; `--prefer local|remote` auto-resolves
+- never-synced + equal content → state seeded quietly (no updatedAt churn)
+- new local file → create (POST; the API honors the vault's `created` date)
+- new remote entry → written into the vault
+- deletions NEVER propagate — a vanished side is reported, nothing is removed
+
+## Running it
+
+```sh
+cd apps/content && go build -o /tmp/ff-content .
+CONTENT_URL=https://content.farfield.systems \
+BLOBS_PUBLIC_URL=https://blobs.farfield.systems \
+CONTENT_API_KEY=<write key> \
+/tmp/ff-content sync-vault --dry-run "<vault>/content"   # always dry-run first
+```
+
+The write key lives in the homelab `.env` — fetch it into the environment
+without printing it:
+`KEY=$(ssh iam@homelab.local 'grep "^CONTENT_API_KEY=" ~/projects/farfield/.env | cut -d= -f2')`.
+The client sends a browser-shaped User-Agent (the Cloudflare edge rejects
+bot agents).
+
+## Media rules (history that bites)
+
+- Bodies reference media as `blob://<cid>`; galleries as `![](series://<slug>)`.
+- Legacy `ipfs://<cid>` refs: raw (bafkrei…) CIDs are IDENTICAL to blob CIDs
+  — `--migrate-refs` rewrites them after verifying each against the blob
+  store. dag-pb (bafybei…) CIDs re-hashed during the 2026 migration and do
+  NOT match; those were fixed once by positional mapping against production
+  bodies. A push refuses bodies with CID-bearing ipfs refs; prose that merely
+  mentions `ipfs://` is fine.
+- Production galleries use curated `series://` embeds — never overwrite them
+  with raw image lists from old vault copies.
+
+## Conventions
+
+- Slugs are stable public URLs: production's slug wins identity disputes;
+  rename the vault file, don't re-slug production.
+- New entries via Templater templates in `<vault>/templates/` (they scaffold
+  the full frontmatter including excerpt).
+- The vault is its own git repo (auto-backup commits) — make an explicit
+  checkpoint commit before bulk reconciliation.

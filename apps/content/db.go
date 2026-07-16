@@ -514,8 +514,14 @@ func insertEntry(db *sql.DB, e *Entry) error {
 		return err
 	}
 	now := time.Now().UTC()
-	e.CreatedAt = now.Format(time.RFC3339)
-	e.UpdatedAt = e.CreatedAt
+	// A provided createdAt is honored when valid — the vault sync creates
+	// entries that were authored earlier; everything else leaves it empty.
+	if t, err := time.Parse(time.RFC3339, e.CreatedAt); err == nil && !t.After(now) {
+		e.CreatedAt = t.UTC().Format(time.RFC3339)
+	} else {
+		e.CreatedAt = now.Format(time.RFC3339)
+	}
+	e.UpdatedAt = now.Format(time.RFC3339)
 	e.Slug = stampSlug(e.Slug, now)
 	e.CID = entryCID(e)
 	res, err := db.Exec(
