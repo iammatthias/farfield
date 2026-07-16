@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 )
 
 func TestDecideMatrix(t *testing.T) {
@@ -367,5 +368,53 @@ remote body
 	var out strings.Builder
 	if err := syncVault(c, dir, false, "manual", false, &out); err != nil {
 		t.Fatalf("sibling must be ignored: %v\n%s", err, out.String())
+	}
+}
+
+func TestConflictNewerWins(t *testing.T) {
+	f, c, dir := newSyncTest(t)
+	var out strings.Builder
+
+	f.entries["1700000000009-lww"] = &Entry{
+		Collection: "posts", Slug: "1700000000009-lww", Title: "LWW",
+		Body: "original", CID: "cid-l1",
+		CreatedAt: "2024-01-01T00:00:00Z", UpdatedAt: "2024-01-01T00:00:00Z",
+	}
+	if err := syncVault(c, dir, false, "newer", false, &out); err != nil {
+		t.Fatal(err)
+	}
+	p := filepath.Join(dir, "posts", "1700000000009-lww.md")
+
+	// Diverge: remote edited later than the local file's mtime → pull wins.
+	raw, _ := os.ReadFile(p)
+	os.WriteFile(p, []byte(strings.Replace(string(raw), "original", "local older", 1)), 0o644)
+	older := time.Now().Add(-2 * time.Hour)
+	os.Chtimes(p, older, older)
+	f.entries["1700000000009-lww"].Body = "remote newer"
+	f.entries["1700000000009-lww"].CID = "cid-l2"
+	f.entries["1700000000009-lww"].UpdatedAt = time.Now().UTC().Format(time.RFC3339)
+
+	out.Reset()
+	if err := syncVault(c, dir, false, "newer", false, &out); err != nil {
+		t.Fatalf("newer(remote): %v\n%s", err, out.String())
+	}
+	pulled, _ := os.ReadFile(p)
+	if !strings.Contains(string(pulled), "remote newer") {
+		t.Errorf("remote was newer — pull should win:\n%s", out.String())
+	}
+
+	// Diverge again: local mtime now newer than remote updatedAt → push wins.
+	raw, _ = os.ReadFile(p)
+	os.WriteFile(p, []byte(strings.Replace(string(raw), "remote newer", "local newest", 1)), 0o644)
+	f.entries["1700000000009-lww"].Body = "remote stale"
+	f.entries["1700000000009-lww"].CID = "cid-l3"
+	f.entries["1700000000009-lww"].UpdatedAt = time.Now().Add(-1 * time.Hour).UTC().Format(time.RFC3339)
+
+	out.Reset()
+	if err := syncVault(c, dir, false, "newer", false, &out); err != nil {
+		t.Fatalf("newer(local): %v\n%s", err, out.String())
+	}
+	if f.entries["1700000000009-lww"].Body != "local newest" {
+		t.Error("local was newer — push should win")
 	}
 }

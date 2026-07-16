@@ -24,8 +24,12 @@ entry's remote CID + local hash at last sync:
 
 - local changed → push (PUT; server stamps updatedAt, file is rewritten to match)
 - remote changed → pull (file rewritten in vault frontmatter style)
-- both changed → conflict: `--prefer manual` (default) writes `<slug>.remote.md`
-  beside the file and exits nonzero; `--prefer local|remote` auto-resolves
+- both changed → last write wins (default `--prefer newer`): the more
+  recently edited side is taken — local edit time is max(file mtime,
+  frontmatter `updated`), remote is the server's `updatedAt`; ties fall back
+  to a `<slug>.remote.md` sibling. `--prefer manual|local|remote` overrides
+  for bulk reconciliation. Losers are recoverable (remote → entry revision
+  history, local → vault git)
 - never-synced + equal content → state seeded quietly (no updatedAt churn)
 - new local file → create (POST; the API honors the vault's `created` date)
 - new remote entry → written into the vault

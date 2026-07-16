@@ -41,7 +41,7 @@ import (
 func runSyncVault(args []string) error {
 	fs := flag.NewFlagSet("sync-vault", flag.ExitOnError)
 	dryRun := fs.Bool("dry-run", false, "report actions without changing anything")
-	prefer := fs.String("prefer", "manual", "conflict policy: manual|local|remote")
+	prefer := fs.String("prefer", "newer", "conflict policy: newer|manual|local|remote")
 	migrateRefs := fs.Bool("migrate-refs", false, "rewrite verified ipfs:// refs to blob:// in vault files first")
 	if err := fs.Parse(args); err != nil {
 		return err
@@ -50,8 +50,10 @@ func runSyncVault(args []string) error {
 		return fmt.Errorf("usage: content sync-vault [flags] <content-dir>")
 	}
 	dir := fs.Arg(0)
-	if *prefer != "manual" && *prefer != "local" && *prefer != "remote" {
-		return fmt.Errorf("--prefer must be manual, local, or remote")
+	switch *prefer {
+	case "newer", "manual", "local", "remote":
+	default:
+		return fmt.Errorf("--prefer must be newer, manual, local, or remote")
 	}
 
 	client := &syncClient{
@@ -200,6 +202,19 @@ func decide(hasLocal, hasRemote, known, localChanged, remoteChanged bool) syncAc
 type vaultFile struct {
 	path  string
 	entry *Entry
+	mtime time.Time
+}
+
+// editTime is when the local file was last touched: the later of the
+// filesystem mtime and the frontmatter's updated stamp (the vault's
+// update-time-on-edit plugin maintains the latter; the former catches edits
+// made outside Obsidian).
+func (v vaultFile) editTime() time.Time {
+	t := v.mtime
+	if u, err := time.Parse(time.RFC3339, v.entry.UpdatedAt); err == nil && u.After(t) {
+		t = u
+	}
+	return t
 }
 
 // loadVault walks <dir>'s collection subfolders. Files directly in <dir>
@@ -230,7 +245,11 @@ func loadVault(dir string) (map[string]vaultFile, error) {
 			if prev, dup := out[e.Slug]; dup {
 				return nil, fmt.Errorf("duplicate slug %q: %s and %s", e.Slug, prev.path, f)
 			}
-			out[e.Slug] = vaultFile{path: f, entry: e}
+			var mtime time.Time
+			if fi, err := os.Stat(f); err == nil {
+				mtime = fi.ModTime()
+			}
+			out[e.Slug] = vaultFile{path: f, entry: e, mtime: mtime}
 		}
 	}
 	return out, nil
@@ -415,6 +434,8 @@ func syncVault(c *syncClient, dir string, dryRun bool, prefer string, migrateRef
 				act = actPush
 			case "remote":
 				act = actPull
+			case "newer":
+				act = newerSide(lf.editTime(), re.UpdatedAt)
 			}
 		}
 
@@ -559,4 +580,22 @@ func pushEntry(c *syncClient, e *Entry, create bool) (*Entry, error) {
 		return nil, err
 	}
 	return &saved, nil
+}
+
+// newerSide resolves a conflict by last edit: the more recently touched
+// side wins. A tie or an unparseable remote stamp stays a conflict — the
+// sibling-file fallback never guesses.
+func newerSide(local time.Time, remoteUpdated string) syncAction {
+	remote, err := time.Parse(time.RFC3339, remoteUpdated)
+	if err != nil || local.IsZero() {
+		return actConflict
+	}
+	switch {
+	case local.After(remote):
+		return actPush
+	case remote.After(local):
+		return actPull
+	default:
+		return actConflict
+	}
 }

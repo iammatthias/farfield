@@ -4,9 +4,10 @@
  * sync.go) and shares its state file (content/.farfield-sync.json), so the
  * CLI and the plugin are interchangeable: per-entry state records the remote
  * CID and a local content hash from the last sync. Local-only changes push,
- * remote-only changes pull, both-changed conflicts write a `.remote.md`
- * sibling for review (or auto-resolve via the preference setting).
- * Deletions never propagate — a vanished side is reported.
+ * remote-only changes pull, and both-changed conflicts resolve to whichever
+ * side was edited more recently (a tie or unknowable timestamp writes a
+ * `.remote.md` sibling instead — the fallback never guesses). Deletions
+ * never propagate — a vanished side is reported.
  *
  * The hash MUST stay byte-compatible with entryHash in sync.go:
  * sha256(title \0 excerpt \0 tags-joined-by-comma \0 published \0 body-trimmed \0).
@@ -23,7 +24,6 @@ const DEFAULTS = {
   contentUrl: "https://content.farfield.systems",
   apiKey: "",
   contentRoot: "content",
-  prefer: "manual", // manual | local | remote
   autoSyncMinutes: 0, // 0 = manual only
 };
 
@@ -99,6 +99,20 @@ function renderEntryFile(e) {
   lines.push("excerpt: " + yamlScalar(e.excerpt || ""));
   lines.push("---", "");
   return lines.join("\n") + "\n" + (e.body || "").trim() + "\n";
+}
+
+/* ── conflict resolution: last write wins (parity with sync.go) ────────── */
+
+// The more recently edited side wins a both-changed conflict. A tie or an
+// unknowable timestamp stays a conflict — the sibling fallback never
+// guesses. Losing versions are recoverable either way: remote losers live
+// in the entry's revision history, local losers in the vault's git.
+function newerSide(localMs, remoteUpdated) {
+  const remoteMs = Date.parse(remoteUpdated || "");
+  if (!localMs || isNaN(remoteMs)) return "conflict";
+  if (localMs > remoteMs) return "push";
+  if (remoteMs > localMs) return "pull";
+  return "conflict";
 }
 
 /* ── merge table (parity with sync.go decide) ──────────────────────────── */
@@ -281,7 +295,6 @@ class FarfieldSyncPlugin extends Plugin {
   }
 
   async runSync() {
-    const prefer = this.settings.prefer;
     const [remote, st] = await Promise.all([this.fetchRemote(), this.loadState()]);
     const local = this.localEntries();
 
@@ -308,8 +321,15 @@ class FarfieldSyncPlugin extends Plugin {
       }
 
       let act = decide(!!le, !!re, !!rec, localChanged, remoteChanged);
-      if (act === "conflict" && prefer === "local") act = "push";
-      if (act === "conflict" && prefer === "remote") act = "pull";
+      if (act === "conflict") {
+        // local edit time: the later of file mtime and frontmatter updated
+        const fmMs = Date.parse(toRFC3339(lf.fm.updated) || "");
+        const localMs = Math.max(lf.file.stat?.mtime || 0, isNaN(fmMs) ? 0 : fmMs);
+        act = newerSide(localMs, re.updatedAt);
+        if (act !== "conflict") {
+          notes.push("conflict " + slug + " → took " + (act === "push" ? "local" : "remote") + " (newer)");
+        }
+      }
 
       switch (act) {
         case "none":
@@ -410,13 +430,6 @@ class FarfieldSettingTab extends PluginSettingTab {
         .onChange(async (v) => { this.plugin.settings.contentRoot = v.trim().replace(/\/$/, ""); await this.plugin.saveSettings(); }));
 
     new Setting(containerEl)
-      .setName("When both sides changed")
-      .addDropdown((d) => d
-        .addOptions({ manual: "Keep both (write .remote.md)", local: "Prefer this vault", remote: "Prefer Farfield" })
-        .setValue(this.plugin.settings.prefer)
-        .onChange(async (v) => { this.plugin.settings.prefer = v; await this.plugin.saveSettings(); }));
-
-    new Setting(containerEl)
       .setName("Auto-sync every (minutes)")
       .setDesc("0 disables; sync always available from the ribbon or command palette.")
       .addText((t) => t
@@ -427,4 +440,4 @@ class FarfieldSettingTab extends PluginSettingTab {
 
 module.exports = FarfieldSyncPlugin;
 // Exposed for the node test harness only.
-module.exports.__internals = { entryHash, decide, toRFC3339, vaultTime, renderEntryFile };
+module.exports.__internals = { entryHash, decide, newerSide, toRFC3339, vaultTime, renderEntryFile };

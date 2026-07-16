@@ -1,9 +1,9 @@
 {
   "id": "farfield-sync",
   "name": "Farfield Sync",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "minAppVersion": "1.4.0",
-  "description": "Bidirectional sync between this vault's content/ directory and the farfield content service. Three-way merge; conflicts become .remote.md siblings; deletions never propagate.",
+  "description": "Bidirectional sync between this vault's content/ directory and the farfield content service. Three-way merge; conflicts resolve to the most recently edited side; deletions never propagate.",
   "author": "farfield",
   "isDesktopOnly": false
 }
