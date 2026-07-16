@@ -421,6 +421,14 @@ td.nowrap, th.nowrap { white-space: nowrap; }
 }
 .search-row input { max-width: 24rem; }
 
+/* series reorder tray — wraps inside the rail */
+.rail-order { margin-top: 1rem; }
+.rail-order [data-series-tray] { margin: 0.5rem 0 0.4rem; }
+.rail-order .embed-tray.series-tray {
+	flex-wrap: wrap; overflow: visible;
+	border: 0; padding: 0; min-height: 0; background: transparent;
+}
+
 /* fleet search results — one ranked list of everything */
 .fleet-results { display: flex; flex-direction: column; gap: 0.5rem; }
 .fleet-hit {

@@ -50,6 +50,13 @@
             </div>
           {{end}}
         </div>
+        {{if not .IsNew}}
+          <div class="rail-panel rail-order">
+            <span class="label">Order</span>
+            <div data-series-tray></div>
+            <p class="hint">Drag thumbnails to reorder the gallery.</p>
+          </div>
+        {{end}}
         <div class="rail-actions">
           <button type="submit">{{if .IsNew}}Create series{{else}}Save &amp; close{{end}}</button>
           <a href="/series">Cancel</a>

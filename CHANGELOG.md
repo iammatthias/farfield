@@ -7,6 +7,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 ## [Unreleased]
 
 ### Added
+- Series galleries reorder by dragging thumbnails on the edit page — the markdown rewrites itself (alt text preserved) and autosaves.
 - Fleet search: content's `/search` (linked from the fleet menu) ranks entries, series, feed posts, and public bookmarks with on-device semantic embeddings — the corpus aggregates server-side over the read APIs, ranking never leaves the browser.
 - Fleet single sign-on: set a shared `SESSION_SECRET` (and `SESSION_COOKIE_DOMAIN` for subdomain deployments) and one login works across every admin app via signed, stateless session cookies; logout anywhere ends the fleet session. Apps without the secret keep their own database sessions.
 - `lib/markdown`: one shared markdown pipeline (goldmark + farfield embeds) for every admin UI — blob:// media, `[file](blob://cid)` links, series:// galleries, image alt text, and an editable-HTML renderer whose unsupported blocks round-trip verbatim.
