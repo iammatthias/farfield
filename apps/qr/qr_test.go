@@ -75,7 +75,6 @@ func loginSession(t *testing.T, ts *httptest.Server) []*http.Cookie {
 	return cookies
 }
 
-
 // ── DB / model tests ───────────────────────────────────────────────────────
 
 func TestCodeCRUDAndCID(t *testing.T) {

@@ -4,7 +4,9 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>{{block "title" .}}farfield · sideload{{end}}</title>
-  <meta name="theme-color" content="#fafaf7">
+  <meta name="theme-color" content="#fcfbf8" media="(prefers-color-scheme: light)">
+  <meta name="theme-color" content="#181613" media="(prefers-color-scheme: dark)">
+  <link rel="icon" href="data:image/svg+xml,<svg%20xmlns='http://www.w3.org/2000/svg'%20viewBox='0%200%2064%2064'><rect%20width='64'%20height='64'%20rx='14'%20fill='%231f1b16'/><text%20x='32'%20y='42'%20font-family='ui-monospace,Menlo,monospace'%20font-size='26'%20font-weight='600'%20text-anchor='middle'%20fill='%23fcfbf8'>si</text></svg>">
   <link rel="stylesheet" href="/static/styles.css?v={{.AssetVer}}">
   <style>
     .container { max-width: 56rem; }
@@ -23,7 +25,7 @@
       border-bottom: 1px solid var(--hairline);
       text-decoration: none; color: inherit;
     }
-    .app-row:hover { background: #f2f0ea; }
+    .app-row:hover { background: var(--wash); }
     .app-row .name { font-weight: 500; font-size: 1rem; }
     .app-row .bundle {
       font: 0.74rem/1 var(--font-mono); opacity: 0.55; word-break: break-all;
@@ -47,29 +49,32 @@
     /* expiry banner */
     .banner {
       margin: 1.1rem 0; padding: 0.7rem 0.9rem;
-      border: 1px solid var(--hairline);
+      border: 1px solid var(--hairline); border-radius: var(--r-s);
       font: 0.82rem/1.4 var(--font-mono);
     }
     .banner.ok     { border-color: var(--hairline); }
     .banner.warn   { border-color: var(--accent); color: var(--accent); }
     .banner.danger { border-color: var(--accent); color: var(--accent);
-                     background: #fbeee8; }
+                     background: var(--accent-soft); }
 
     /* the install action — the cable-killer, a big tap target */
     .install {
       display: flex; flex-wrap: wrap; align-items: center; gap: 1.5rem;
       margin: 1.5rem 0; padding: 1.4rem;
-      border: 1px solid var(--ink);
+      background: var(--panel);
+      border: 1px solid var(--hairline); border-radius: var(--r-m);
+      box-shadow: var(--shadow-s);
     }
     .install .lede { flex: 1 1 16rem; min-width: 0; }
     .install-btn {
       display: inline-block; padding: 0.85rem 1.6rem;
       background: var(--ink); color: var(--surface);
-      border: 1px solid var(--ink);
-      font: 500 0.95rem/1 var(--font-mono);
+      border: 1px solid var(--ink); border-radius: var(--r-s);
+      font: 500 0.95rem/1 var(--font-sans);
       text-decoration: none; text-align: center;
+      transition: opacity 0.15s ease-out;
     }
-    .install-btn:hover { background: var(--surface); color: var(--ink); }
+    .install-btn:hover { opacity: 0.88; }
     .install .qr { flex: 0 0 auto; width: 9rem; height: 9rem; }
     .install .qr svg { width: 100%; height: 100%; display: block; }
     .install .qr-cap {
@@ -119,15 +124,14 @@
       cursor: pointer;
     }
     .pill {
-      display: inline-block; padding: 0.05rem 0.45rem;
-      border: 1px solid var(--hairline);
-      font: 0.68rem/1.4 var(--font-mono); text-transform: uppercase;
-      letter-spacing: 0.05em;
+      display: inline-block; padding: 0.22rem 0.55rem; border-radius: 999px;
+      background: var(--wash);
+      font-size: 0.68rem; font-weight: 500; line-height: 1;
     }
-    .pill.live { border-color: var(--ink); }
+    .pill.live { background: var(--accent-soft); color: var(--accent); }
     .pill.dead { opacity: 0.5; }
-    .pill.ok { border-color: var(--ink); }
-    .pill.pending { border-color: var(--accent); color: var(--accent); }
+    .pill.ok { background: var(--accent-soft); color: var(--accent); }
+    .pill.pending { color: var(--accent); }
 
     .back { font: 0.78rem/1 var(--font-mono); opacity: 0.6; }
 
@@ -140,8 +144,8 @@
     .markdown li { margin: 0.2rem 0; }
     .markdown a { color: var(--accent); }
     .markdown code {
-      font: 0.85em var(--font-mono); background: #f2f0ea;
-      padding: 0.05em 0.35em; border-radius: 2px;
+      font: 0.85em var(--font-mono); background: var(--wash);
+      padding: 0.05em 0.35em; border-radius: 4px;
     }
     .markdown h2, .markdown h3 { font-size: 1rem; margin: 1rem 0 0.4rem; }
 
@@ -224,5 +228,6 @@
     <a href="/shares">Shares</a>
     <a href="/logout">Log out</a>
   </nav>
+    {{.FleetNav}}
 </header>
 {{end}}

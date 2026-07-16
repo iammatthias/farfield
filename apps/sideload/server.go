@@ -37,9 +37,9 @@ type Server struct {
 	auth      *web.Auth
 	rd        *web.Renderer
 	blobs     *blobStore
-	publicURL string        // absolute HTTPS base for manifest/ipa/icon URLs
+	publicURL string           // absolute HTTPS base for manifest/ipa/icon URLs
 	limiter   *web.FailLimiter // failed token lookups, per client IP
-	ownerUDID string        // SIDELOAD_OWNER_UDID — kept in every app's whitelist
+	ownerUDID string           // SIDELOAD_OWNER_UDID — kept in every app's whitelist
 
 	// pulse records request telemetry; nil disables it (tests never start it).
 	pulse *pulse.Recorder
@@ -101,15 +101,16 @@ func newServer(db *sql.DB, blobs *blobStore, password, apiKey string, cookieSecu
 }
 
 func (s *Server) parseTemplates() error {
-	tmpl, err := web.ParseTemplates(assets, template.FuncMap{
+	funcs := template.FuncMap{
 		"relAge":   relAge,
 		"sizeText": sizeText,
 		"markdown": renderMarkdown,
-	})
+	}
+	tmpl, err := web.ParseTemplates(assets, funcs)
 	if err != nil {
 		return err
 	}
-	s.rd = &web.Renderer{Templates: tmpl, AssetVer: theme.Version}
+	s.rd = &web.Renderer{Templates: tmpl, AssetVer: theme.Version, Funcs: funcs}
 	return nil
 }
 

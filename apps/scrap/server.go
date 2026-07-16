@@ -42,9 +42,9 @@ type Server struct {
 	db        *sql.DB
 	auth      *web.Auth
 	rd        *web.Renderer
-	publicURL string        // absolute base for URLs the API returns
+	publicURL string           // absolute base for URLs the API returns
 	limiter   *web.FailLimiter // failed token attempts, per IP+paste
-	chromaCSS template.CSS  // highlight stylesheet, embedded into view pages
+	chromaCSS template.CSS     // highlight stylesheet, embedded into view pages
 
 	// pulse records request telemetry; nil disables it (tests never start it).
 	pulse *pulse.Recorder
@@ -99,15 +99,16 @@ func newServer(db *sql.DB, password, apiKey string, cookieSecure bool, publicURL
 }
 
 func (s *Server) parseTemplates() error {
-	tmpl, err := web.ParseTemplates(assets, template.FuncMap{
+	funcs := template.FuncMap{
 		"relAge":   relAge,
 		"ttl":      ttlText,
 		"sizeText": sizeText,
-	})
+	}
+	tmpl, err := web.ParseTemplates(assets, funcs)
 	if err != nil {
 		return err
 	}
-	s.rd = &web.Renderer{Templates: tmpl, AssetVer: theme.Version}
+	s.rd = &web.Renderer{Templates: tmpl, AssetVer: theme.Version, Funcs: funcs}
 	return nil
 }
 

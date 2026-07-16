@@ -13,7 +13,7 @@ html, body { overflow-x: hidden; }
   max-width: 74rem;
   margin: 0 auto;
   padding: 1.5rem 1.5rem 0.9rem;
-  border-bottom: 2px solid var(--ink);
+  border-bottom: 1px solid var(--hairline);
 }
 
 /* ── Layout: left sidebar + content ── */
@@ -40,7 +40,7 @@ html, body { overflow-x: hidden; }
   height: 100vh;
   overflow-y: auto;
   padding: 2.5rem 1.5rem 2rem 0;
-  border-right: 2px solid var(--ink);
+  border-right: 1px solid var(--hairline);
 }
 
 .brand {
@@ -53,7 +53,7 @@ html, body { overflow-x: hidden; }
 
 .docs-nav { display: flex; flex-direction: column; }
 .docs-nav a {
-  font: 400 0.85rem/1.6 var(--font-mono);
+  font: 400 0.88rem/1.6 var(--font-sans);
   color: var(--ink);
   text-decoration: none;
   opacity: 0.55;
@@ -84,7 +84,7 @@ html, body { overflow-x: hidden; }
   white-space: nowrap;
 }
 #nav-toggle:focus-visible ~ .bar .nav-burger {
-  outline: 2px solid var(--ink);
+  outline: 2px solid var(--line-strong);
   outline-offset: 3px;
 }
 
@@ -115,7 +115,7 @@ html, body { overflow-x: hidden; }
   grid-template-columns: repeat(auto-fill, minmax(15rem, 1fr));
 }
 .app-card {
-  border: 1px solid var(--ink);
+  border: 1px solid var(--hairline); border-radius: var(--r-s);
   padding: 1rem;
   min-width: 0;
   text-decoration: none;
@@ -164,13 +164,13 @@ html, body { overflow-x: hidden; }
 .screenshot { max-width: 100%; }
 .screenshot img {
   display: block; width: 100%; max-width: 100%; height: auto;
-  border: 1px solid var(--ink); background: #fff;
+  border: 1px solid var(--hairline); border-radius: var(--r-s); background: #fff;
 }
 .screenshot figcaption {
   font-family: var(--font-mono); font-size: 0.75rem; opacity: 0.62; margin-top: 0.5rem;
 }
 .screenshot-placeholder {
-  border: 1px solid var(--ink); min-height: 12rem;
+  border: 1px solid var(--hairline); border-radius: var(--r-s); min-height: 12rem;
   display: flex; align-items: center; justify-content: center;
   font-family: var(--font-mono); font-size: 0.875rem; opacity: 0.5;
   background: repeating-linear-gradient(45deg, var(--wash), var(--wash) 10px, transparent 10px, transparent 20px);
@@ -191,7 +191,7 @@ html, body { overflow-x: hidden; }
   .nav-burger::before, .nav-burger::after, .nav-burger span {
     content: ""; display: block; width: 100%; height: 2px; background: var(--ink);
   }
-  .docs-nav { display: none; padding: 0.5rem 1rem 1rem; border-bottom: 2px solid var(--ink); }
+  .docs-nav { display: none; padding: 0.5rem 1rem 1rem; border-bottom: 1px solid var(--hairline); }
   #nav-toggle:checked ~ .docs-layout .docs-nav { display: flex; }
   .docs-nav a { padding: 0.5rem 0; border-left: none; }
   .page { max-width: 100%; padding: 1.5rem 1rem 3rem; }

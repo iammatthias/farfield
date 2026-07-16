@@ -71,11 +71,12 @@ func run(host, port string) error {
 
 	// Templates parse after the Server exists so qrFor can close over s and
 	// share the SVG cache with the HTTP handlers.
-	tmpl, err := web.ParseTemplates(assets, s.templateFuncs())
+	funcs := s.templateFuncs()
+	tmpl, err := web.ParseTemplates(assets, funcs)
 	if err != nil {
 		return err
 	}
-	s.rd = &web.Renderer{Templates: tmpl, AssetVer: theme.Version}
+	s.rd = &web.Renderer{Templates: tmpl, AssetVer: theme.Version, Funcs: funcs}
 
 	defer keys.Attach(s.auth, "qr")() // admin-issued keys, when KEYS_DB_PATH is set
 

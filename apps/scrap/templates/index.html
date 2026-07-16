@@ -5,6 +5,7 @@
     <nav>
       {{if .Authed}}<a href="/">Compose</a><a href="/manage">Manage</a>{{end}}
     </nav>
+    {{.FleetNav}}
   </header>
   <p class="label">Public pastes</p>
   {{if .Pastes}}

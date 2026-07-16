@@ -4,7 +4,9 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>{{block "title" .}}farfield · scrap{{end}}</title>
-  <meta name="theme-color" content="#fafaf7">
+  <meta name="theme-color" content="#fcfbf8" media="(prefers-color-scheme: light)">
+  <meta name="theme-color" content="#181613" media="(prefers-color-scheme: dark)">
+  <link rel="icon" href="data:image/svg+xml,<svg%20xmlns='http://www.w3.org/2000/svg'%20viewBox='0%200%2064%2064'><rect%20width='64'%20height='64'%20rx='14'%20fill='%231f1b16'/><text%20x='32'%20y='42'%20font-family='ui-monospace,Menlo,monospace'%20font-size='26'%20font-weight='600'%20text-anchor='middle'%20fill='%23fcfbf8'>sc</text></svg>">
   <link rel="stylesheet" href="/static/styles.css?v={{.AssetVer}}">
   <style>
     .container { max-width: 60rem; }
@@ -33,12 +35,14 @@
     /* code view — the instrument readout */
     .code-wrap {
       margin-top: 1.25rem;
-      border: 1px solid var(--ink);
+      background: var(--panel);
+      border: 1px solid var(--hairline); border-radius: var(--r-m);
+      box-shadow: var(--shadow-s);
       overflow-x: auto;
     }
     .code-wrap pre.chroma {
       margin: 0; padding: 0.9rem 1rem 0.9rem 0;
-      background: var(--surface);
+      background: var(--panel);
       font-size: 0.82rem; line-height: 1.55;
     }
     .chroma .line { display: block; width: 100%; }
@@ -52,9 +56,9 @@
     }
     .chroma .lnlinks { text-decoration: none; color: inherit; }
     /* #L10 single-line highlight (CSS only) + JS-applied range highlight */
-    .chroma .line:target { background: #f7ebe3; }
-    .chroma .line.hl { background: #f7ebe3; }
-    .chroma .line:has([id]:target) { background: #f7ebe3; }
+    .chroma .line:target { background: color-mix(in srgb, var(--accent) 10%, transparent); }
+    .chroma .line.hl { background: color-mix(in srgb, var(--accent) 10%, transparent); }
+    .chroma .line:has([id]:target) { background: color-mix(in srgb, var(--accent) 10%, transparent); }
 
     /* link-shaped buttons in the masthead nav */
     button.linklike {
@@ -126,8 +130,7 @@
     }
     .compose fieldset legend {
       padding: 0; margin-bottom: 0.3rem;
-      font: 500 0.7rem/1 var(--font-mono);
-      text-transform: uppercase; letter-spacing: 0.09em; opacity: 0.6;
+      font-size: 0.8rem; font-weight: 500; opacity: 0.62;
     }
     .compose .radio-row { display: flex; flex-wrap: wrap; gap: 0.35rem 1.1rem; }
     .compose .radio-row label {

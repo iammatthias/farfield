@@ -4,7 +4,9 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>{{block "title" .}}farfield · library{{end}}</title>
-  <meta name="theme-color" content="#fafaf7">
+  <meta name="theme-color" content="#fcfbf8" media="(prefers-color-scheme: light)">
+  <meta name="theme-color" content="#181613" media="(prefers-color-scheme: dark)">
+  <link rel="icon" href="data:image/svg+xml,<svg%20xmlns='http://www.w3.org/2000/svg'%20viewBox='0%200%2064%2064'><rect%20width='64'%20height='64'%20rx='14'%20fill='%231f1b16'/><text%20x='32'%20y='42'%20font-family='ui-monospace,Menlo,monospace'%20font-size='26'%20font-weight='600'%20text-anchor='middle'%20fill='%23fcfbf8'>li</text></svg>">
   <link rel="stylesheet" href="/static/styles.css?v={{.AssetVer}}">
   <style>
     /* opds admin — full-width, for the catalogue table */
@@ -16,12 +18,11 @@
     table.books td.shrink { width: 1%; white-space: nowrap; }
     .cover {
       width: 40px; height: 56px; max-width: none; object-fit: cover; display: block;
-      border: 1px solid var(--hairline); background: var(--wash);
+      border: 1px solid var(--hairline); border-radius: 3px; background: var(--wash);
     }
     .cover.placeholder {
       display: flex; align-items: center; justify-content: center;
-      font: 500 0.6rem/1 var(--font-mono); text-transform: uppercase;
-      letter-spacing: 0.06em; opacity: 0.4;
+      font-size: 0.62rem; font-weight: 500; opacity: 0.4;
     }
     td.title { font-weight: 500; }
     td.meta { font-size: 0.85rem; opacity: 0.75; }

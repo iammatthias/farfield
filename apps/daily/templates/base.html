@@ -4,22 +4,21 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>{{block "title" .}}farfield · daily{{end}}</title>
-  <meta name="theme-color" content="#fafaf7">
+  <meta name="theme-color" content="#fcfbf8" media="(prefers-color-scheme: light)">
+  <meta name="theme-color" content="#181613" media="(prefers-color-scheme: dark)">
+  <link rel="icon" href="data:image/svg+xml,<svg%20xmlns='http://www.w3.org/2000/svg'%20viewBox='0%200%2064%2064'><rect%20width='64'%20height='64'%20rx='14'%20fill='%231f1b16'/><text%20x='32'%20y='42'%20font-family='ui-monospace,Menlo,monospace'%20font-size='26'%20font-weight='600'%20text-anchor='middle'%20fill='%23fcfbf8'>da</text></svg>">
   <link rel="stylesheet" href="/static/styles.css?v={{.AssetVer}}">
   <style>
     /* photo — a single-plate viewer, one image at a time */
     .container { max-width: 60rem; }
 
-    /* masthead nav — mono small caps; the current section reads full ink */
-    .bar nav {
-      font: 500 0.7rem/1.6 var(--font-mono);
-      text-transform: uppercase; letter-spacing: 0.08em;
-      align-items: baseline;
-    }
-    .bar nav a { text-decoration: none; opacity: 0.55; }
-    .bar nav a.on, .bar nav a:hover { opacity: 1; }
+    /* masthead nav — the current section reads full ink */
+    .bar nav a.on { opacity: 1; text-decoration: underline; }
 
-    figure.plate { border: 1px solid var(--ink); background: var(--wash); }
+    figure.plate {
+      background: var(--panel); border: 1px solid var(--hairline);
+      border-radius: var(--r-m); box-shadow: var(--shadow-s); overflow: hidden;
+    }
     /* aspect-ratio reserves the plate's space before the image loads (no CLS);
        contain letterboxes odd shapes inside the 3:2 plate, like archive's .frame */
     figure.plate img { width: 100%; display: block; aspect-ratio: 3 / 2; object-fit: contain; }
@@ -28,14 +27,12 @@
     figure.plate .placeholder {
       display: flex; align-items: center; justify-content: center;
       min-height: 16rem; padding: 2rem; text-align: center;
-      font: 500 0.78rem/1.6 var(--font-mono);
-      text-transform: uppercase; letter-spacing: 0.08em; opacity: 0.5;
+      font-size: 0.85rem; opacity: 0.45;
     }
     figure.plate figcaption {
       display: flex; justify-content: space-between; gap: 1rem;
-      padding: 0.55rem 0.8rem; border-top: 1px solid var(--ink);
-      font: 500 0.7rem/1 var(--font-mono);
-      text-transform: uppercase; letter-spacing: 0.07em;
+      padding: 0.55rem 0.8rem; border-top: 1px solid var(--hairline);
+      font-size: 0.75rem; font-weight: 500; opacity: 0.7;
     }
 
     /* the page meta line — eyebrow text left, page actions right */
@@ -54,7 +51,8 @@
 
     .notice {
       margin-top: 1.25rem; padding: 0.55rem 0.75rem;
-      border: 1px solid var(--hairline); font-size: 0.82rem; opacity: 0.75;
+      background: var(--wash); border-radius: var(--r-s);
+      font-size: 0.82rem; opacity: 0.75;
     }
 
     .stepper {
@@ -67,35 +65,35 @@
     .stepper a:hover { color: var(--accent); }
     .stepper .muted { opacity: 0.3; }
 
-    /* archive — a hairline grid of day plates */
+    /* archive — a soft grid of day plates */
     .archive {
-      display: grid; gap: 0.75rem;
+      display: grid; gap: 0.9rem;
       grid-template-columns: repeat(auto-fill, minmax(13rem, 1fr));
       margin-top: 1.5rem;
     }
     .archive a {
-      text-decoration: none; color: inherit; border: 1px solid var(--ink);
+      text-decoration: none; color: inherit;
+      background: var(--panel); border: 1px solid var(--hairline);
+      border-radius: var(--r-m); box-shadow: var(--shadow-s); overflow: hidden;
+      transition: border-color 0.15s ease-out, box-shadow 0.15s ease-out;
     }
-    .archive a:hover { outline: 2px solid var(--ink); outline-offset: -3px; }
+    .archive a:hover { border-color: var(--line-strong); box-shadow: var(--shadow-m); }
     .archive .frame { position: relative; aspect-ratio: 3 / 2; background: var(--wash); }
     .archive .frame img { width: 100%; height: 100%; object-fit: cover; }
     .archive .frame .placeholder {
       width: 100%; height: 100%;
       display: flex; align-items: center; justify-content: center;
-      font: 500 0.7rem/1 var(--font-mono);
-      text-transform: uppercase; letter-spacing: 0.07em; opacity: 0.4;
+      font-size: 0.8rem; opacity: 0.4;
     }
     .media-tag {
-      position: absolute; left: 0; bottom: 0;
-      padding: 0.18rem 0.4rem;
+      position: absolute; left: 0.35rem; bottom: 0.35rem;
+      padding: 0.22rem 0.5rem; border-radius: 999px;
       background: var(--ink); color: var(--surface);
-      font: 500 0.58rem/1 var(--font-mono);
-      text-transform: uppercase; letter-spacing: 0.06em;
+      font-size: 0.62rem; font-weight: 500; line-height: 1;
     }
-    .archive .cap { padding: 0.5rem 0.65rem; border-top: 1px solid var(--ink); }
+    .archive .cap { padding: 0.5rem 0.65rem; border-top: 1px solid var(--hairline); }
     .archive .cap .date {
-      font: 500 0.68rem/1 var(--font-mono);
-      text-transform: uppercase; letter-spacing: 0.07em; opacity: 0.55;
+      font: 500 0.68rem/1 var(--font-mono); opacity: 0.55;
     }
     .archive .cap .ttl {
       display: block; margin-top: 0.25rem; font-size: 0.85rem;
@@ -110,9 +108,8 @@
     .cal-foot {
       display: flex; justify-content: space-between; align-items: baseline;
       gap: 1rem; margin-top: 2.5rem; padding-top: 0.85rem;
-      border-top: 2px solid var(--ink);
-      font: 500 0.68rem/1 var(--font-mono);
-      text-transform: uppercase; letter-spacing: 0.08em;
+      border-top: 1px solid var(--hairline);
+      font-size: 0.78rem; font-weight: 500; opacity: 0.7;
     }
     .cal-foot a { text-decoration: none; }
     .cal-foot a:hover { color: var(--accent); }

@@ -56,7 +56,7 @@ func run(host, port string) error {
 			Password:     store.Env("PASSWORD", ""),
 			CookieSecure: store.Env("COOKIE_SECURE", "false") == "true",
 		},
-		rd: &web.Renderer{Templates: tmpl, AssetVer: theme.Version},
+		rd: &web.Renderer{Templates: tmpl, AssetVer: theme.Version, Funcs: tmplFuncs},
 	}
 
 	// In-process scheduler: snapshots no longer depend on a host cron

@@ -4,7 +4,9 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>{{block "title" .}}farfield · blobs{{end}}</title>
-  <meta name="theme-color" content="#fafaf7">
+  <meta name="theme-color" content="#fcfbf8" media="(prefers-color-scheme: light)">
+  <meta name="theme-color" content="#181613" media="(prefers-color-scheme: dark)">
+  <link rel="icon" href="data:image/svg+xml,<svg%20xmlns='http://www.w3.org/2000/svg'%20viewBox='0%200%2064%2064'><rect%20width='64'%20height='64'%20rx='14'%20fill='%231f1b16'/><text%20x='32'%20y='42'%20font-family='ui-monospace,Menlo,monospace'%20font-size='26'%20font-weight='600'%20text-anchor='middle'%20fill='%23fcfbf8'>bl</text></svg>">
   <link rel="stylesheet" href="/static/styles.css?v={{.AssetVer}}">
   <style>
     /* blobs admin — full-width, for the media table */
@@ -14,13 +16,13 @@
     table.blobs td.shrink { width: 1%; }
     .thumb {
       width: 52px; height: 52px; max-width: none; object-fit: cover; display: block;
-      border: 1px solid var(--hairline);
+      border: 1px solid var(--hairline); border-radius: 4px;
     }
     a.row { text-decoration: none; }
     a.row:hover { color: var(--accent); }
     .swatch {
       display: inline-block; width: 0.9rem; height: 0.9rem;
-      vertical-align: -2px; border: 1px solid var(--hairline);
+      vertical-align: -2px; border: 1px solid var(--hairline); border-radius: 3px;
     }
     .pager {
       display: flex; gap: 1.5rem; justify-content: center; align-items: baseline;
@@ -30,29 +32,26 @@
     /* :target modal viewer — no JavaScript */
     .modal { display: none; position: fixed; inset: 0; z-index: 50; }
     .modal:target { display: flex; align-items: center; justify-content: center; padding: 1.5rem; }
-    .modal .backdrop { position: absolute; inset: 0; background: rgba(10, 10, 10, 0.55); }
+    .modal .backdrop { position: absolute; inset: 0;
+      background: color-mix(in srgb, var(--ink) 40%, transparent); }
     .modal .card {
       position: relative; z-index: 1; width: 100%; max-width: 58rem; max-height: 88vh;
-      overflow: auto; background: var(--surface); border: 1px solid var(--ink);
+      overflow: auto; background: var(--panel);
+      border: 1px solid var(--hairline); border-radius: var(--r-m);
+      box-shadow: var(--shadow-m);
       display: grid; grid-template-columns: minmax(0, 1fr) 19rem;
     }
     .modal .card > img {
       width: 100%; height: 100%; max-height: 88vh;
       object-fit: contain; background: var(--wash);
     }
-    .modal .detail { padding: 1.25rem 1.4rem; min-width: 0; border-left: 1px solid var(--ink); }
-    .modal .detail h2 {
-      font: 500 0.8rem/1 var(--font-mono);
-      text-transform: uppercase; letter-spacing: 0.08em; margin-bottom: 0.9rem;
-    }
+    .modal .detail { padding: 1.25rem 1.4rem; min-width: 0; border-left: 1px solid var(--hairline); }
+    .modal .detail h2 { font-size: 0.9rem; font-weight: 600; margin-bottom: 0.9rem; }
     .modal .detail dl {
       display: grid; grid-template-columns: auto minmax(0, 1fr);
       gap: 0.45rem 1rem; margin-bottom: 1.1rem; font-size: 0.85rem;
     }
-    .modal .detail dt {
-      font: 500 0.68rem/1.4 var(--font-mono);
-      text-transform: uppercase; letter-spacing: 0.07em; opacity: 0.5;
-    }
+    .modal .detail dt { font-size: 0.75rem; font-weight: 500; opacity: 0.55; line-height: 1.6; }
     .modal .detail dd { word-break: break-all; }
     .modal .close {
       position: absolute; top: 0; right: 0; z-index: 2;
@@ -60,12 +59,13 @@
       display: flex; align-items: center; justify-content: center;
       font-size: 1.3rem; line-height: 1; text-decoration: none;
       color: var(--surface); background: var(--ink);
+      border-radius: 0 var(--r-m) 0 var(--r-s);
     }
     .modal .close:hover { background: var(--accent); }
     @media (max-width: 46rem) {
       .modal .card { grid-template-columns: 1fr; }
       .modal .card > img { max-height: 50vh; }
-      .modal .detail { border-left: 0; border-top: 1px solid var(--ink); }
+      .modal .detail { border-left: 0; border-top: 1px solid var(--hairline); }
     }
   </style>
 </head>

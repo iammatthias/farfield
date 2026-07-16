@@ -5,7 +5,7 @@
     .crumb a { text-decoration: none; }
 
     .organize { display: flex; flex-wrap: wrap; align-items: center; gap: 0.5rem 0.6rem; margin: 0.75rem 0 0.4rem; }
-    .organize-label { font: 500 0.7rem/1 var(--font-mono); text-transform: uppercase; letter-spacing: 0.07em; opacity: 0.6; }
+    .organize-label { font-size: 0.8rem; font-weight: 500; opacity: 0.62; }
     .organize input[type="text"] { flex: 1 1 12rem; max-width: 18rem; padding: 0.3rem 0.5rem; font-size: 0.85rem; }
     .organize button { padding: 0.3rem 0.9rem; }
     .organize .check-all { display: inline-flex; align-items: center; gap: 0.35rem; font-size: 0.85rem; white-space: nowrap; }
@@ -23,17 +23,16 @@
       display: flex; align-items: center; gap: 0.6rem;
       padding: 0.65rem 0.85rem; text-decoration: none;
     }
-    .folder-link:hover { background: rgba(10, 10, 10, 0.04); }
+    .folder-link:hover { background: var(--wash); }
     .folder-icon { width: 1.1rem; height: 1.1rem; flex: none; opacity: 0.7; }
     .folder-name { font-weight: 600; }
     .folder-link:hover .folder-name { color: var(--accent); }
     .folder-count {
-      margin-left: auto; font: 500 0.7rem/1 var(--font-mono);
-      text-transform: uppercase; letter-spacing: 0.06em; opacity: 0.55; white-space: nowrap;
+      margin-left: auto; font-size: 0.75rem; font-weight: 500;
+      opacity: 0.55; white-space: nowrap;
     }
     .folder-open {
-      font: 500 0.7rem/1 var(--font-mono); text-transform: uppercase;
-      letter-spacing: 0.06em; opacity: 0.45; white-space: nowrap;
+      font-size: 0.75rem; font-weight: 500; opacity: 0.45; white-space: nowrap;
       border-left: 1px solid var(--hairline); padding-left: 0.65rem;
     }
     .folder-link:hover .folder-open { opacity: 1; color: var(--accent); }
@@ -42,11 +41,11 @@
     @media (max-width: 46rem) {
       table.books thead { display: none; }
       table.books, table.books tbody, table.books tr, table.books td { display: block; width: auto; }
-      table.books tr { border: 1px solid var(--hairline); padding: 0.5rem 0.75rem; margin-bottom: 0.6rem; }
+      table.books tr { background: var(--panel); border: 1px solid var(--hairline); border-radius: var(--r-s); padding: 0.5rem 0.75rem; margin-bottom: 0.6rem; }
       table.books td { display: flex; gap: 0.7rem; align-items: baseline; padding: 0.18rem 0; border: 0; }
       table.books td::before {
         content: attr(data-label); flex: 0 0 4.5rem;
-        font: 500 0.66rem/1.5 var(--font-mono); text-transform: uppercase; letter-spacing: 0.06em; opacity: 0.5;
+        font-size: 0.7rem; font-weight: 500; line-height: 1.7; opacity: 0.55;
       }
       table.books td.pick, table.books td.shrink { display: inline-flex; }
       table.books td.pick::before, table.books td.shrink::before { content: ""; flex: 0; }
@@ -66,6 +65,7 @@
       <a href="/upload">Upload</a>
       <a href="/logout">Log out</a>
     </nav>
+    {{.FleetNav}}
   </header>
 
   {{if not .Root}}

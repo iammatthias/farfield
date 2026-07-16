@@ -67,17 +67,18 @@
 
   <article class="skill-section">
     <h2>Farfield Style</h2>
-    <p>Function and form, with function first. The aesthetic borrows from Dieter Rams (Braun), JPL / NASA technical documentation, and Swiss typography — high-contrast monochrome, generous whitespace, ruled dividers, restrained type. Nothing decorative earns its place unless it carries information.</p>
+    <p>Function and form, with function first — but kind. The aesthetic keeps its Braun / JPL / Swiss-typography lineage (warm paper, ink, one signal red, restrained type) and softens the delivery: soft white panels, hairline borders, rounded corners, gentle shadows. Nothing decorative earns its place unless it carries information.</p>
 
     <h3>Palette</h3>
     <table>
       <tr><th>Token</th><th>Value</th><th>Usage</th></tr>
-      <tr><td>--surface</td><td><code>#fafaf7</code></td><td>Page background — slightly warm, paper-like</td></tr>
-      <tr><td>--ink</td><td><code>#0a0a0a</code></td><td>All text, primary rules</td></tr>
-      <tr><td>--accent</td><td><code>#d93a00</code></td><td>NASA red — status, callouts; never body text</td></tr>
+      <tr><td>--surface</td><td><code>#fcfbf8</code></td><td>Page ground — bright warm white (Display&nbsp;P3 upgraded)</td></tr>
+      <tr><td>--panel</td><td><code>#ffffff</code></td><td>Cards, inputs, bars</td></tr>
+      <tr><td>--ink</td><td><code>#1f1b16</code></td><td>All text — warm near-black</td></tr>
+      <tr><td>--accent</td><td><code>#e63d00</code></td><td>Signal red — status, callouts; never body text (more vivid on P3 displays)</td></tr>
     </table>
 
-    <p>No gradients. No shadows. No additional colours.</p>
+    <p>No gradients. Depth comes from panel-on-ground plus soft, low-alpha shadows; every tint derives from ink or accent via <code>color-mix()</code>. No additional colours.</p>
 
     <h3>Hierarchy via opacity</h3>
     <table>

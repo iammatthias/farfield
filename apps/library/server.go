@@ -115,7 +115,7 @@ func run(host, port string) error {
 			APIKey:       store.Env("LIBRARY_API_KEY", ""),
 			CookieSecure: store.Env("COOKIE_SECURE", "false") == "true",
 		},
-		rd:        &web.Renderer{Templates: tmpl, AssetVer: theme.Version},
+		rd:        &web.Renderer{Templates: tmpl, AssetVer: theme.Version, Funcs: tmplFuncs},
 		uploadKey: store.Env("LIBRARY_UPLOAD_KEY", ""),
 		tusDir:    store.Env("LIBRARY_TUS_DIR", "tus-staging"),
 		maxUpload: maxUploadLimit(),

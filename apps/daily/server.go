@@ -98,7 +98,7 @@ func run(host, port string) error {
 	s := &Server{
 		db:      db,
 		fetcher: newFetcher(store.Env("NASA_API_KEY", "DEMO_KEY")),
-		rd:      &web.Renderer{Templates: tmpl, AssetVer: theme.Version},
+		rd:      &web.Renderer{Templates: tmpl, AssetVer: theme.Version, Funcs: templateFuncs},
 	}
 
 	// Backfill the whole photo archive — Jan 1 through today — in the background so

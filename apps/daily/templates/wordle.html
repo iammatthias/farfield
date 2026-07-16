@@ -10,7 +10,7 @@
     .wordle-wrap .tile {
       aspect-ratio: 1; min-width: 0;
       display: flex; align-items: center; justify-content: center;
-      border: 1px solid var(--hairline);
+      border: 1px solid var(--hairline); border-radius: 4px;
       font: 500 clamp(1.1rem, 7vw, 1.5rem) var(--font-mono);
       text-transform: uppercase;
     }
@@ -25,8 +25,7 @@
     .wordle-legend {
       display: flex; flex-wrap: wrap; gap: 0.5rem 1.25rem;
       list-style: none; padding: 0.6rem 0 0; margin: 0;
-      font: 500 0.62rem/1.4 var(--font-mono);
-      text-transform: uppercase; letter-spacing: 0.06em; opacity: 0.8;
+      font-size: 0.72rem; font-weight: 500; opacity: 0.8;
     }
     .wordle-legend li { display: flex; align-items: center; gap: 0.45rem; }
     .wordle-legend .tile {
@@ -39,18 +38,13 @@
       display: flex; flex-wrap: wrap; gap: 0.6rem 1rem; align-items: center;
       margin-top: 1rem;
     }
-    .wordle-status {
-      font: 500 0.7rem/1.4 var(--font-mono);
-      text-transform: uppercase; letter-spacing: 0.07em; opacity: 0.7;
-      min-height: 1rem;
-    }
+    .wordle-status { font-size: 0.8rem; font-weight: 500; opacity: 0.7; min-height: 1rem; }
     .wordle-status.alert { color: var(--accent); opacity: 1; }
     .wordle-hard {
       display: flex; align-items: center; gap: 0.4rem;
-      font: 500 0.7rem/1 var(--font-mono);
-      text-transform: uppercase; letter-spacing: 0.07em;
+      font-size: 0.8rem; font-weight: 500;
     }
-    .wordle-hard input { width: auto; accent-color: var(--ink); }
+    .wordle-hard input { width: auto; }
     .wordle-hint { margin-top: 0.6rem; }
 
     /* visually hidden input — keeps mobile keyboards available without a
@@ -61,14 +55,14 @@
       overflow: hidden; clip-path: inset(50%); white-space: nowrap;
     }
 
-    .wordle-meta { margin-top: 1.5rem; border-top: 2px solid var(--ink); }
+    .wordle-meta { margin-top: 1.5rem; border-top: 1px solid var(--hairline); }
     .wordle-meta > div {
       display: flex; gap: 1rem; padding: 0.45rem 0;
-      border-bottom: 1px solid rgba(10, 10, 10, 0.15);
+      border-bottom: 1px solid var(--hairline);
     }
     .wordle-meta dt {
-      flex: 0 0 6.5rem; font: 500 0.7rem/1.5 var(--font-mono);
-      text-transform: uppercase; letter-spacing: 0.08em; opacity: 0.5;
+      flex: 0 0 6.5rem; font-size: 0.75rem; font-weight: 500;
+      line-height: 1.7; opacity: 0.55;
     }
     .wordle-meta dd { margin: 0; font-family: var(--font-mono); font-size: 0.8rem; overflow-wrap: anywhere; }
   </style>
