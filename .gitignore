@@ -17,6 +17,10 @@
 /apps/scrap/scrap
 /apps/sideload/sideload
 
+# Local build/dev output and e2e deps.
+tmp/
+e2e/node_modules/
+
 # Compiled iOS Shortcuts — source of truth is the .cherri files.
 /shortcuts/*.shortcut
 

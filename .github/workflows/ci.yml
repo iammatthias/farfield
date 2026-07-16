@@ -2,23 +2,66 @@ name: CI
 
 on:
   push:
+    branches: [master]
   pull_request:
 
 jobs:
-  build:
+  test:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
 
       - uses: actions/setup-go@v5
         with:
-          go-version: "1.25"
+          go-version: 1.25.x
+          cache-dependency-path: go.work.sum
 
-      # `go list -m` enumerates every module in the go.work workspace, so this
-      # builds and tests apps and libs alike with no per-app list to maintain.
-      - name: Build, vet, test
+      - name: gofmt
         run: |
-          for dir in $(go list -m -f '{{.Dir}}'); do
-            echo "==> $dir"
-            (cd "$dir" && go build ./... && go vet ./... && go test ./...)
-          done
+          files=$(gofmt -l apps lib)
+          if [ -n "$files" ]; then
+            echo "gofmt needed on:"
+            echo "$files"
+            exit 1
+          fi
+
+      - run: make vet
+
+      - run: make test
+
+  e2e:
+    needs: test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: 1.25.x
+          cache-dependency-path: go.work.sum
+
+      - run: make build
+
+      - name: Start dev fleet
+        run: scripts/devfleet.sh start
+
+      - name: Install Playwright
+        run: |
+          npm install --no-save playwright
+          npx playwright install --with-deps chromium
+
+      - name: Run e2e suite
+        run: make e2e
+        env:
+          E2E_API_KEY: dev-content-key
+
+      - name: Stop dev fleet
+        if: always()
+        run: scripts/devfleet.sh stop
+
+      - name: Upload fleet logs
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: devfleet-logs
+          path: tmp/dev/logs
