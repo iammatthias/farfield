@@ -20,6 +20,7 @@ use (
 	./lib/backup
 	./lib/cid
 	./lib/keys
+	./lib/markdown
 	./lib/pulse
 	./lib/qrenc
 	./lib/store
