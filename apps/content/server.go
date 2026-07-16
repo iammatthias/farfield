@@ -33,7 +33,13 @@ type Server struct {
 	blobsKey      string // blobs API key — kept server-side
 	blobsPublic   string // browser-facing blobs URL — injected into the editor
 	contentPublic string // browser-facing content URL — injected into the editor
-	siteURLTmpl   string // public page URL pattern with {collection}/{slug} holes; "" = no view-on-site link
+
+	// fleet search sources — internal URLs + optional read keys
+	feedURL          string
+	feedReadKey      string
+	bookmarksURL     string
+	bookmarksReadKey string
+	siteURLTmpl      string // public page URL pattern with {collection}/{slug} holes; "" = no view-on-site link
 
 	// md renders markdown bodies for the admin UI — the document preview on
 	// the edit page and the editor's live preview endpoint.
@@ -84,6 +90,11 @@ func run(host, port string) error {
 		blobsPublic:   store.Env("BLOBS_PUBLIC_URL", "http://127.0.0.1:8789"),
 		contentPublic: store.Env("CONTENT_PUBLIC_URL", "http://127.0.0.1:8787"),
 		siteURLTmpl:   store.Env("SITE_URL_TEMPLATE", ""), // e.g. https://example.com/{collection}/{slug}
+
+		feedURL:          store.Env("FEED_URL", "http://127.0.0.1:8788"),
+		feedReadKey:      store.Env("FEED_READ_KEY", ""),
+		bookmarksURL:     store.Env("BOOKMARKS_URL", "http://127.0.0.1:8793"),
+		bookmarksReadKey: store.Env("BOOKMARKS_READ_KEY", ""),
 	}
 
 	s.md = newRenderer(s.db, s.blobsURL, s.blobsPublic)
@@ -111,6 +122,8 @@ func (s *Server) routes() http.Handler {
 	mux.HandleFunc("GET /entries", s.auth.RequireSession(s.handleEntries))
 	mux.HandleFunc("GET /entries/new", s.auth.RequireSession(s.handleNewEntry))
 	mux.HandleFunc("GET /entries/trash", s.auth.RequireSession(s.handleTrash))
+	mux.HandleFunc("GET /search", s.auth.RequireSession(s.handleFleetSearchPage))
+	mux.HandleFunc("GET /fleet-search-data", s.auth.RequireSession(s.handleFleetSearchData))
 	mux.HandleFunc("POST /entries", s.auth.RequireSession(s.handleCreateEntry))
 	mux.HandleFunc("GET /entries/{slug}/edit", s.auth.RequireSession(s.handleEditEntry))
 	mux.HandleFunc("POST /entries/{slug}", s.auth.RequireSession(s.handleUpdateEntry))

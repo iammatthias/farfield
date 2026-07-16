@@ -34,6 +34,20 @@ var (
 	fleetHTML template.HTML
 )
 
+// FleetBase returns the browser-facing base URL for a fleet app — the
+// production subdomain, or the canonical localhost port under
+// FARFIELD_FLEET=local.
+func FleetBase(name string) string {
+	if os.Getenv("FARFIELD_FLEET") == "local" {
+		for _, a := range fleetApps {
+			if a.Name == name {
+				return "http://127.0.0.1:" + a.Port
+			}
+		}
+	}
+	return "https://" + name + ".farfield.systems"
+}
+
 // fleetNav renders the cross-app switcher menu. Renderer.Render injects it
 // into every page as .FleetNav; admin mastheads include it with
 // {{.FleetNav}}. Public pages simply don't reference it.
@@ -45,12 +59,9 @@ func fleetNav() template.HTML {
 		}
 		var b strings.Builder
 		b.WriteString(`<details class="fleet"><summary>fleet</summary><nav>`)
+		b.WriteString(`<a class="fleet-wide" href="` + FleetBase("content") + `/search">search the fleet</a>`)
 		for _, a := range fleetApps {
-			href := "https://" + a.Name + ".farfield.systems"
-			if mode == "local" {
-				href = "http://127.0.0.1:" + a.Port
-			}
-			b.WriteString(`<a href="` + href + `">` + a.Name + `</a>`)
+			b.WriteString(`<a href="` + FleetBase(a.Name) + `">` + a.Name + `</a>`)
 		}
 		b.WriteString(`</nav></details>`)
 		fleetHTML = template.HTML(b.String())

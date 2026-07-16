@@ -7,6 +7,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 ## [Unreleased]
 
 ### Added
+- Fleet search: content's `/search` (linked from the fleet menu) ranks entries, series, feed posts, and public bookmarks with on-device semantic embeddings — the corpus aggregates server-side over the read APIs, ranking never leaves the browser.
 - Fleet single sign-on: set a shared `SESSION_SECRET` (and `SESSION_COOKIE_DOMAIN` for subdomain deployments) and one login works across every admin app via signed, stateless session cookies; logout anywhere ends the fleet session. Apps without the secret keep their own database sessions.
 - `lib/markdown`: one shared markdown pipeline (goldmark + farfield embeds) for every admin UI — blob:// media, `[file](blob://cid)` links, series:// galleries, image alt text, and an editable-HTML renderer whose unsupported blocks round-trip verbatim.
 - Rich document editor in the shared theme: contenteditable surface with formatting toolbar, markdown typing shortcuts, ⌘B/⌘I/⌘K, paste/drop upload, alt-text editing, autosave, async ⌘S saves, and a Markdown source toggle. Content and feed composers are document-first with a sticky metadata rail.

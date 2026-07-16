@@ -1,0 +1,19 @@
+{{define "title"}}Search the fleet · farfield{{end}}
+{{define "content"}}
+  {{template "topbar" .}}
+
+  <div class="section-head">
+    <h2>Search the fleet</h2>
+    <span class="hint">entries · series · posts · bookmarks</span>
+  </div>
+
+  <div class="search-row">
+    <input type="search" id="fleet-search" placeholder="Search everything…"
+      autocomplete="off" autofocus aria-label="Search the fleet">
+    <span id="fleet-status" class="hint" aria-live="polite"></span>
+  </div>
+
+  <div id="fleet-results" class="fleet-results"></div>
+
+  <script type="module" src="/static/fleet-search.js"></script>
+{{end}}

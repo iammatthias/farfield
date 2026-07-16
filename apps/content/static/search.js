@@ -4,6 +4,8 @@
 // ~7 MB (cached immutably), embeddings are ~5 ms each and cached in
 // localStorage keyed by entry CID — content-addressed, so a cache entry can
 // never go stale.
+import { loadTern, vecToB64, vecFromB64, dot } from "/static/ternlight-loader.js";
+
 const input = document.getElementById("entry-search");
 const status = document.getElementById("search-status");
 const tbody = document.querySelector("table.rows tbody");
@@ -59,25 +61,6 @@ if (input && tbody) {
     }
   }
 
-  async function loadTern() {
-    const V = "?v=ternlight-0.1.0"; // bump when the vendored engine changes
-    const bg = await import("/static/ternlight/tern_engine_bg.js" + V);
-    const resp = await fetch("/static/ternlight/tern_engine_bg.wasm" + V);
-    let result;
-    try {
-      result = await WebAssembly.instantiateStreaming(resp, {
-        "./tern_engine_bg.js": bg,
-      });
-    } catch {
-      // Streaming needs the application/wasm MIME — fall back to a buffer.
-      const buf = await (await fetch("/static/ternlight/tern_engine_bg.wasm" + V)).arrayBuffer();
-      result = await WebAssembly.instantiate(buf, { "./tern_engine_bg.js": bg });
-    }
-    bg.__wbg_set_wasm(result.instance.exports);
-    result.instance.exports.__wbindgen_start();
-    return bg;
-  }
-
   function loadDocs() {
     return fetch("/search-data").then((r) => {
       if (!r.ok) throw new Error("search-data failed");
@@ -94,27 +77,11 @@ if (input && tbody) {
     const key = "ffemb1:" + d.cid;
     try {
       const hit = localStorage.getItem(key);
-      if (hit) {
-        const bin = atob(hit);
-        const bytes = new Uint8Array(bin.length);
-        for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
-        return new Float32Array(bytes.buffer);
-      }
+      if (hit) return vecFromB64(hit);
     } catch { /* storage unavailable — recompute */ }
     const v = tern.embed(embedText(d));
-    try {
-      let bin = "";
-      const bytes = new Uint8Array(v.buffer);
-      for (let i = 0; i < bytes.length; i++) bin += String.fromCharCode(bytes[i]);
-      localStorage.setItem(key, btoa(bin));
-    } catch { /* full or unavailable — fine */ }
+    try { localStorage.setItem(key, vecToB64(v)); } catch { /* full — fine */ }
     return v;
-  }
-
-  function dot(a, b) {
-    let s = 0;
-    for (let i = 0; i < a.length; i++) s += a[i] * b[i];
-    return s;
   }
 
   function semanticRank() {

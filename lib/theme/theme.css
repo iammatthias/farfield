@@ -173,6 +173,11 @@ hr { border: 0; border-top: 1px solid var(--hairline); margin-block: 1.6rem; }
 	text-decoration: none; font-size: 0.85rem; opacity: 0.8;
 }
 .fleet nav a:hover { background: var(--wash); opacity: 1; }
+.fleet nav .fleet-wide {
+	grid-column: 1 / -1;
+	border-bottom: 1px solid var(--hairline); border-radius: var(--r-s) var(--r-s) 0 0;
+	font-weight: 500; opacity: 1;
+}
 
 .section-head {
 	display: flex; justify-content: space-between; align-items: baseline;
@@ -415,6 +420,23 @@ td.nowrap, th.nowrap { white-space: nowrap; }
 	margin: 0.9rem 0 1.1rem;
 }
 .search-row input { max-width: 24rem; }
+
+/* fleet search results — one ranked list of everything */
+.fleet-results { display: flex; flex-direction: column; gap: 0.5rem; }
+.fleet-hit {
+	display: flex; align-items: center; gap: 0.8rem;
+	padding: 0.65rem 0.9rem; text-decoration: none;
+	background: var(--panel);
+	border: 1px solid var(--hairline); border-radius: var(--r-s);
+	transition: border-color 0.15s ease-out, box-shadow 0.15s ease-out;
+}
+.fleet-hit:hover { border-color: var(--line-strong); box-shadow: var(--shadow-s); }
+.fleet-hit-main { flex: 1; min-width: 0; display: flex; flex-direction: column; }
+.fleet-hit-main strong { font-weight: 500; }
+.fleet-hit-main small {
+	white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.fleet-hit-sim { flex: none; font-size: 0.72rem; }
 
 /* revision history — a quiet list in the rail */
 .rail-history { margin-top: 1rem; }
