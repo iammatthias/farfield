@@ -36,6 +36,9 @@ type Server struct {
 	auth      *web.Auth
 	rd        *web.Renderer
 	maxUpload int64
+	// sources locates the services whose bodies reference blobs — the
+	// hygiene page scans them. See hygieneSources for the env vars.
+	sources hygieneSources
 	// pulse records request telemetry; nil disables it (tests never start it).
 	pulse *pulse.Recorder
 }
@@ -95,6 +98,12 @@ func run(host, port string) error {
 		},
 		rd:        &web.Renderer{Templates: tmpl, AssetVer: theme.Version, Funcs: tmplFuncs},
 		maxUpload: defaultMaxUpload,
+		sources: hygieneSources{
+			ContentURL: store.Env("CONTENT_URL", "http://127.0.0.1:8787"),
+			ContentKey: store.Env("CONTENT_API_KEY", ""),
+			FeedURL:    store.Env("FEED_URL", "http://127.0.0.1:8788"),
+			FeedKey:    store.Env("FEED_READ_KEY", ""),
+		},
 	}
 
 	defer keys.Attach(s.auth, "blobs")() // admin-issued keys, when KEYS_DB_PATH is set
@@ -111,6 +120,7 @@ func (s *Server) routes() http.Handler {
 	mux.HandleFunc("GET /{$}", s.auth.RequireSession(s.handleIndex))
 	mux.HandleFunc("GET /upload", s.auth.RequireSession(s.handleUploadForm))
 	mux.HandleFunc("POST /upload", s.auth.RequireSession(s.handleAdminUpload))
+	mux.HandleFunc("GET /hygiene", s.auth.RequireSession(s.handleHygiene))
 	mux.HandleFunc("POST /blobs/{cid}/delete", s.auth.RequireSession(s.handleAdminDelete))
 
 	// Login — public HTML.
@@ -269,7 +279,13 @@ func (s *Server) handleAdminDelete(w http.ResponseWriter, r *http.Request) {
 			s.deleteThumbBytes(thumb)
 		}
 	}
-	http.Redirect(w, r, "/", http.StatusSeeOther)
+	// The hygiene page deletes orphans in place — send its deletes back to
+	// it. Whitelisted, never echoed, so the target cannot be attacker-chosen.
+	next := "/"
+	if r.FormValue("next") == "/hygiene" {
+		next = "/hygiene"
+	}
+	http.Redirect(w, r, next, http.StatusSeeOther)
 }
 
 // deleteThumbBytes drops a thumbnail's stored bytes once no remaining row

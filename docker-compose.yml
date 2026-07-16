@@ -40,6 +40,10 @@ services:
       - SESSION_COOKIE_DOMAIN=${SESSION_COOKIE_DOMAIN:-}
       - BLOBS_API_KEY=${BLOBS_API_KEY:-}
       - BLOBS_READ_KEY=${BLOBS_READ_KEY:-}
+      - CONTENT_URL=http://content:8787
+      - CONTENT_API_KEY=${CONTENT_API_KEY:-}
+      - FEED_URL=http://feed:8788
+      - FEED_READ_KEY=${FEED_READ_KEY:-}
       - KEYS_DB_PATH=/data/keys.sqlite
       - R2_ACCOUNT_ID=${R2_ACCOUNT_ID:-}
       - R2_BUCKET=${R2_BUCKET:-}
@@ -99,6 +103,10 @@ services:
       - SESSION_COOKIE_DOMAIN=${SESSION_COOKIE_DOMAIN:-}
       - CONTENT_API_KEY=${CONTENT_API_KEY:-}
       - CONTENT_READ_KEY=${CONTENT_READ_KEY:-}
+      - FEED_URL=http://feed:8788
+      - FEED_READ_KEY=${FEED_READ_KEY:-}
+      - BOOKMARKS_URL=http://bookmarks:8793
+      - BOOKMARKS_READ_KEY=${BOOKMARKS_READ_KEY:-}
       - KEYS_DB_PATH=/data/keys.sqlite
       - BLOBS_URL=http://blobs:8789
       - BLOBS_API_KEY=${BLOBS_API_KEY:-}

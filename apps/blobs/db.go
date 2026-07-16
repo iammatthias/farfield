@@ -119,6 +119,26 @@ func listMeta(db *sql.DB, limit, offset int) ([]Meta, error) {
 	return out, rows.Err()
 }
 
+// listAllMeta returns every blob's metadata, newest first. The hygiene report
+// compares the whole store against external references, so it cannot page.
+func listAllMeta(db *sql.DB) ([]Meta, error) {
+	rows, err := db.Query(
+		`SELECT ` + blobCols + ` FROM blobs ORDER BY created_at DESC, cid`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []Meta
+	for rows.Next() {
+		m, err := scanMeta(rows)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, *m)
+	}
+	return out, rows.Err()
+}
+
 // countMeta returns the total number of blobs in the index.
 func countMeta(db *sql.DB) (int, error) {
 	var n int

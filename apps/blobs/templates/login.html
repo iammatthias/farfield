@@ -1,6 +1,7 @@
 {{define "title"}}Log in · farfield{{end}}
 {{define "content"}}
   <section class="prose">
+    <div class="login-mark" aria-hidden="true">bl</div>
     <h1>farfield · blobs</h1>
     {{with .Error}}<p class="error">{{.}}</p>{{end}}
     <form method="post" action="/login">

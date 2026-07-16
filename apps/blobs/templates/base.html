@@ -29,6 +29,15 @@
       margin-top: 2rem; font-family: var(--font-mono); font-size: 0.8rem;
     }
 
+    /* hygiene report — reference lists inside table cells */
+    details.reflist summary { cursor: pointer; opacity: 0.72; }
+    details.reflist[open] summary, details.reflist summary:hover { opacity: 1; }
+    .reflist ul, ul.reflist {
+      list-style: none; padding: 0; margin: 0;
+      display: grid; gap: 0.35rem;
+    }
+    details.reflist ul { margin-top: 0.5rem; }
+
     /* :target modal viewer — no JavaScript */
     .modal { display: none; position: fixed; inset: 0; z-index: 50; }
     .modal:target { display: flex; align-items: center; justify-content: center; padding: 1.5rem; }

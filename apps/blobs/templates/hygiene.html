@@ -1,0 +1,152 @@
+{{define "title"}}Hygiene · farfield{{end}}
+{{define "content"}}
+  <header class="bar">
+    <h1>farfield · blobs</h1>
+    <nav>
+      <a href="/">Blobs</a>
+      <a href="/upload">Upload</a>
+      <a href="/logout">Log out</a>
+    </nav>
+    {{.FleetNav}}
+  </header>
+
+  {{with .Report}}
+    <p class="hint">
+      Bodies from content (entries, series) and feed (posts) were scanned for
+      blob://&lt;cid&gt; references —
+      {{len .Referenced}} referenced ·
+      {{len .Orphans}} orphaned ·
+      {{len .Missing}} missing ·
+      {{.DerivedThumbs}} generated thumbnail{{if ne .DerivedThumbs 1}}s{{end}} excluded as derived.
+    </p>
+
+    {{if not .SourcesOK}}
+      <div class="error">
+        <p>Some sources could not be scanned, so a blob that looks unreferenced
+        may only be unscanned — orphan deletion is disabled.</p>
+        <ul>
+          {{range .SourceErrors}}<li class="mono">{{.}}</li>{{end}}
+        </ul>
+      </div>
+    {{end}}
+    {{if .DraftsSkipped}}
+      <p class="hint">Content refused the draft scan (CONTENT_API_KEY is not
+      its write key) — drafts were not scanned, published entries only.</p>
+    {{end}}
+
+    <div class="section-head">
+      <h2>Orphans</h2>
+      <span class="hint">in the store, referenced by nothing</span>
+    </div>
+    {{if .Orphans}}
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr><th></th><th>CID</th><th>Type</th><th>Size</th><th>Added</th><th></th><th></th></tr>
+          </thead>
+          <tbody>
+            {{range .Orphans}}
+              <tr>
+                <td class="shrink">
+                  <img class="thumb" src="/blobs/{{if .ThumbCID}}{{.ThumbCID}}{{else}}{{.CID}}{{end}}" loading="lazy" alt=""
+                       {{if .DominantColor}}style="background:{{.DominantColor}}"{{end}}>
+                </td>
+                <td class="mono" title="{{.CID}}">{{slice .CID 0 24}}…</td>
+                <td>{{.Mime}}</td>
+                <td>{{humanSize .Size}}</td>
+                <td>{{shortDate .CreatedAt}}</td>
+                <td><span class="badge">no references</span></td>
+                <td>
+                  {{if $.Report.SourcesOK}}
+                    <form method="post" action="/blobs/{{.CID}}/delete"
+                          onsubmit="return confirm('Delete this blob? It is removed from the store.')">
+                      <input type="hidden" name="next" value="/hygiene">
+                      <button type="submit" class="danger">Delete</button>
+                    </form>
+                  {{end}}
+                </td>
+              </tr>
+            {{end}}
+          </tbody>
+        </table>
+      </div>
+    {{else}}
+      <p class="hint">No orphans — every stored blob is referenced somewhere.</p>
+    {{end}}
+
+    <div class="section-head">
+      <h2>Referenced</h2>
+      <span class="hint">stored blobs with live references</span>
+    </div>
+    {{if .Referenced}}
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr><th></th><th>CID</th><th>Type</th><th>Size</th><th>References</th></tr>
+          </thead>
+          <tbody>
+            {{range .Referenced}}
+              <tr>
+                <td class="shrink">
+                  <img class="thumb" src="/blobs/{{if .Meta.ThumbCID}}{{.Meta.ThumbCID}}{{else}}{{.Meta.CID}}{{end}}" loading="lazy" alt=""
+                       {{if .Meta.DominantColor}}style="background:{{.Meta.DominantColor}}"{{end}}>
+                </td>
+                <td class="mono" title="{{.Meta.CID}}">{{slice .Meta.CID 0 24}}…</td>
+                <td>{{.Meta.Mime}}</td>
+                <td>{{humanSize .Meta.Size}}</td>
+                <td>
+                  <details class="reflist">
+                    <summary>{{len .Refs}} reference{{if ne (len .Refs) 1}}s{{end}}</summary>
+                    <ul>
+                      {{range .Refs}}
+                        <li>
+                          <span class="badge">{{.Kind}}</span>
+                          {{if .Title}}{{.Title}} <span class="muted mono">{{.Slug}}</span>{{else}}<span class="mono">{{.Slug}}</span>{{end}}
+                        </li>
+                      {{end}}
+                    </ul>
+                  </details>
+                </td>
+              </tr>
+            {{end}}
+          </tbody>
+        </table>
+      </div>
+    {{else}}
+      <p class="hint">No stored blob is referenced by any scanned body.</p>
+    {{end}}
+
+    <div class="section-head">
+      <h2>Missing</h2>
+      <span class="hint">referenced in bodies, not in the store</span>
+    </div>
+    {{if .Missing}}
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr><th>CID</th><th>Referenced by</th></tr>
+          </thead>
+          <tbody>
+            {{range .Missing}}
+              <tr>
+                <td class="mono">{{.CID}}</td>
+                <td>
+                  <ul class="reflist">
+                    {{range .Refs}}
+                      <li>
+                        <span class="badge">{{.Kind}}</span>
+                        {{if .Title}}{{.Title}} <span class="muted mono">{{.Slug}}</span>{{else}}<span class="mono">{{.Slug}}</span>{{end}}
+                      </li>
+                    {{end}}
+                  </ul>
+                </td>
+              </tr>
+            {{end}}
+          </tbody>
+        </table>
+      </div>
+    {{else}}
+      <p class="hint">No dangling references — every blob embedded in a body is in the store.</p>
+    {{end}}
+  {{end}}
+{{end}}
