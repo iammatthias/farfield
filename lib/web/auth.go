@@ -4,12 +4,34 @@ import (
 	"database/sql"
 	"log/slog"
 	"net/http"
+	"os"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/iammatthias/farfield/lib/auth"
 	"github.com/iammatthias/farfield/lib/store"
 )
+
+// Fleet-wide session config, read from the environment because it must be
+// identical in every app for single sign-on to hold: SESSION_SECRET turns on
+// signed fleet sessions (one login spans every app sharing the secret), and
+// SESSION_COOKIE_DOMAIN widens the cookie to the fleet's parent domain
+// (e.g. .farfield.systems). With no secret set, each app keeps its own
+// database-backed sessions exactly as before.
+var (
+	fleetOnceAuth sync.Once
+	fleetSecret   string
+	cookieDomain  string
+)
+
+func fleetSessionConfig() (secret, domain string) {
+	fleetOnceAuth.Do(func() {
+		fleetSecret = os.Getenv("SESSION_SECRET")
+		cookieDomain = os.Getenv("SESSION_COOKIE_DOMAIN")
+	})
+	return fleetSecret, cookieDomain
+}
 
 // KeyChecker resolves an admin-issued token for an app to its scope —
 // keys.ScopeRead / ScopeUpload / ScopeWrite. lib/keys implements it; the
@@ -52,13 +74,22 @@ func (a *Auth) keyScope(r *http.Request) (string, bool) {
 }
 
 // RequireSession guards the HTML admin UI. An invalid or absent session
-// redirects to the login page.
+// redirects to the login page. A signed fleet session (SESSION_SECRET) is
+// accepted first; the app's own database sessions keep working either way,
+// so enabling the secret never logs anyone out.
 func (a *Auth) RequireSession(next http.HandlerFunc) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		if token, ok := auth.Session(r); ok {
-			if valid, err := store.ValidSession(a.DB, token); err == nil && valid {
+			if secret, _ := fleetSessionConfig(); secret != "" &&
+				auth.VerifySignedSession(secret, token) {
 				next(w, r)
 				return
+			}
+			if a.DB != nil {
+				if valid, err := store.ValidSession(a.DB, token); err == nil && valid {
+					next(w, r)
+					return
+				}
 			}
 		}
 		http.Redirect(w, r, "/login", http.StatusSeeOther)
@@ -156,6 +187,16 @@ func (a *Auth) HandleLogin(w http.ResponseWriter, r *http.Request) {
 		http.Redirect(w, r, "/login?error=Invalid+password", http.StatusSeeOther)
 		return
 	}
+	secret, domain := fleetSessionConfig()
+	if secret != "" {
+		// Fleet mode: a signed, stateless token every sibling app accepts.
+		token := auth.SignSession(secret, time.Now().Add(7*24*time.Hour))
+		c := auth.SessionCookie(token, a.CookieSecure)
+		c.Domain = domain
+		http.SetCookie(w, c)
+		http.Redirect(w, r, "/", http.StatusSeeOther)
+		return
+	}
 	token := auth.NewSessionToken()
 	if err := store.InsertSession(a.DB, token, time.Now().Add(7*24*time.Hour)); err != nil {
 		slog.Error("create session", "err", err)
@@ -166,11 +207,15 @@ func (a *Auth) HandleLogin(w http.ResponseWriter, r *http.Request) {
 	http.Redirect(w, r, "/", http.StatusSeeOther)
 }
 
-// HandleLogout deletes the session and clears the cookie.
+// HandleLogout deletes the session and clears the cookie. Fleet sessions
+// are stateless, so their logout is the cookie clear itself — scoped to the
+// same domain the login set, or the browser would keep the fleet cookie.
 func (a *Auth) HandleLogout(w http.ResponseWriter, r *http.Request) {
 	if token, ok := auth.Session(r); ok {
 		_ = store.DeleteSession(a.DB, token)
 	}
-	http.SetCookie(w, auth.ClearCookie(a.CookieSecure))
+	c := auth.ClearCookie(a.CookieSecure)
+	_, c.Domain = fleetSessionConfig()
+	http.SetCookie(w, c)
 	http.Redirect(w, r, "/login", http.StatusSeeOther)
 }

@@ -9,6 +9,8 @@ import (
 	"testing"
 	"testing/fstest"
 	"time"
+
+	"github.com/iammatthias/farfield/lib/auth"
 )
 
 func TestRateLimiterAllow(t *testing.T) {
@@ -324,5 +326,42 @@ func TestHasWriteKey(t *testing.T) {
 	}
 	if (&Auth{}).HasWriteKey(mk("X-API-Key", "anything")) != false {
 		t.Error("unconfigured APIKey must never match")
+	}
+}
+
+// TestFleetSession proves the single-sign-on property: a login on one app
+// yields a cookie every other app accepts, purely via the shared secret.
+func TestFleetSession(t *testing.T) {
+	fleetOnceAuth.Do(func() {}) // ensure we control the values below
+	fleetSecret, cookieDomain = "fleet-test-secret", ""
+	defer func() { fleetSecret, cookieDomain = "", "" }()
+
+	token := auth.SignSession("fleet-test-secret", time.Now().Add(time.Hour))
+
+	otherApp := &Auth{} // no DB, no password — a different service entirely
+	called := false
+	h := otherApp.RequireSession(func(w http.ResponseWriter, r *http.Request) { called = true })
+
+	req := httptest.NewRequest("GET", "/", nil)
+	req.AddCookie(&http.Cookie{Name: "session", Value: token})
+	h(httptest.NewRecorder(), req)
+	if !called {
+		t.Fatal("signed fleet session not accepted by a sibling app")
+	}
+
+	// Tampered and expired tokens are refused.
+	for name, bad := range map[string]string{
+		"tampered": token + "x",
+		"expired":  auth.SignSession("fleet-test-secret", time.Now().Add(-time.Minute)),
+		"wrongkey": auth.SignSession("some-other-secret", time.Now().Add(time.Hour)),
+	} {
+		called = false
+		req := httptest.NewRequest("GET", "/", nil)
+		req.AddCookie(&http.Cookie{Name: "session", Value: bad})
+		rec := httptest.NewRecorder()
+		h(rec, req)
+		if called || rec.Code != http.StatusSeeOther {
+			t.Errorf("%s token must redirect to login", name)
+		}
 	}
 }

@@ -36,6 +36,8 @@ services:
       - BLOBS_BACKEND=${BLOBS_BACKEND:-r2}
       - BLOBS_DIR=/data/blobs
       - PASSWORD=${PASSWORD:-changeme}
+      - SESSION_SECRET=${SESSION_SECRET:-}
+      - SESSION_COOKIE_DOMAIN=${SESSION_COOKIE_DOMAIN:-}
       - BLOBS_API_KEY=${BLOBS_API_KEY:-}
       - BLOBS_READ_KEY=${BLOBS_READ_KEY:-}
       - KEYS_DB_PATH=/data/keys.sqlite
@@ -62,6 +64,8 @@ services:
       - LIBRARY_BACKEND=${LIBRARY_BACKEND:-r2}
       - LIBRARY_DIR=/data/library
       - PASSWORD=${PASSWORD:-changeme}
+      - SESSION_SECRET=${SESSION_SECRET:-}
+      - SESSION_COOKIE_DOMAIN=${SESSION_COOKIE_DOMAIN:-}
       - LIBRARY_API_KEY=${LIBRARY_API_KEY:-}
       - LIBRARY_UPLOAD_KEY=${LIBRARY_UPLOAD_KEY:-}
       - LIBRARY_MAX_UPLOAD=${LIBRARY_MAX_UPLOAD:-}
@@ -91,6 +95,8 @@ services:
       - CONTENT_PORT=8787
       - CONTENT_DB_PATH=/data/content.sqlite
       - PASSWORD=${PASSWORD:-changeme}
+      - SESSION_SECRET=${SESSION_SECRET:-}
+      - SESSION_COOKIE_DOMAIN=${SESSION_COOKIE_DOMAIN:-}
       - CONTENT_API_KEY=${CONTENT_API_KEY:-}
       - CONTENT_READ_KEY=${CONTENT_READ_KEY:-}
       - KEYS_DB_PATH=/data/keys.sqlite
@@ -118,6 +124,8 @@ services:
       - FEED_PORT=8788
       - FEED_DB_PATH=/data/feed.sqlite
       - PASSWORD=${PASSWORD:-changeme}
+      - SESSION_SECRET=${SESSION_SECRET:-}
+      - SESSION_COOKIE_DOMAIN=${SESSION_COOKIE_DOMAIN:-}
       - FEED_API_KEY=${FEED_API_KEY:-}
       - FEED_READ_KEY=${FEED_READ_KEY:-}
       - KEYS_DB_PATH=/data/keys.sqlite
@@ -189,6 +197,8 @@ services:
       - PULSE_PORT=8798
       - PULSE_DB_PATH=/data/pulse.sqlite
       - PASSWORD=${PASSWORD:-changeme}
+      - SESSION_SECRET=${SESSION_SECRET:-}
+      - SESSION_COOKIE_DOMAIN=${SESSION_COOKIE_DOMAIN:-}
       - COOKIE_SECURE=true
     volumes:
       - ./data:/data
@@ -222,6 +232,8 @@ services:
       - BOOKMARKS_PORT=8793
       - BOOKMARKS_DB_PATH=/data/bookmarks.sqlite
       - PASSWORD=${PASSWORD:-changeme}
+      - SESSION_SECRET=${SESSION_SECRET:-}
+      - SESSION_COOKIE_DOMAIN=${SESSION_COOKIE_DOMAIN:-}
       - BOOKMARKS_API_KEY=${BOOKMARKS_API_KEY:-}
       - BOOKMARKS_READ_KEY=${BOOKMARKS_READ_KEY:-}
       - KEYS_DB_PATH=/data/keys.sqlite
@@ -246,6 +258,8 @@ services:
       - KEYS_DB_PATH=/data/keys.sqlite
       - QR_PUBLIC_URL=${QR_PUBLIC_URL:-https://qr.farfield.systems}
       - PASSWORD=${PASSWORD:-changeme}
+      - SESSION_SECRET=${SESSION_SECRET:-}
+      - SESSION_COOKIE_DOMAIN=${SESSION_COOKIE_DOMAIN:-}
       - COOKIE_SECURE=true
     volumes:
       - ./data:/data
@@ -266,6 +280,8 @@ services:
       - KEYS_DB_PATH=/data/keys.sqlite
       - SCRAP_PUBLIC_URL=${SCRAP_PUBLIC_URL:-https://scrap.farfield.systems}
       - PASSWORD=${PASSWORD:-changeme}
+      - SESSION_SECRET=${SESSION_SECRET:-}
+      - SESSION_COOKIE_DOMAIN=${SESSION_COOKIE_DOMAIN:-}
       - COOKIE_SECURE=true
     volumes:
       - ./data:/data
@@ -288,6 +304,8 @@ services:
       - SIDELOAD_OWNER_UDID=${SIDELOAD_OWNER_UDID:-}
       - SIDELOAD_PUBLIC_URL=${SIDELOAD_PUBLIC_URL:-https://sideload.farfield.systems}
       - PASSWORD=${PASSWORD:-changeme}
+      - SESSION_SECRET=${SESSION_SECRET:-}
+      - SESSION_COOKIE_DOMAIN=${SESSION_COOKIE_DOMAIN:-}
       - COOKIE_SECURE=true
     volumes:
       - ./data:/data
@@ -305,6 +323,8 @@ services:
       - KEYS_PORT=8801
       - KEYS_DB_PATH=/data/keys.sqlite
       - PASSWORD=${PASSWORD:-changeme}
+      - SESSION_SECRET=${SESSION_SECRET:-}
+      - SESSION_COOKIE_DOMAIN=${SESSION_COOKIE_DOMAIN:-}
       - COOKIE_SECURE=true
     volumes:
       - ./data:/data
@@ -329,6 +349,8 @@ services:
       - FEED_DB_PATH=/data/feed.sqlite
       - BLOBS_DB_PATH=/data/blobs.sqlite
       - PASSWORD=${PASSWORD:-changeme}
+      - SESSION_SECRET=${SESSION_SECRET:-}
+      - SESSION_COOKIE_DOMAIN=${SESSION_COOKIE_DOMAIN:-}
       - BLOBS_URL=http://blobs:8789
       - BLOBS_API_KEY=${BLOBS_API_KEY:-}
       - COOKIE_SECURE=true

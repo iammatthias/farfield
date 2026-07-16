@@ -33,7 +33,7 @@ start() {
     [ -x "bin/$app" ] || { echo "missing bin/$app — run make build"; exit 1; }
     envname=$(echo "$app" | tr 'a-z-' 'A-Z_')
     env HOST=127.0.0.1 PASSWORD=demo COOKIE_SECURE=false \
-      FARFIELD_FLEET=local \
+      FARFIELD_FLEET=local SESSION_SECRET=dev-fleet-secret \
       FARFIELD_DEV_TEMPLATES="$PWD/apps/$app" \
       FARFIELD_DEV_THEME="$PWD/lib/theme" \
       "${envname}_PORT=$port" \
