@@ -508,7 +508,16 @@ func getEntry(db *sql.DB, slug string) (*Entry, error) {
 // with the creation instant — "<unixMillis>-<slug>" — so app-authored entries
 // are keyed like the migrated content; it must then be unique. An unknown
 // collection slug is an error.
+// normalizeBody strips carriage returns from an entry body. Browser form
+// submission turns every textarea newline into CRLF; stored bodies must stay
+// LF or each web save would look like a content change to the vault sync
+// (its hash runs over body bytes) and push \r\n into the vault files.
+func normalizeBody(body string) string {
+	return strings.ReplaceAll(body, "\r\n", "\n")
+}
+
 func insertEntry(db *sql.DB, e *Entry) error {
+	e.Body = normalizeBody(e.Body)
 	collID, err := collectionID(db, e.Collection)
 	if err != nil {
 		return err
@@ -545,6 +554,7 @@ func insertEntry(db *sql.DB, e *Entry) error {
 // new values (including a possibly-changed collection and slug). A trashed
 // entry is not editable — like every read, the update sees it as missing.
 func updateEntry(db *sql.DB, currentSlug string, e *Entry) error {
+	e.Body = normalizeBody(e.Body)
 	collID, err := collectionID(db, e.Collection)
 	if err != nil {
 		return err
