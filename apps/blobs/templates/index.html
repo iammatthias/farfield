@@ -25,9 +25,17 @@
             <tr>
               <td class="shrink">
                 <a class="row" href="#m-{{.CID}}">
-                  {{/* generated thumbnail when one exists; older rows fall back to the full blob */}}
-                <img class="thumb" src="/blobs/{{if .ThumbCID}}{{.ThumbCID}}{{else}}{{.CID}}{{end}}" loading="lazy" alt=""
-                       {{if .DominantColor}}style="background:{{.DominantColor}}"{{end}}>
+                  {{$kind := mediaKind .Mime}}
+                  {{if eq $kind "image"}}
+                    {{/* generated thumbnail when one exists; older rows fall back to the full blob */}}
+                    <img class="thumb" src="/blobs/{{if .ThumbCID}}{{.ThumbCID}}{{else}}{{.CID}}{{end}}" loading="lazy" alt=""
+                         {{if .DominantColor}}style="background:{{.DominantColor}}"{{end}}>
+                  {{else if eq $kind "video"}}
+                    {{/* #t=0.1 nudges browsers to paint the first frame */}}
+                    <video class="thumb" src="/blobs/{{.CID}}#t=0.1" preload="metadata" muted playsinline></video>
+                  {{else}}
+                    <span class="thumb glyph">{{if eq $kind "audio"}}♪{{else}}⁘{{end}}</span>
+                  {{end}}
                 </a>
               </td>
               <td><a class="row mono" href="#m-{{.CID}}">{{slice .CID 0 24}}…</a></td>
@@ -61,7 +69,16 @@
         <a class="backdrop" href="#grid" aria-label="Close"></a>
         <div class="card">
           <a class="close" href="#grid" aria-label="Close">×</a>
-          <img src="/blobs/{{.CID}}" loading="lazy" alt="">
+          {{$kind := mediaKind .Mime}}
+          {{if eq $kind "image"}}
+            <img src="/blobs/{{.CID}}" loading="lazy" alt="">
+          {{else if eq $kind "video"}}
+            <video src="/blobs/{{.CID}}" controls preload="metadata" playsinline></video>
+          {{else if eq $kind "audio"}}
+            <div class="media-well"><audio src="/blobs/{{.CID}}" controls preload="metadata"></audio></div>
+          {{else}}
+            <div class="media-well glyph">⁘</div>
+          {{end}}
           <div class="detail">
             <h2>{{.Mime}}</h2>
             <dl>

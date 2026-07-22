@@ -11,6 +11,7 @@ import (
 	"net/http"
 	"net/url"
 	"os"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -29,6 +30,11 @@ type R2 struct {
 	cfg    R2Config
 	host   string
 	client *http.Client
+	// stream serves GetStream bodies. client's 60s Timeout covers the whole
+	// response body — fatal for a viewer scrubbing through a long video — so
+	// streams bound only the wait for headers and let the body take as long
+	// as the reader needs.
+	stream *http.Client
 }
 
 // NewR2 builds an R2 byte store. It does not contact R2.
@@ -41,10 +47,13 @@ func NewR2(cfg R2Config) (*R2, error) {
 			return nil, fmt.Errorf("R2 config: %s is required", name)
 		}
 	}
+	streamTr := http.DefaultTransport.(*http.Transport).Clone()
+	streamTr.ResponseHeaderTimeout = 30 * time.Second
 	return &R2{
 		cfg:    cfg,
 		host:   cfg.AccountID + ".r2.cloudflarestorage.com",
 		client: &http.Client{Timeout: 60 * time.Second},
+		stream: &http.Client{Transport: streamTr},
 	}, nil
 }
 
@@ -134,27 +143,69 @@ func (r *R2) Get(key string) ([]byte, error) {
 }
 
 // GetStream returns the object's body as a stream. GET requests sign an
-// empty payload, so streaming the response is compatible with SigV4.
+// empty payload, so streaming the response is compatible with SigV4. When
+// the object's size is known (it always is, short of a proxy mangling the
+// response) the stream is a seekable rangeReader, so the byte handler can
+// answer Range requests with 206s — video seeking over R2.
 func (r *R2) GetStream(key string) (io.ReadCloser, int64, error) {
+	body, size, err := r.getRange(key, 0)
+	if err != nil || body == nil {
+		return nil, 0, err
+	}
+	if size < 0 {
+		return body, size, nil // unknown length — plain stream, no seeking
+	}
+	rr := &rangeReader{
+		size: size,
+		body: body,
+		fetch: func(off int64) (io.ReadCloser, error) {
+			b, _, err := r.getRange(key, off)
+			if err == nil && b == nil {
+				err = fmt.Errorf("R2 get %s: object vanished mid-read", key)
+			}
+			return b, err
+		},
+	}
+	return rr, size, nil
+}
+
+// getRange GETs the object starting at byte offset off, returning the body
+// and the response's Content-Length ((nil, 0, nil) when absent). The Range
+// header is not in the SigV4 signed set, so adding it does not disturb the
+// signature; should a middlebox strip it, the ignored prefix is discarded to
+// keep the caller's offset honest.
+func (r *R2) getRange(key string, off int64) (io.ReadCloser, int64, error) {
 	req, err := http.NewRequest(http.MethodGet, r.objectURL(key), nil)
 	if err != nil {
 		return nil, 0, err
 	}
+	if off > 0 {
+		req.Header.Set("Range", "bytes="+strconv.FormatInt(off, 10)+"-")
+	}
 	r.sign(req, nil)
-	resp, err := r.client.Do(req)
+	resp, err := r.stream.Do(req)
 	if err != nil {
 		return nil, 0, err
 	}
-	if resp.StatusCode == http.StatusNotFound {
+	switch resp.StatusCode {
+	case http.StatusNotFound:
 		resp.Body.Close()
 		return nil, 0, nil
-	}
-	if resp.StatusCode != http.StatusOK {
+	case http.StatusPartialContent:
+		return resp.Body, resp.ContentLength, nil
+	case http.StatusOK:
+		if off > 0 {
+			if _, err := io.CopyN(io.Discard, resp.Body, off); err != nil {
+				resp.Body.Close()
+				return nil, 0, err
+			}
+		}
+		return resp.Body, resp.ContentLength, nil
+	default:
 		body, _ := io.ReadAll(resp.Body)
 		resp.Body.Close()
 		return nil, 0, fmt.Errorf("R2 get %s: HTTP %d: %s", key, resp.StatusCode, body)
 	}
-	return resp.Body, resp.ContentLength, nil
 }
 
 func (r *R2) Delete(key string) error {

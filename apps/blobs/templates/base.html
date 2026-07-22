@@ -18,6 +18,11 @@
       width: 52px; height: 52px; max-width: none; object-fit: cover; display: block;
       border: 1px solid var(--hairline); border-radius: 4px;
     }
+    video.thumb { pointer-events: none; background: var(--wash); }
+    .thumb.glyph {
+      display: flex; align-items: center; justify-content: center;
+      font-size: 1.05rem; opacity: 0.55; background: var(--wash);
+    }
     a.row { text-decoration: none; }
     a.row:hover { color: var(--accent); }
     .swatch {
@@ -50,10 +55,16 @@
       box-shadow: var(--shadow-m);
       display: grid; grid-template-columns: minmax(0, 1fr) 19rem;
     }
-    .modal .card > img {
+    .modal .card > img, .modal .card > video {
       width: 100%; height: 100%; max-height: 88vh;
       object-fit: contain; background: var(--wash);
     }
+    .modal .card > .media-well {
+      display: flex; align-items: center; justify-content: center;
+      min-height: 14rem; padding: 1.5rem; background: var(--wash);
+    }
+    .modal .card > .media-well.glyph { font-size: 2rem; opacity: 0.4; }
+    .modal .card > .media-well audio { width: 100%; }
     .modal .detail { padding: 1.25rem 1.4rem; min-width: 0; border-left: 1px solid var(--hairline); }
     .modal .detail h2 { font-size: 0.9rem; font-weight: 600; margin-bottom: 0.9rem; }
     .modal .detail dl {
@@ -73,7 +84,7 @@
     .modal .close:hover { background: var(--accent); }
     @media (max-width: 46rem) {
       .modal .card { grid-template-columns: 1fr; }
-      .modal .card > img { max-height: 50vh; }
+      .modal .card > img, .modal .card > video { max-height: 50vh; }
       .modal .detail { border-left: 0; border-top: 1px solid var(--hairline); }
     }
   </style>

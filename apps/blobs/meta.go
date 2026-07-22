@@ -57,13 +57,13 @@ func deriveMetadata(data []byte) (Meta, image.Image, error) {
 	if err != nil || cfg.Width > maxDecodeDim || cfg.Height > maxDecodeDim {
 		// Not a decodable image — or one with absurd dimensions, which is
 		// never worth a full pixel decode — store it opaquely.
-		m.Mime = http.DetectContentType(data)
+		m.Mime = sniffMime(data)
 		return m, nil, nil
 	}
 	img, format, err := image.Decode(bytes.NewReader(data))
 	if err != nil {
 		// Header parsed but the pixels did not (truncated file) — opaque.
-		m.Mime = http.DetectContentType(data)
+		m.Mime = sniffMime(data)
 		return m, nil, nil
 	}
 	bh, err := blurhash.Encode(4, 3, img)
@@ -102,6 +102,30 @@ func thumbJPEG(img image.Image) []byte {
 		return nil
 	}
 	return buf.Bytes()
+}
+
+// sniffMime detects a non-image blob's MIME type. Go's DetectContentType
+// covers the WHATWG-sniffable set (MP4, WebM, AVI, common audio) but not
+// Apple's ISO-BMFF brands, so an iPhone-recorded .mov or an .m4a would land
+// as application/octet-stream and render as a bare file link instead of a
+// player. Those brands are refined here; everything else passes through.
+func sniffMime(data []byte) string {
+	m := http.DetectContentType(data)
+	if m != "application/octet-stream" {
+		return m
+	}
+	// ISO base media file format: size(4) "ftyp" major-brand(4) …
+	if len(data) >= 12 && string(data[4:8]) == "ftyp" {
+		switch string(data[8:12]) {
+		case "qt  ":
+			return "video/quicktime"
+		case "M4V ":
+			return "video/mp4"
+		case "M4A ", "M4B ":
+			return "audio/mp4"
+		}
+	}
+	return m
 }
 
 func mimeFor(format string) string {

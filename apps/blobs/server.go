@@ -12,6 +12,7 @@ import (
 	"net/url"
 	"os"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/iammatthias/farfield/lib/keys"
@@ -405,9 +406,10 @@ func (s *Server) handleAPIGetBytes(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("ETag", etag)
 	// Content-addressed: the bytes for a CID never change.
 	w.Header().Set("Cache-Control", "public, max-age=31536000, immutable")
-	// The local backend hands back an *os.File — let ServeContent stream it
-	// with Range support and Content-Length. R2 bodies are not seekable, so
-	// send the known size and copy.
+	// Both backends hand back a seekable stream — an *os.File locally, a
+	// rangeReader over R2 — so ServeContent can answer Range requests with
+	// 206s (Safari refuses to play video without them). The copy branch is
+	// the fallback for a stream of unknown length.
 	if rs, ok := body.(io.ReadSeeker); ok {
 		http.ServeContent(w, r, "", time.Time{}, rs)
 		return
@@ -481,6 +483,21 @@ func (s *Server) handleAPIDelete(w http.ResponseWriter, r *http.Request) {
 var tmplFuncs = template.FuncMap{
 	"humanSize": humanSize,
 	"shortDate": shortDate,
+	"mediaKind": mediaKind,
+}
+
+// mediaKind buckets a MIME type into the tag family a template should render
+// it with: image, video, audio, or file for everything else.
+func mediaKind(mime string) string {
+	switch {
+	case strings.HasPrefix(mime, "image/"):
+		return "image"
+	case strings.HasPrefix(mime, "video/"):
+		return "video"
+	case strings.HasPrefix(mime, "audio/"):
+		return "audio"
+	}
+	return "file"
 }
 
 // humanSize formats a byte count as B / KB / MB.
