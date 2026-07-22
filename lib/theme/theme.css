@@ -740,6 +740,15 @@ dialog.embed-modal::backdrop { background: color-mix(in srgb, var(--ink) 35%, tr
 	box-shadow: none;
 }
 .embed-cell img { width: 100%; height: 100%; object-fit: cover; }
+.embed-cell video {
+  width: 100%; height: 100%; object-fit: cover; pointer-events: none;
+  background: var(--wash);
+}
+.embed-cell .embed-glyph {
+  width: 100%; height: 100%; display: flex; align-items: center;
+  justify-content: center; font-size: 1.05rem; opacity: 0.55;
+  background: var(--wash);
+}
 .embed-cell:hover { background: var(--panel); border-color: var(--line-strong); }
 .embed-cell.sel { border-color: var(--accent);
 	outline: 2px solid var(--accent); outline-offset: -2px; }
