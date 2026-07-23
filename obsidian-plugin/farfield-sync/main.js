@@ -12,6 +12,10 @@
  * The hash MUST stay byte-compatible with entryHash in sync.go:
  * sha256(title \0 excerpt \0 tags-joined-by-comma \0 published \0 body-trimmed \0).
  *
+ * Sync runs vault-wide (ribbon, command, auto-interval) or for a single
+ * note (ribbon, command, file context menu) — both paths share syncEntry
+ * and the state file, so they never disagree.
+ *
  * Plain CommonJS, no build step, no Node APIs — works on mobile.
  */
 "use strict";
@@ -67,6 +71,10 @@ function toRFC3339(s) {
   }
   const d = new Date(s);
   return isNaN(d) ? "" : d.toISOString().replace(/\.\d{3}Z$/, "Z");
+}
+
+function nowStamp() {
+  return new Date().toISOString().replace(/\.\d{3}Z$/, "Z");
 }
 
 function vaultTime(rfc) {
@@ -136,12 +144,41 @@ class FarfieldSyncPlugin extends Plugin {
     this.settings = Object.assign({}, DEFAULTS, await this.loadData());
     this.syncing = false;
 
-    this.addRibbonIcon("refresh-cw", "Sync with Farfield", () => this.sync());
+    this.addRibbonIcon("refresh-cw", "Farfield: sync vault", () => this.sync());
+    this.addRibbonIcon("file-check", "Farfield: sync current note", () => {
+      const f = this.app.workspace.getActiveFile();
+      if (!f) {
+        new Notice("Farfield sync: no active note");
+        return;
+      }
+      this.syncFile(f);
+    });
+
     this.addCommand({
       id: "sync",
-      name: "Sync with Farfield",
+      name: "Sync vault with Farfield",
       callback: () => this.sync(),
     });
+    this.addCommand({
+      id: "sync-note",
+      name: "Sync this note with Farfield",
+      checkCallback: (checking) => {
+        const f = this.app.workspace.getActiveFile();
+        const ok = !!(f && this.entryForFile(f));
+        if (!checking && ok) this.syncFile(f);
+        return ok;
+      },
+    });
+
+    // Right-click a note in the explorer (or its tab) to sync just that one.
+    this.registerEvent(this.app.workspace.on("file-menu", (menu, file) => {
+      if (!this.entryForFile(file)) return;
+      menu.addItem((item) => item
+        .setTitle("Sync with Farfield")
+        .setIcon("refresh-cw")
+        .onClick(() => this.syncFile(file)));
+    }));
+
     this.addSettingTab(new FarfieldSettingTab(this.app, this));
     this.statusEl = this.addStatusBarItem();
     this.applyAutoSync();
@@ -185,18 +222,24 @@ class FarfieldSyncPlugin extends Plugin {
   }
 
   // Entries are <contentRoot>/<collection>/<slug>.md; deeper nesting, root
-  // notes, and conflict siblings are not entries.
-  localEntries() {
+  // notes, and conflict siblings are not entries. Returns {slug, lf} or null.
+  entryForFile(f) {
+    if (!f || !f.path || !f.path.endsWith(".md")) return null;
+    if (f.path.endsWith(".remote.md")) return null;
     const root = this.settings.contentRoot + "/";
+    if (!f.path.startsWith(root)) return null;
+    const rel = f.path.slice(root.length).split("/");
+    if (rel.length !== 2) return null;
+    const fm = this.app.metadataCache.getFileCache(f)?.frontmatter || {};
+    const slug = String(fm.slug || f.basename);
+    return { slug, lf: { file: f, collection: rel[0], fm } };
+  }
+
+  localEntries() {
     const out = new Map();
     for (const f of this.app.vault.getMarkdownFiles()) {
-      if (!f.path.startsWith(root)) continue;
-      const rel = f.path.slice(root.length).split("/");
-      if (rel.length !== 2) continue;
-      if (f.path.endsWith(".remote.md")) continue;
-      const fm = this.app.metadataCache.getFileCache(f)?.frontmatter || {};
-      const slug = String(fm.slug || f.basename);
-      out.set(slug, { file: f, collection: rel[0], fm });
+      const ent = this.entryForFile(f);
+      if (ent) out.set(ent.slug, ent.lf);
     }
     return out;
   }
@@ -234,7 +277,7 @@ class FarfieldSyncPlugin extends Plugin {
 
   /* ── remote I/O ── */
 
-  async api(method, path, body) {
+  async api(method, path, body, allow404) {
     const res = await requestUrl({
       url: this.settings.contentUrl.replace(/\/$/, "") + path,
       method,
@@ -245,6 +288,7 @@ class FarfieldSyncPlugin extends Plugin {
       body: body ? JSON.stringify(body) : undefined,
       throw: false,
     });
+    if (allow404 && res.status === 404) return null;
     if (res.status < 200 || res.status >= 300) {
       throw new Error(method + " " + path + ": HTTP " + res.status);
     }
@@ -256,6 +300,11 @@ class FarfieldSyncPlugin extends Plugin {
     const map = new Map();
     for (const e of data.entries || []) map.set(e.slug, e);
     return map;
+  }
+
+  // One entry by slug; null when it does not exist remotely.
+  fetchRemoteOne(slug) {
+    return this.api("GET", "/api/entries/" + encodeURIComponent(slug), null, true);
   }
 
   pushPayload(e) {
@@ -294,6 +343,54 @@ class FarfieldSyncPlugin extends Plugin {
     }
   }
 
+  // Sync exactly one note: same decide/apply logic, scoped to the file's
+  // slug — the state file still records the result, so a later vault-wide
+  // sync agrees with what happened here.
+  async syncFile(file) {
+    if (this.syncing) return;
+    if (!this.settings.apiKey) {
+      new Notice("Farfield sync: set the API key in settings first");
+      return;
+    }
+    const ent = this.entryForFile(file);
+    if (!ent) {
+      new Notice(file && file.path && file.path.endsWith(".remote.md")
+        ? "Farfield sync: this is a conflict copy — merge it into the main note, delete it, then sync that note"
+        : "Farfield sync: not an entry (expects " + this.settings.contentRoot + "/<collection>/<note>.md)");
+      return;
+    }
+    this.syncing = true;
+    this.status("syncing " + file.basename + "…");
+    try {
+      const st = await this.loadState();
+      const re = await this.fetchRemoteOne(ent.slug);
+      const counts = { unchanged: 0, push: 0, create: 0, pull: 0, "pull-new": 0, conflict: 0 };
+      const notes = [];
+      const act = await this.syncEntry(ent.slug, ent.lf, re || undefined, st, counts, notes);
+      await this.saveState(st);
+      const verb = {
+        "none": "up to date",
+        "push": "pushed local edits",
+        "create": "created on Farfield",
+        "pull": "pulled remote edits",
+        "pull-new": "pulled from Farfield",
+        "conflict": "conflict — review the .remote.md copy",
+        "skip-ipfs": "not pushed — body still has legacy ipfs:// refs",
+        "remote-gone": "remote entry is gone (trashed?); local kept",
+        "local-gone": "local file is gone; remote kept",
+      }[act] || act;
+      this.status(file.basename + ": " + verb);
+      new Notice("Farfield sync — " + file.basename + ": " + verb, 6000);
+      if (notes.length) console.log("[farfield-sync]\n" + notes.join("\n"));
+    } catch (err) {
+      this.status("failed");
+      new Notice("Farfield sync failed: " + err.message, 10000);
+      console.error("[farfield-sync]", err);
+    } finally {
+      this.syncing = false;
+    }
+  }
+
   async runSync() {
     const [remote, st] = await Promise.all([this.fetchRemote(), this.loadState()]);
     const local = this.localEntries();
@@ -301,85 +398,9 @@ class FarfieldSyncPlugin extends Plugin {
     const slugs = new Set([...local.keys(), ...remote.keys(), ...Object.keys(st.entries)]);
     const counts = { unchanged: 0, push: 0, create: 0, pull: 0, "pull-new": 0, conflict: 0 };
     const notes = [];
-    const now = () => new Date().toISOString().replace(/\.\d{3}Z$/, "Z");
 
     for (const slug of [...slugs].sort()) {
-      const lf = local.get(slug);
-      const re = remote.get(slug);
-      const rec = st.entries[slug];
-
-      const le = lf ? await this.readEntry(lf, slug) : null;
-      const lHash = le ? await entryHash(le) : "";
-      const localChanged = !!le && (!rec || lHash !== rec.localHash);
-      const remoteChanged = !!re && (!rec || re.cid !== rec.remoteCid);
-
-      // First encounter, equal content: seed quietly (see sync.go).
-      if (le && re && !rec && lHash === (await entryHash(re))) {
-        st.entries[slug] = { remoteCid: re.cid, localHash: lHash, syncedAt: now() };
-        counts.unchanged++;
-        continue;
-      }
-
-      let act = decide(!!le, !!re, !!rec, localChanged, remoteChanged);
-      if (act === "conflict") {
-        // local edit time: the later of file mtime and frontmatter updated
-        const fmMs = Date.parse(toRFC3339(lf.fm.updated) || "");
-        const localMs = Math.max(lf.file.stat?.mtime || 0, isNaN(fmMs) ? 0 : fmMs);
-        act = newerSide(localMs, re.updatedAt);
-        if (act !== "conflict") {
-          notes.push("conflict " + slug + " → took " + (act === "push" ? "local" : "remote") + " (newer)");
-        }
-      }
-
-      switch (act) {
-        case "none":
-          counts.unchanged++;
-          break;
-        case "push":
-        case "create": {
-          if (IPFS_REF_RE.test(le.body)) {
-            notes.push("SKIP " + slug + " — body has legacy ipfs:// refs; fix them first");
-            counts.conflict++;
-            break;
-          }
-          const saved = act === "create"
-            ? await this.api("POST", "/api/entries", this.pushPayload(le))
-            : await this.api("PUT", "/api/entries/" + slug, this.pushPayload(le));
-          le.updatedAt = saved.updatedAt || le.updatedAt;
-          le.createdAt = saved.createdAt || le.createdAt;
-          await this.writeEntryFile(lf.file.path, le);
-          st.entries[slug] = {
-            remoteCid: saved.cid, localHash: await entryHash(le), syncedAt: now(),
-          };
-          counts[act === "create" ? "create" : "push"]++;
-          break;
-        }
-        case "pull":
-        case "pull-new": {
-          const path = lf
-            ? lf.file.path
-            : this.settings.contentRoot + "/" + re.collection + "/" + slug + ".md";
-          await this.writeEntryFile(path, re);
-          st.entries[slug] = {
-            remoteCid: re.cid, localHash: await entryHash(re), syncedAt: now(),
-          };
-          counts[act === "pull-new" ? "pull-new" : "pull"]++;
-          break;
-        }
-        case "conflict": {
-          counts.conflict++;
-          const sib = lf.file.path.replace(/\.md$/, ".remote.md");
-          await this.writeEntryFile(sib, re);
-          notes.push("CONFLICT " + slug + " — review " + sib);
-          break;
-        }
-        case "remote-gone":
-          notes.push("NOTE " + slug + " — remote entry gone (trashed?); local kept");
-          break;
-        case "local-gone":
-          notes.push("NOTE " + slug + " — local file gone; remote kept");
-          break;
-      }
+      await this.syncEntry(slug, local.get(slug), remote.get(slug), st, counts, notes);
     }
 
     await this.saveState(st);
@@ -387,6 +408,87 @@ class FarfieldSyncPlugin extends Plugin {
       `${counts.pull} pull · ${counts["pull-new"]} pull-new · ${counts.conflict} conflicts`;
     const changed = counts.push + counts.create + counts.pull + counts["pull-new"];
     return { line, notes, changed, conflicts: counts.conflict };
+  }
+
+  // Syncs one slug: the full decide/apply pass for a (local, remote, state)
+  // triple. Mutates counts, notes, and st; returns the action taken. Both
+  // the vault-wide sync and the single-note sync run through here.
+  async syncEntry(slug, lf, re, st, counts, notes) {
+    const rec = st.entries[slug];
+
+    const le = lf ? await this.readEntry(lf, slug) : null;
+    const lHash = le ? await entryHash(le) : "";
+    const localChanged = !!le && (!rec || lHash !== rec.localHash);
+    const remoteChanged = !!re && (!rec || re.cid !== rec.remoteCid);
+
+    // First encounter, equal content: seed quietly (see sync.go).
+    if (le && re && !rec && lHash === (await entryHash(re))) {
+      st.entries[slug] = { remoteCid: re.cid, localHash: lHash, syncedAt: nowStamp() };
+      counts.unchanged++;
+      return "none";
+    }
+
+    let act = decide(!!le, !!re, !!rec, localChanged, remoteChanged);
+    if (act === "conflict") {
+      // local edit time: the later of file mtime and frontmatter updated
+      const fmMs = Date.parse(toRFC3339(lf.fm.updated) || "");
+      const localMs = Math.max(lf.file.stat?.mtime || 0, isNaN(fmMs) ? 0 : fmMs);
+      act = newerSide(localMs, re.updatedAt);
+      if (act !== "conflict") {
+        notes.push("conflict " + slug + " → took " + (act === "push" ? "local" : "remote") + " (newer)");
+      }
+    }
+
+    switch (act) {
+      case "none":
+        counts.unchanged++;
+        return act;
+      case "push":
+      case "create": {
+        if (IPFS_REF_RE.test(le.body)) {
+          notes.push("SKIP " + slug + " — body has legacy ipfs:// refs; fix them first");
+          counts.conflict++;
+          return "skip-ipfs";
+        }
+        const saved = act === "create"
+          ? await this.api("POST", "/api/entries", this.pushPayload(le))
+          : await this.api("PUT", "/api/entries/" + slug, this.pushPayload(le));
+        le.updatedAt = saved.updatedAt || le.updatedAt;
+        le.createdAt = saved.createdAt || le.createdAt;
+        await this.writeEntryFile(lf.file.path, le);
+        st.entries[slug] = {
+          remoteCid: saved.cid, localHash: await entryHash(le), syncedAt: nowStamp(),
+        };
+        counts[act === "create" ? "create" : "push"]++;
+        return act;
+      }
+      case "pull":
+      case "pull-new": {
+        const path = lf
+          ? lf.file.path
+          : this.settings.contentRoot + "/" + re.collection + "/" + slug + ".md";
+        await this.writeEntryFile(path, re);
+        st.entries[slug] = {
+          remoteCid: re.cid, localHash: await entryHash(re), syncedAt: nowStamp(),
+        };
+        counts[act === "pull-new" ? "pull-new" : "pull"]++;
+        return act;
+      }
+      case "conflict": {
+        counts.conflict++;
+        const sib = lf.file.path.replace(/\.md$/, ".remote.md");
+        await this.writeEntryFile(sib, re);
+        notes.push("CONFLICT " + slug + " — review " + sib);
+        return act;
+      }
+      case "remote-gone":
+        notes.push("NOTE " + slug + " — remote entry gone (trashed?); local kept");
+        return act;
+      case "local-gone":
+        notes.push("NOTE " + slug + " — local file gone; remote kept");
+        return act;
+    }
+    return act;
   }
 
   async saveSettings() {

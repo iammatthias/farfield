@@ -418,3 +418,15 @@ func TestConflictNewerWins(t *testing.T) {
 		t.Error("local was newer — push should win")
 	}
 }
+
+// TestEntryHashVector pins the exact digest of a known entry. The Obsidian
+// plugin's harness (obsidian-plugin/farfield-sync/test.js) pins the same
+// constant, so a drift in either implementation breaks one of the suites —
+// the two tools share a state file and must hash identically.
+func TestEntryHashVector(t *testing.T) {
+	e := &Entry{Title: "T", Excerpt: "E", Tags: []string{"a", "b"}, Published: true, Body: "  B \n"}
+	const want = "09cdd1dd8c4e3b16d8887f7f2a251db42991785adc559fa2e4b16b9190559471"
+	if got := entryHash(e); got != want {
+		t.Errorf("entryHash = %s, want %s", got, want)
+	}
+}

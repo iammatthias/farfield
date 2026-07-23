@@ -29,6 +29,9 @@ jobs:
 
       - run: make test
 
+      - name: Obsidian plugin harness
+        run: node obsidian-plugin/farfield-sync/test.js
+
   e2e:
     needs: test
     runs-on: ubuntu-latest
