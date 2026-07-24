@@ -36,8 +36,8 @@ Module._load = (request, parent, isMain) =>
   request === "obsidian" ? shim : origLoad(request, parent, isMain);
 
 const FarfieldSyncPlugin = require("./main.js");
-const { entryHash, decide, newerSide, toRFC3339, vaultTime, renderEntryFile, scanLocalRefs } =
-  FarfieldSyncPlugin.__internals;
+const { entryHash, decide, newerSide, toRFC3339, vaultTime, renderEntryFile, scanLocalRefs,
+  mediaKindFor, blobRefsIn } = FarfieldSyncPlugin.__internals;
 
 /* ── tiny check runner ─────────────────────────────────────────────────── */
 
@@ -409,6 +409,17 @@ async function main() {
     await g.uploadMedia(g.fileObj("scratch.md"));
     check("non-entry → rejected", notices.some((n) => n.includes("not an entry")), notices.join(" | "));
   }
+
+  /* ── media display helpers ── */
+  check("mediaKindFor buckets image", mediaKindFor("image/gif") === "image");
+  check("mediaKindFor buckets video", mediaKindFor("video/quicktime") === "video");
+  check("mediaKindFor buckets audio", mediaKindFor("audio/mp4") === "audio");
+  check("mediaKindFor unknown mime is a file", mediaKindFor("application/pdf") === "file");
+  check("mediaKindFor no mime tries an image", mediaKindFor("") === "image");
+  check("blobRefsIn extracts gallery cids",
+    JSON.stringify(blobRefsIn("![](blob://bafkreiaaa)\n\n![x](blob://bafkreibbb)\ntext ipfs://notthis")) ===
+    JSON.stringify(["bafkreiaaa", "bafkreibbb"]));
+  check("blobRefsIn empty body", blobRefsIn("").length === 0);
 
   console.log(failures ? "\n" + failures + " failure(s)" : "\nall checks passed");
   process.exit(failures ? 1 : 0);

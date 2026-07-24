@@ -1,0 +1,25 @@
+/* Farfield Sync — media hydrated from the blobs service */
+
+.farfield-blob-media {
+  max-width: 100%;
+  border-radius: 4px;
+}
+
+video.farfield-blob-media,
+audio.farfield-blob-media {
+  display: block;
+  width: min(100%, 32rem);
+}
+
+.farfield-series {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
+  gap: 8px;
+}
+
+.farfield-series img {
+  width: 100%;
+  height: 140px;
+  object-fit: cover;
+  border-radius: 4px;
+}

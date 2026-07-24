@@ -156,6 +156,28 @@ function renderEntryFile(e) {
   return lines.join("\n") + "\n" + (e.body || "").trim() + "\n";
 }
 
+/* ── displaying farfield-hosted media ──────────────────────────────────── */
+
+// mediaKindFor buckets a MIME type into the element family that displays it
+// (parity with lib/markdown renderBlob). An empty mime — the probe failed,
+// likely offline — optimistically tries an image, the common case.
+function mediaKindFor(mime) {
+  if (/^image\//.test(mime || "")) return "image";
+  if (/^video\//.test(mime || "")) return "video";
+  if (/^audio\//.test(mime || "")) return "audio";
+  return mime ? "file" : "image";
+}
+
+// blobRefsIn extracts every blob CID referenced in a markdown body — used
+// to turn a series' gallery markdown into an image grid.
+function blobRefsIn(text) {
+  const out = [];
+  const re = /blob:\/\/([A-Za-z0-9]+)/g;
+  let m;
+  while ((m = re.exec(text || ""))) out.push(m[1]);
+  return out;
+}
+
 /* ── conflict resolution: last write wins (parity with sync.go) ────────── */
 
 // The more recently edited side wins a both-changed conflict. A tie or an
@@ -254,6 +276,111 @@ class FarfieldSyncPlugin extends Plugin {
     this.addSettingTab(new FarfieldSettingTab(this.app, this));
     this.statusEl = this.addStatusBarItem();
     this.applyAutoSync();
+
+    // Render farfield-hosted media inside notes. The post-processor covers
+    // reading view; the observer catches embeds Obsidian builds outside it
+    // (Live Preview widgets, popovers). Hydration is idempotent, so overlap
+    // is harmless.
+    this.mimeCache = new Map();
+    this.registerMarkdownPostProcessor((el) => this.hydrateMedia(el));
+    const observer = new MutationObserver((muts) => {
+      for (const m of muts) {
+        for (const n of m.addedNodes) this.hydrateMedia(n);
+      }
+    });
+    observer.observe(document.body, { childList: true, subtree: true });
+    this.register(() => observer.disconnect());
+  }
+
+  /* ── displaying blob:// and series:// refs ── */
+
+  blobPublicURL(cid) {
+    return (this.settings.blobsUrl || "").replace(/\/$/, "") + "/blobs/" + cid;
+  }
+
+  // MIME for a cid, probed once per session via HEAD on the public bytes
+  // route — no key needed, and the tag choice (img/video/audio) needs it.
+  async blobMime(cid) {
+    if (this.mimeCache.has(cid)) return this.mimeCache.get(cid);
+    let mime = "";
+    try {
+      const res = await requestUrl({ url: this.blobPublicURL(cid), method: "HEAD", throw: false });
+      if (res.status >= 200 && res.status < 300) {
+        const h = res.headers || {};
+        mime = h["content-type"] || h["Content-Type"] || "";
+      }
+    } catch (e) { /* offline — render optimistically */ }
+    this.mimeCache.set(cid, mime);
+    return mime;
+  }
+
+  // Rewrites farfield refs inside a rendered fragment: <img src="blob://…">
+  // becomes the real media element served by blobs, a series embed becomes
+  // an image grid, and [text](blob://…) links get a clickable public URL.
+  hydrateMedia(root) {
+    if (!root || root.nodeType !== 1) return;
+    const embedSel = 'img[src^="blob://"], img[src^="series://"]';
+    const embeds = Array.from(root.querySelectorAll(embedSel));
+    if (root.matches && root.matches(embedSel)) embeds.push(root);
+    for (const el of embeds) {
+      if (el.dataset.ffHydrated) continue;
+      el.dataset.ffHydrated = "1";
+      const src = el.getAttribute("src") || "";
+      if (src.startsWith("series://")) this.hydrateSeries(el, src.slice("series://".length));
+      else this.hydrateBlob(el, src.slice("blob://".length));
+    }
+    const linkSel = 'a[href^="blob://"]';
+    const links = Array.from(root.querySelectorAll(linkSel));
+    if (root.matches && root.matches(linkSel)) links.push(root);
+    for (const a of links) {
+      a.setAttribute("href", this.blobPublicURL((a.getAttribute("href") || "").slice("blob://".length)));
+    }
+  }
+
+  async hydrateBlob(el, cid) {
+    const url = this.blobPublicURL(cid);
+    const kind = mediaKindFor(await this.blobMime(cid));
+    if (kind === "video" || kind === "audio") {
+      const m = document.createElement(kind);
+      m.controls = true;
+      m.preload = "metadata";
+      m.src = url;
+      m.className = "farfield-blob-media";
+      el.replaceWith(m);
+    } else if (kind === "file") {
+      const a = document.createElement("a");
+      a.href = url;
+      a.textContent = el.getAttribute("alt") || "blob://" + cid;
+      el.replaceWith(a);
+    } else {
+      el.classList.add("farfield-blob-media");
+      el.src = url;
+    }
+  }
+
+  async hydrateSeries(el, slug) {
+    const wrap = document.createElement("div");
+    wrap.className = "farfield-series";
+    wrap.textContent = "Loading series " + slug + "…";
+    el.replaceWith(wrap);
+    try {
+      const se = await this.api("GET", "/api/series/" + encodeURIComponent(slug));
+      const cids = blobRefsIn(se && se.body);
+      wrap.textContent = "";
+      if (!cids.length) {
+        wrap.textContent = "series://" + slug + " (empty)";
+        return;
+      }
+      for (const cid of cids) {
+        const img = document.createElement("img");
+        img.loading = "lazy";
+        img.alt = "";
+        img.src = this.blobPublicURL(cid);
+        wrap.appendChild(img);
+      }
+    } catch (err) {
+      wrap.textContent = "series://" + slug + " (could not load: " + err.message + ")";
+    }
   }
 
   applyAutoSync() {
@@ -728,4 +855,4 @@ class FarfieldSettingTab extends PluginSettingTab {
 
 module.exports = FarfieldSyncPlugin;
 // Exposed for the node test harness only.
-module.exports.__internals = { entryHash, decide, newerSide, toRFC3339, vaultTime, renderEntryFile, scanLocalRefs };
+module.exports.__internals = { entryHash, decide, newerSide, toRFC3339, vaultTime, renderEntryFile, scanLocalRefs, mediaKindFor, blobRefsIn };

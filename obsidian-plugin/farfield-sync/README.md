@@ -41,9 +41,21 @@ propagate; bodies with legacy CID-bearing `ipfs://` refs refuse to push.
 
 Plain CommonJS, no build step, no Node APIs — desktop and mobile.
 
+## Viewing farfield media
+
+Notes render their farfield-hosted media in place: `![alt](blob://cid)`
+embeds become the real image/video/audio served by the blobs service (the
+element is chosen by a one-time MIME probe of the public bytes route),
+`![](series://slug)` embeds become an image grid fetched from the content
+service, and `[text](blob://cid)` links point at the public URL. Reading
+view is covered by a markdown post-processor; embeds built outside it
+(Live Preview widgets, hover popovers) are caught by a DOM observer.
+Requires network reach to the blobs service; offline, refs degrade to
+broken images rather than blocking the note.
+
 ## Install
 
-Copy `manifest.json` + `main.js` into
+Copy `manifest.json` + `main.js` + `styles.css` into
 `<vault>/.obsidian/plugins/farfield-sync/`, enable it, and set the content
 URL + write API key in settings. Keep the plugin's `data.json` out of any
 vault git remote — it holds the key.
