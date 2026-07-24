@@ -200,6 +200,14 @@ class FarfieldSyncPlugin extends Plugin {
       }
       this.syncFile(f);
     });
+    this.addRibbonIcon("image-up", "Farfield: upload current note's media", () => {
+      const f = this.app.workspace.getActiveFile();
+      if (!f) {
+        new Notice("Farfield media: no active note");
+        return;
+      }
+      this.uploadMedia(f);
+    });
 
     this.addCommand({
       id: "sync",

@@ -15,8 +15,9 @@ A status-bar summary reports what happened either way.
 
 ## Media upload (manual, per note)
 
-"Upload this note's media to Farfield" (command palette or the note's
-context menu) uploads the note's vault-local media — `![[image.png]]`
+"Upload this note's media to Farfield" (the image-up ribbon icon, command
+palette, or the note's context menu) uploads the note's vault-local media —
+`![[image.png]]`
 embeds and `![alt](relative/path.png)` images — to the blobs service and
 rewrites the references to `![alt](blob://cid)`. It needs a blobs write key
 in settings (a scoped key from the keys app works).
