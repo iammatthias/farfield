@@ -29,10 +29,57 @@ const DEFAULTS = {
   apiKey: "",
   contentRoot: "content",
   autoSyncMinutes: 0, // 0 = manual only
+  blobsUrl: "https://blobs.farfield.systems",
+  blobsKey: "", // blob uploads stay off until a key is set
 };
 
 const STATE_FILE = ".farfield-sync.json";
 const IPFS_REF_RE = /ipfs:\/\/[A-Za-z0-9]{46,}/;
+
+/* ── local media references (manual blob upload) ───────────────────────── */
+
+const MEDIA_EXTS = new Set([
+  "png", "jpg", "jpeg", "gif", "webp", "avif", "svg",
+  "mp4", "mov", "webm", "m4v",
+  "m4a", "mp3", "wav", "ogg", "aac", "flac",
+  "pdf",
+]);
+
+function mediaExt(target) {
+  return MEDIA_EXTS.has((target.split(".").pop() || "").toLowerCase());
+}
+
+// Finds media references in a body that are not yet blob:// refs, in
+// document order:
+//   kind "wiki"     — ![[file.png]] / ![[file.png|alt]] (vault-resolvable)
+//   kind "path"     — ![alt](relative/path.png)          (vault-resolvable)
+//   kind "file-url" — ![alt](file:///abs/path.png)       (outside the vault;
+//                     reported, never uploadable from here)
+// Web URLs, blob://, series://, and ipfs:// targets are not local media and
+// are left alone.
+function scanLocalRefs(body) {
+  const out = [];
+  let m;
+  const wiki = /!\[\[([^\]|]+?)(?:\|([^\]]*))?\]\]/g;
+  while ((m = wiki.exec(body))) {
+    const target = m[1].trim();
+    if (!mediaExt(target)) continue; // note transclusion, not media
+    out.push({ match: m[0], target, alt: (m[2] || "").trim(), kind: "wiki" });
+  }
+  const md = /!\[([^\]]*)\]\(([^)]+)\)/g;
+  while ((m = md.exec(body))) {
+    let target = m[2].trim();
+    if (/^file:\/\//i.test(target)) {
+      if (mediaExt(target)) out.push({ match: m[0], target, alt: m[1].trim(), kind: "file-url" });
+      continue;
+    }
+    if (/^[a-z][a-z0-9+.-]*:/i.test(target)) continue; // http(s), blob, series, ipfs…
+    try { target = decodeURIComponent(target); } catch (e) { /* keep as-is */ }
+    if (!mediaExt(target)) continue;
+    out.push({ match: m[0], target, alt: m[1].trim(), kind: "path" });
+  }
+  return out;
+}
 
 /* ── canonical hashing (parity with sync.go entryHash) ─────────────────── */
 
@@ -169,14 +216,31 @@ class FarfieldSyncPlugin extends Plugin {
         return ok;
       },
     });
+    // Deliberately manual and never part of sync/auto-sync: an uploaded
+    // blob only stops being an orphan once its entry pushes, so the author
+    // decides when media goes up.
+    this.addCommand({
+      id: "upload-media",
+      name: "Upload this note's media to Farfield",
+      checkCallback: (checking) => {
+        const f = this.app.workspace.getActiveFile();
+        const ok = !!(f && this.entryForFile(f));
+        if (!checking && ok) this.uploadMedia(f);
+        return ok;
+      },
+    });
 
-    // Right-click a note in the explorer (or its tab) to sync just that one.
+    // Right-click a note in the explorer (or its tab) to act on just it.
     this.registerEvent(this.app.workspace.on("file-menu", (menu, file) => {
       if (!this.entryForFile(file)) return;
       menu.addItem((item) => item
         .setTitle("Sync with Farfield")
         .setIcon("refresh-cw")
         .onClick(() => this.syncFile(file)));
+      menu.addItem((item) => item
+        .setTitle("Upload media to Farfield")
+        .setIcon("image-up")
+        .onClick(() => this.uploadMedia(file)));
     }));
 
     this.addSettingTab(new FarfieldSettingTab(this.app, this));
@@ -391,6 +455,104 @@ class FarfieldSyncPlugin extends Plugin {
     }
   }
 
+  /* ── manual media upload ── */
+
+  // Uploads a note's vault-local media to the blobs service and rewrites
+  // the references to blob://cid. Manual by design — it never runs from
+  // sync or auto-sync, and it never pushes the entry: media without a
+  // pushed entry is an orphan-in-waiting, so the author syncs when ready.
+  // Blobs are content-addressed, so re-running is a no-op per file.
+  async uploadMedia(file) {
+    if (this.syncing) return;
+    const ent = this.entryForFile(file);
+    if (!ent) {
+      new Notice("Farfield media: not an entry — uploads are per-entry");
+      return;
+    }
+    if (!this.settings.blobsKey) {
+      new Notice("Farfield media: set the blobs URL + API key in settings first");
+      return;
+    }
+    this.syncing = true;
+    this.status("uploading media…");
+    try {
+      const raw = await this.app.vault.read(file);
+      const refs = scanLocalRefs(raw);
+      const outside = refs.filter((r) => r.kind === "file-url");
+      const uploadable = refs.filter((r) => r.kind !== "file-url");
+      if (!refs.length) {
+        this.status("");
+        new Notice("Farfield media — " + file.basename + ": no local media references");
+        return;
+      }
+
+      const cids = new Map(); // target -> cid
+      const failed = [];
+      for (const r of uploadable) {
+        if (cids.has(r.target)) continue;
+        const tf = this.app.metadataCache.getFirstLinkpathDest(r.target, file.path);
+        if (!tf) {
+          failed.push(r.target + " — not found in the vault");
+          continue;
+        }
+        try {
+          const bytes = await this.app.vault.readBinary(tf);
+          const meta = await this.blobsUpload(bytes);
+          cids.set(r.target, meta.cid);
+        } catch (err) {
+          failed.push(r.target + " — " + err.message);
+        }
+      }
+
+      let rewrote = 0;
+      let body = raw;
+      for (const r of uploadable) {
+        const cid = cids.get(r.target);
+        if (!cid || !body.includes(r.match)) continue;
+        rewrote += body.split(r.match).length - 1;
+        body = body.split(r.match).join("![" + r.alt + "](blob://" + cid + ")");
+      }
+      if (body !== raw) await this.app.vault.modify(file, body);
+
+      const bits = [cids.size + " uploaded", rewrote + " refs rewritten"];
+      if (failed.length) bits.push(failed.length + " failed");
+      if (outside.length) {
+        bits.push(outside.length + " file:// refs skipped (outside the vault)");
+      }
+      const line = bits.join(" · ") +
+        (cids.size ? " — sync this note when you're ready to publish" : "");
+      this.status(file.basename + ": media " + (cids.size ? "uploaded" : "unchanged"));
+      new Notice("Farfield media — " + file.basename + ": " + line, 10000);
+      const details = failed.concat(outside.map((r) => r.target + " — file:// ref; move it into the vault or upload it another way"));
+      if (details.length) console.log("[farfield-sync] media:\n" + details.join("\n"));
+    } catch (err) {
+      this.status("failed");
+      new Notice("Farfield media failed: " + err.message, 10000);
+      console.error("[farfield-sync]", err);
+    } finally {
+      this.syncing = false;
+    }
+  }
+
+  // Raw-body upload to the blobs service; the server sniffs the MIME type
+  // from the bytes and dedupes by CID.
+  async blobsUpload(bytes) {
+    const res = await requestUrl({
+      url: (this.settings.blobsUrl || "").replace(/\/$/, "") + "/blobs",
+      method: "POST",
+      headers: {
+        "X-API-Key": this.settings.blobsKey,
+        "Content-Type": "application/octet-stream",
+      },
+      body: bytes,
+      throw: false,
+    });
+    if (res.status < 200 || res.status >= 300) {
+      throw new Error("HTTP " + res.status);
+    }
+    return res.json;
+  }
+
   async runSync() {
     const [remote, st] = await Promise.all([this.fetchRemote(), this.loadState()]);
     const local = this.localEntries();
@@ -537,9 +699,25 @@ class FarfieldSettingTab extends PluginSettingTab {
       .addText((t) => t
         .setValue(String(this.plugin.settings.autoSyncMinutes))
         .onChange(async (v) => { this.plugin.settings.autoSyncMinutes = Number(v) || 0; await this.plugin.saveSettings(); }));
+
+    new Setting(containerEl)
+      .setName("Blobs service URL")
+      .setDesc("For the manual per-note media upload.")
+      .addText((t) => t
+        .setValue(this.plugin.settings.blobsUrl)
+        .onChange(async (v) => { this.plugin.settings.blobsUrl = v.trim(); await this.plugin.saveSettings(); }));
+
+    new Setting(containerEl)
+      .setName("Blobs API key")
+      .setDesc("A blobs write key — a scoped key from the keys app works. Empty disables media upload.")
+      .addText((t) => {
+        t.inputEl.type = "password";
+        t.setValue(this.plugin.settings.blobsKey)
+          .onChange(async (v) => { this.plugin.settings.blobsKey = v.trim(); await this.plugin.saveSettings(); });
+      });
   }
 }
 
 module.exports = FarfieldSyncPlugin;
 // Exposed for the node test harness only.
-module.exports.__internals = { entryHash, decide, newerSide, toRFC3339, vaultTime, renderEntryFile };
+module.exports.__internals = { entryHash, decide, newerSide, toRFC3339, vaultTime, renderEntryFile, scanLocalRefs };

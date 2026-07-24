@@ -36,7 +36,7 @@ Module._load = (request, parent, isMain) =>
   request === "obsidian" ? shim : origLoad(request, parent, isMain);
 
 const FarfieldSyncPlugin = require("./main.js");
-const { entryHash, decide, newerSide, toRFC3339, vaultTime, renderEntryFile } =
+const { entryHash, decide, newerSide, toRFC3339, vaultTime, renderEntryFile, scanLocalRefs } =
   FarfieldSyncPlugin.__internals;
 
 /* ── tiny check runner ─────────────────────────────────────────────────── */
@@ -82,8 +82,15 @@ function unquote(s) {
 
 function makePlugin() {
   const p = Object.create(FarfieldSyncPlugin.prototype);
-  p.settings = { contentUrl: "https://x", apiKey: "k", contentRoot: "content", autoSyncMinutes: 0 };
-  p.files = new Map();   // path -> content
+  p.settings = { contentUrl: "https://x", apiKey: "k", contentRoot: "content",
+    autoSyncMinutes: 0, blobsUrl: "https://b", blobsKey: "bk" };
+  p.files = new Map();     // path -> content
+  p.binaries = new Map();  // path -> bytes (attachments)
+  p.uploads = [];          // paths whose bytes reached blobsUpload
+  p.blobsUpload = async (bytes) => {
+    p.uploads.push(bytes);
+    return { cid: "blob-" + crypto.createHash("sha256").update(String(bytes)).digest("hex").slice(0, 8) };
+  };
   p.mtimes = new Map();  // path -> ms
   p.remote = new Map();  // slug -> server entry
   p.apiCalls = [];
@@ -103,6 +110,10 @@ function makePlugin() {
       getMarkdownFiles: () =>
         [...p.files.keys()].filter((x) => x.endsWith(".md")).map(fileObj),
       read: async (f) => p.files.get(f.path),
+      readBinary: async (f) => {
+        if (!p.binaries.has(f.path)) throw new Error("no binary " + f.path);
+        return p.binaries.get(f.path);
+      },
       modify: async (f, c) => { p.files.set(f.path, c); },
       create: async (path, c) => { p.files.set(path, c); },
       getAbstractFileByPath: (path) => (p.files.has(path) ? fileObj(path) : null),
@@ -116,6 +127,15 @@ function makePlugin() {
     },
     metadataCache: {
       getFileCache: (f) => ({ frontmatter: parseFM(p.files.get(f.path)) }),
+      // Resolve like Obsidian: exact path first, then by basename.
+      getFirstLinkpathDest: (target) => {
+        for (const path of p.binaries.keys()) {
+          if (path === target || path.endsWith("/" + target) || path.split("/").pop() === target) {
+            return { path };
+          }
+        }
+        return null;
+      },
     },
   };
 
@@ -319,6 +339,75 @@ async function main() {
     p.files.set("content/essays/two.remote.md", "sibling");
     await p.syncFile(p.fileObj("content/essays/two.remote.md"));
     check("syncFile explains conflict copies", notices.some((n) => n.includes("conflict copy")), notices.join(" | "));
+  }
+
+  /* ── local media reference scanning ── */
+  {
+    const body = [
+      "![[shot.png]]",
+      "![[assets/clip.mov|the demo]]",
+      "![[Another note]]",
+      "![chart](img/chart.jpg)",
+      "![remote](https://example.org/x.png)",
+      "![done](blob://bafkreiabc)",
+      "![gone](file:///Users/x/big.gif)",
+    ].join("\n\n");
+    const refs = scanLocalRefs(body);
+    check("scan finds wiki embeds, paths, and file urls", refs.length === 4,
+      JSON.stringify(refs.map((r) => r.target)));
+    check("scan keeps wiki alt text", refs.some((r) => r.target === "assets/clip.mov" && r.alt === "the demo" && r.kind === "wiki"));
+    check("scan classifies file:// as outside", refs.some((r) => r.target.startsWith("file://") && r.kind === "file-url"));
+    check("scan skips note transclusions and web/blob refs",
+      !refs.some((r) => r.target.includes("Another") || r.target.includes("example.org") || r.target.includes("bafkrei")));
+  }
+
+  /* ── manual media upload ── */
+  {
+    const p = makePlugin();
+    const re = serverEntry(p, {
+      body: "![[shot.png]]\n\n![chart](img/chart.jpg)\n\n![remote](https://example.org/x.png)\n\n![gone](file:///Users/x/big.gif)",
+    });
+    p.files.set("content/essays/one.md", renderEntryFile(re));
+    p.binaries.set("attachments/shot.png", "PNGBYTES");
+    p.binaries.set("img/chart.jpg", "JPGBYTES");
+    notices.length = 0;
+    await p.uploadMedia(p.fileObj("content/essays/one.md"));
+    const after = p.files.get("content/essays/one.md");
+    check("upload rewrote wiki embed to blob ref", /!\[\]\(blob:\/\/blob-\w+\)/.test(after), after);
+    check("upload rewrote md image keeping alt", /!\[chart\]\(blob:\/\/blob-\w+\)/.test(after));
+    check("upload left web and file:// refs alone",
+      after.includes("https://example.org/x.png") && after.includes("file:///Users/x/big.gif"));
+    check("upload sent both attachments", p.uploads.length === 2, String(p.uploads.length));
+    check("upload notice counts and warns", notices.some((n) =>
+      n.includes("2 uploaded") && n.includes("2 refs rewritten") && n.includes("file:// refs skipped")),
+      notices.join(" | "));
+    check("upload did not push the entry", !p.apiCalls.some((c) => c.method === "PUT" || c.method === "POST"));
+
+    // idempotent: nothing local left to upload
+    notices.length = 0;
+    p.uploads.length = 0;
+    await p.uploadMedia(p.fileObj("content/essays/one.md"));
+    check("second run uploads nothing", p.uploads.length === 0);
+
+    // a ref that resolves nowhere is reported, not fatal
+    const q = makePlugin();
+    q.files.set("content/essays/two.md", renderEntryFile(serverEntry(q, { slug: "two", body: "![[missing.png]]" })));
+    notices.length = 0;
+    await q.uploadMedia(q.fileObj("content/essays/two.md"));
+    check("missing attachment reports a failure", notices.some((n) => n.includes("1 failed")), notices.join(" | "));
+
+    // guard rails
+    const g = makePlugin();
+    g.settings.blobsKey = "";
+    g.files.set("content/essays/three.md", renderEntryFile(serverEntry(g, { slug: "three" })));
+    notices.length = 0;
+    await g.uploadMedia(g.fileObj("content/essays/three.md"));
+    check("no blobs key → settings notice", notices.some((n) => n.includes("blobs URL + API key")), notices.join(" | "));
+    notices.length = 0;
+    g.files.set("scratch.md", "x");
+    g.settings.blobsKey = "bk";
+    await g.uploadMedia(g.fileObj("scratch.md"));
+    check("non-entry → rejected", notices.some((n) => n.includes("not an entry")), notices.join(" | "));
   }
 
   console.log(failures ? "\n" + failures + " failure(s)" : "\nall checks passed");
