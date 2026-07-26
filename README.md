@@ -59,6 +59,7 @@ lib/qrenc        QR encoder → SVG.
 lib/backup       Snapshot + content-addressed push/pull.
 apps/*           One module per deployable service.
 docs/API.md      The website-facing API contract.
+docs/HOSTING.md  What runs on the homelab, and how a request reaches it.
 ```
 
 The `lib/*` modules have zero dependencies; only apps pull in the SQLite driver.
@@ -91,6 +92,8 @@ tunnel.
 ## Reference
 
 - [`docs/API.md`](docs/API.md) — the JSON API the website consumes.
+- [`docs/HOSTING.md`](docs/HOSTING.md) — the homelab inventory: every hosted
+  project, the ingress path, and the operational facts that bite.
 - [`.claude/skills/`](.claude/skills/) — `farfield-stack` (scaffold a new app),
   `farfield-style` (the visual system), `content-addressing`, and
   `self-migrating-sqlite`.
