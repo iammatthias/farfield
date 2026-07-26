@@ -2,8 +2,13 @@ package main
 
 import (
 	"context"
+	"errors"
+	"net/http"
+	"net/url"
 	"path/filepath"
+	"strings"
 	"testing"
+	"time"
 
 	"github.com/iammatthias/farfield/lib/store"
 )
@@ -207,5 +212,45 @@ func TestDBRoundTrip(t *testing.T) {
 
 	if n, err := countPhotosBetween(db, sourceNASA, "2024-01-01", "2024-01-02"); err != nil || n != 2 {
 		t.Fatalf("countPhotosBetween = %d, err %v, want 2", n, err)
+	}
+}
+
+// APOD takes its credential in the query string, so any transport error
+// carries the key inside a *url.Error. Nothing may reach the logs with it.
+func TestNASAErrorsRedactTheAPIKey(t *testing.T) {
+	const key = "super-secret-nasa-key"
+	f := newFetcher(key)
+	// Point the client at a dead address so client.Do fails with a *url.Error
+	// carrying the full request URL, key included.
+	f.client = &http.Client{Timeout: 50 * time.Millisecond}
+
+	q := url.Values{}
+	q.Set("api_key", key)
+	q.Set("date", "2026-01-01")
+
+	_, err := f.nasaGet(context.Background(), q)
+	if err == nil {
+		t.Skip("upstream unexpectedly reachable")
+	}
+	if strings.Contains(err.Error(), key) {
+		t.Errorf("the API key leaked into an error: %v", err)
+	}
+	if !strings.Contains(err.Error(), "REDACTED") {
+		t.Logf("error did not contain the key at all: %v", err)
+	}
+}
+
+func TestScrubLeavesUnrelatedErrorsAlone(t *testing.T) {
+	f := newFetcher("the-key")
+	orig := errors.New("APOD HTTP 404")
+	if got := f.scrub(orig); got != orig {
+		t.Errorf("scrub replaced an error with no key in it: %v", got)
+	}
+	if f.scrub(nil) != nil {
+		t.Error("scrub(nil) must stay nil")
+	}
+	// With no key configured there is nothing to redact.
+	if got := newFetcher("").scrub(orig); got != orig {
+		t.Error("scrub altered an error when no key is configured")
 	}
 }

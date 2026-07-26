@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -150,8 +151,27 @@ func (f *fetcher) nasaRange(ctx context.Context, start, end string) ([]Photo, er
 	return out, nil
 }
 
+// scrub removes the API key from an error message. APOD takes its credential
+// as a query parameter, and Go's *url.Error carries the whole request URL —
+// so an unwrapped transport failure (a timeout, a DNS error) writes the key
+// straight into the logs, where the json-file driver then keeps it on disk.
+// Every error leaving nasaGet passes through here.
+func (f *fetcher) scrub(err error) error {
+	if err == nil || f.nasaKey == "" {
+		return err
+	}
+	msg := err.Error()
+	if !strings.Contains(msg, f.nasaKey) {
+		return err
+	}
+	return errors.New(strings.ReplaceAll(msg, f.nasaKey, "REDACTED"))
+}
+
 // nasaGet performs one APOD request and parses the body.
-func (f *fetcher) nasaGet(ctx context.Context, q url.Values) ([]apodResponse, error) {
+func (f *fetcher) nasaGet(ctx context.Context, q url.Values) (_ []apodResponse, err error) {
+	// Named return plus defer, so no error path can skip the redaction.
+	defer func() { err = f.scrub(err) }()
+
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, apodBase+"?"+q.Encode(), nil)
 	if err != nil {
 		return nil, err
