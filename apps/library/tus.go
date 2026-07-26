@@ -44,6 +44,31 @@ func (s *Server) pruneStaleUploads() {
 			slog.Warn("remove stale staging file", "id", id, "err", err)
 		}
 	}
+	s.pruneOrphanSpool()
+}
+
+// pruneOrphanSpool removes spool files from the single-shot upload path that a
+// crash stranded. Those are cleaned by defer in the happy and error paths
+// alike, so anything left here outlived the process that made it.
+func (s *Server) pruneOrphanSpool() {
+	entries, err := os.ReadDir(s.tusDir)
+	if err != nil {
+		return
+	}
+	cutoff := time.Now().Add(-uploadTTL)
+	for _, e := range entries {
+		if e.IsDir() || !strings.HasPrefix(e.Name(), "upload-") {
+			continue
+		}
+		info, err := e.Info()
+		if err != nil || info.ModTime().After(cutoff) {
+			continue
+		}
+		path := filepath.Join(s.tusDir, e.Name())
+		if err := os.Remove(path); err != nil && !os.IsNotExist(err) {
+			slog.Warn("remove orphaned upload spool", "path", path, "err", err)
+		}
+	}
 }
 
 // stagingPath is the on-disk file holding the partial bytes for an upload.
@@ -283,18 +308,28 @@ func (s *Server) runFinalize(id string) {
 		slog.Error("tus finalize: load upload", "id", id, "err", err)
 		return
 	}
-	data, err := os.ReadFile(s.stagingPath(id))
+	// The staging file is read in place. tus exists because these books are
+	// too large for one request, so buffering the assembled result would put
+	// right back on the heap what the chunking was meant to keep off it.
+	f, err := os.Open(s.stagingPath(id))
 	if err != nil {
 		_ = setUploadError(s.db, id, "could not read staged upload")
 		slog.Error("tus finalize: read staging", "id", id, "err", err)
 		return
 	}
-	if _, _, _, perr := parseEPUB(data); perr != nil {
+	defer f.Close()
+	info, err := f.Stat()
+	if err != nil {
+		_ = setUploadError(s.db, id, "could not stat staged upload")
+		slog.Error("tus finalize: stat staging", "id", id, "err", err)
+		return
+	}
+	if _, _, _, perr := parseEPUBAt(f, info.Size()); perr != nil {
 		_ = setUploadError(s.db, id, perr.Error())
 		s.removeStaging(id) // permanent: the bytes will never be a valid EPUB
 		return
 	}
-	b, err := s.storeUpload(data, u.Filename, u.Collection)
+	b, err := s.storeUploadSeeker(f, info.Size(), u.Filename, u.Collection)
 	if err != nil {
 		_ = setUploadError(s.db, id, err.Error()) // transient: keep staging for retry
 		slog.Error("tus finalize: store", "id", id, "err", err)

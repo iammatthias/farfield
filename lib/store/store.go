@@ -18,16 +18,34 @@ import (
 // idAlphabet is the character set used by ShortID — lowercase alphanumerics.
 const idAlphabet = "0123456789abcdefghijklmnopqrstuvwxyz"
 
+// idLength is the number of characters in a ShortID.
+const idLength = 10
+
+// idRejectAbove is the largest multiple of the alphabet size that fits in a
+// byte. Bytes at or above it are discarded rather than folded with a modulo,
+// which would otherwise make the first 256 % 36 = 4 characters of the
+// alphabet measurably more likely than the rest.
+const idRejectAbove = byte(256 - 256%len(idAlphabet))
+
 // ShortID returns a 10-character random identifier drawn from idAlphabet. It
 // is the farfield equivalent of nanoid: compact, URL-safe, and collision-safe
-// for application record keys.
+// for application record keys. Every character is uniformly distributed.
 func ShortID() string {
-	b := make([]byte, 10)
-	rand.Read(b)
-	for i := range b {
-		b[i] = idAlphabet[int(b[i])%len(idAlphabet)]
+	out := make([]byte, 0, idLength)
+	buf := make([]byte, idLength)
+	for len(out) < idLength {
+		rand.Read(buf)
+		for _, c := range buf {
+			if c >= idRejectAbove {
+				continue
+			}
+			out = append(out, idAlphabet[int(c)%len(idAlphabet)])
+			if len(out) == idLength {
+				break
+			}
+		}
 	}
-	return string(b)
+	return string(out)
 }
 
 // Env returns the value of the environment variable key, or def when the

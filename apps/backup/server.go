@@ -56,7 +56,13 @@ func run(host, port string) error {
 			Password:     store.Env("PASSWORD", ""),
 			CookieSecure: store.Env("COOKIE_SECURE", "false") == "true",
 		},
-		rd: &web.Renderer{Templates: tmpl, AssetVer: theme.Version, Funcs: tmplFuncs},
+		rd: &web.Renderer{Templates: tmpl, AssetVer: theme.Version, Funcs: tmplFuncs,
+			App: "backup", Mark: "ba",
+			Nav: []web.NavItem{
+				{Label: "Dashboard", URL: "/"},
+				{Label: "Log out", URL: "/logout"},
+			},
+		},
 	}
 
 	// In-process scheduler: snapshots no longer depend on a host cron

@@ -2,8 +2,10 @@ package main
 
 import (
 	"bytes"
+	"context"
 	"database/sql"
 	"encoding/json"
+	"errors"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -11,6 +13,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/iammatthias/farfield/lib/web"
 )
@@ -736,4 +739,58 @@ func TestStatusEndpoint(t *testing.T) {
 	if body.Bookmarks != 1 {
 		t.Errorf("status counts only public bookmarks: got %d, want 1", body.Bookmarks)
 	}
+}
+
+// The metadata fetcher takes an attacker-influenced URL and dials it from
+// inside the homelab, so it must refuse the private network outright.
+func TestFetchMetadataRefusesPrivateTargets(t *testing.T) {
+	client := newFetchClient(5 * time.Second)
+	for _, target := range []string{
+		"http://127.0.0.1:8801/keys",
+		"http://localhost/admin",
+		"http://10.0.0.5/",
+		"http://192.168.1.1/",
+		"http://169.254.169.254/latest/meta-data/",
+		"http://[::1]/",
+		"http://100.64.0.1/",
+	} {
+		if _, err := fetchMetadata(context.Background(), client, target); err == nil {
+			t.Errorf("fetchMetadata(%q) succeeded; want it refused", target)
+		}
+	}
+}
+
+// A public host must still work — the guard is about the destination address,
+// not about blocking the feature.
+func TestFetchMetadataAllowsPublicHosts(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/html")
+		_, _ = io.WriteString(w, "<html><head><title>Hello</title></head></html>")
+	}))
+	defer srv.Close()
+
+	// The test server listens on loopback, which the guard blocks by design.
+	// Confirm that is exactly why it fails, rather than some unrelated error.
+	_, err := fetchMetadata(context.Background(), newFetchClient(5*time.Second), srv.URL)
+	if err == nil {
+		t.Fatal("loopback test server was reachable; the guard is not engaged")
+	}
+	if !errors.Is(err, errBlockedTarget) && !strings.Contains(err.Error(), errBlockedTarget.Error()) {
+		t.Errorf("blocked for the wrong reason: %v", err)
+	}
+
+	// The same page parses fine when the address check is not in the way.
+	m := extractMeta([]byte("<html><head><title>Hello</title></head></html>"), mustURL(t, srv.URL))
+	if m.Title != "Hello" {
+		t.Errorf("Title = %q, want %q", m.Title, "Hello")
+	}
+}
+
+func mustURL(t *testing.T, raw string) *url.URL {
+	t.Helper()
+	u, err := url.Parse(raw)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return u
 }

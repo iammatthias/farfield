@@ -1,13 +1,7 @@
-{{define "base"}}<!DOCTYPE html>
-<html lang="en">
-<head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>{{block "title" .}}farfield · bookmarks{{end}}</title>
-  <meta name="theme-color" content="#fcfbf8" media="(prefers-color-scheme: light)">
-  <meta name="theme-color" content="#181613" media="(prefers-color-scheme: dark)">
-  <link rel="icon" href="data:image/svg+xml,<svg%20xmlns='http://www.w3.org/2000/svg'%20viewBox='0%200%2064%2064'><rect%20width='64'%20height='64'%20rx='14'%20fill='%231f1b16'/><text%20x='32'%20y='42'%20font-family='ui-monospace,Menlo,monospace'%20font-size='26'%20font-weight='600'%20text-anchor='middle'%20fill='%23fcfbf8'>bo</text></svg>">
-  <link rel="stylesheet" href="/static/styles.css?v={{.AssetVer}}">
+{{/* bookmarks: the shared layout supplies the shell and masthead;
+    only this app's own styles and partials live here. */}}
+
+{{define "styles"}}
   <style>
     .container { max-width: 56rem; }
 
@@ -35,53 +29,10 @@
     }
     table.admin td.cat { font-family: var(--font-mono); font-size: 0.78rem; opacity: 0.7; }
     table.admin td { vertical-align: middle; }
-    table.admin td.actions {
-      display: table-cell; /* override the shared form .actions flex row */
-      margin-top: 0;
-      font: 0.78rem/1.3 var(--font-mono);
-      white-space: nowrap;
-      vertical-align: middle;
-    }
-    table.admin .action-row {
-      display: inline-flex;
-      gap: 0.6rem;
-      flex-wrap: nowrap;
-      align-items: baseline;
-    }
-    table.admin td.actions form { display: inline-flex; align-items: baseline; margin: 0; }
-    table.admin td.actions a,
-    table.admin td.actions button { line-height: 1; }
-    table.admin td.actions button {
-      border: 0; background: transparent; padding: 0;
-      color: var(--ink); text-decoration: underline;
-      text-underline-offset: 0.2em; font: inherit;
-      cursor: pointer;
-    }
-    table.admin td.actions button.danger {
-      color: var(--accent);
-    }
-    table.admin td.actions button:hover { background: transparent; text-decoration-thickness: 2px; }
     .summary {
       display: flex; flex-wrap: wrap; gap: 0.4rem 1.5rem;
       margin: 0.6rem 0 1.5rem;
       font: 0.78rem/1 var(--font-mono); opacity: 0.65;
     }
   </style>
-</head>
-<body>
-  <main class="container">
-    {{block "content" .}}{{end}}
-  </main>
-</body>
-</html>{{end}}
-
-{{define "topbar"}}
-<header class="bar">
-  <h1><a href="/">farfield · bookmarks</a></h1>
-  <nav>
-    <a href="/new">New bookmark</a>
-    <a href="/logout">Log out</a>
-  </nav>
-    {{.FleetNav}}
-</header>
 {{end}}

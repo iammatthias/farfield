@@ -336,7 +336,7 @@ func TestFleetSession(t *testing.T) {
 	fleetSecret, cookieDomain = "fleet-test-secret", ""
 	defer func() { fleetSecret, cookieDomain = "", "" }()
 
-	token := auth.SignSession("fleet-test-secret", time.Now().Add(time.Hour))
+	token := auth.SignSession("fleet-test-secret", "", time.Now().Add(time.Hour))
 
 	otherApp := &Auth{} // no DB, no password — a different service entirely
 	called := false
@@ -352,8 +352,8 @@ func TestFleetSession(t *testing.T) {
 	// Tampered and expired tokens are refused.
 	for name, bad := range map[string]string{
 		"tampered": token + "x",
-		"expired":  auth.SignSession("fleet-test-secret", time.Now().Add(-time.Minute)),
-		"wrongkey": auth.SignSession("some-other-secret", time.Now().Add(time.Hour)),
+		"expired":  auth.SignSession("fleet-test-secret", "", time.Now().Add(-time.Minute)),
+		"wrongkey": auth.SignSession("some-other-secret", "", time.Now().Add(time.Hour)),
 	} {
 		called = false
 		req := httptest.NewRequest("GET", "/", nil)

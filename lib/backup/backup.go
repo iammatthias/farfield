@@ -49,11 +49,41 @@ func FileCID(path string) (string, int64, error) {
 	return cid.OfReader(f)
 }
 
-// WriteDB replaces the database file at path with data, clearing any stale
-// -wal/-shm sidecars. The owning service must not be running when this is
-// called, or it will keep operating on the pre-restore file.
-func WriteDB(path string, data []byte) error {
-	if err := os.WriteFile(path, data, 0o644); err != nil {
+// WriteDB replaces the database file at path with the bytes from src,
+// clearing any stale -wal/-shm sidecars. The copy streams through a fixed
+// buffer, so restoring a multi-hundred-MB database costs no more memory than
+// taking the snapshot did. The owning service must not be running when this
+// is called, or it will keep operating on the pre-restore file.
+//
+// The bytes land in a sibling temp file and are renamed into place, so an
+// interrupted restore leaves the previous database intact rather than a
+// half-written one.
+func WriteDB(path string, src io.Reader) error {
+	dir := filepath.Dir(path)
+	tmp, err := os.CreateTemp(dir, filepath.Base(path)+".restore-*")
+	if err != nil {
+		return err
+	}
+	tmpName := tmp.Name()
+	defer os.Remove(tmpName) // no-op once the rename below succeeds
+
+	if _, err := io.Copy(tmp, src); err != nil {
+		tmp.Close()
+		return err
+	}
+	// fsync before the rename: a crash must not leave the new name pointing
+	// at bytes the kernel has not committed.
+	if err := tmp.Sync(); err != nil {
+		tmp.Close()
+		return err
+	}
+	if err := tmp.Close(); err != nil {
+		return err
+	}
+	if err := os.Chmod(tmpName, 0o644); err != nil {
+		return err
+	}
+	if err := os.Rename(tmpName, path); err != nil {
 		return err
 	}
 	for _, suffix := range []string{"-wal", "-shm"} {
@@ -90,7 +120,9 @@ func PushFile(blobsURL, apiKey, path string) (string, error) {
 		return "", err
 	}
 	defer resp.Body.Close()
-	body, _ := io.ReadAll(resp.Body)
+	// Both the success body ({"cid":...}) and any error body are small;
+	// bound the read so an upstream that streams forever cannot be believed.
+	body, _ := io.ReadAll(io.LimitReader(resp.Body, maxErrorBody))
 	if resp.StatusCode != http.StatusCreated {
 		return "", fmt.Errorf("blobs /backups: HTTP %d: %s", resp.StatusCode, body)
 	}
@@ -103,24 +135,32 @@ func PushFile(blobsURL, apiKey, path string) (string, error) {
 	return out.CID, nil
 }
 
-// Pull downloads a snapshot by CID from the blobs service.
-func Pull(blobsURL, apiKey, cid string) ([]byte, error) {
+// maxErrorBody caps how much of a failed response we read back for the error
+// message. Enough for any JSON error the blobs service returns; bounded so a
+// misbehaving upstream cannot make an error path allocate without limit.
+const maxErrorBody = 8 << 10
+
+// Pull streams a snapshot by CID from the blobs service into dst. It is the
+// counterpart to PushFile: the snapshot passes through in fixed-size chunks
+// and is never held in memory, so restore is as constant-space as backup.
+func Pull(blobsURL, apiKey, cid string, dst io.Writer) error {
 	req, err := http.NewRequest(http.MethodGet,
 		strings.TrimRight(blobsURL, "/")+"/backups/"+cid, nil)
 	if err != nil {
-		return nil, err
+		return err
 	}
 	req.Header.Set("X-API-Key", apiKey)
 	resp, err := client.Do(req)
 	if err != nil {
-		return nil, err
+		return err
 	}
 	defer resp.Body.Close()
-	body, _ := io.ReadAll(resp.Body)
 	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("blobs /backups/%s: HTTP %d: %s", cid, resp.StatusCode, body)
+		body, _ := io.ReadAll(io.LimitReader(resp.Body, maxErrorBody))
+		return fmt.Errorf("blobs /backups/%s: HTTP %d: %s", cid, resp.StatusCode, body)
 	}
-	return body, nil
+	_, err = io.Copy(dst, resp.Body)
+	return err
 }
 
 // Delete removes a snapshot by CID from the blobs service.
@@ -137,7 +177,7 @@ func Delete(blobsURL, apiKey, cid string) error {
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
-		body, _ := io.ReadAll(resp.Body)
+		body, _ := io.ReadAll(io.LimitReader(resp.Body, maxErrorBody))
 		return fmt.Errorf("blobs DELETE /backups/%s: HTTP %d: %s", cid, resp.StatusCode, body)
 	}
 	return nil

@@ -110,7 +110,14 @@ func (s *Server) parseTemplates() error {
 	if err != nil {
 		return err
 	}
-	s.rd = &web.Renderer{Templates: tmpl, AssetVer: theme.Version, Funcs: funcs}
+	s.rd = &web.Renderer{Templates: tmpl, AssetVer: theme.Version, Funcs: funcs,
+		App: "sideload", Mark: "si",
+		Nav: []web.NavItem{
+			{Label: "Builds", URL: "/"},
+			{Label: "Shares", URL: "/shares"},
+			{Label: "Log out", URL: "/logout"},
+		},
+	}
 	return nil
 }
 

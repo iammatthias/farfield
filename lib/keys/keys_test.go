@@ -1,6 +1,7 @@
 package keys
 
 import (
+	"database/sql"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -126,4 +127,57 @@ func TestMintValidation(t *testing.T) {
 	if _, _, err := s.Mint("x", "feed", "admin", time.Time{}); err == nil {
 		t.Error("unknown scope accepted")
 	}
+}
+
+// Check runs on every authenticated request across the fleet, and each app
+// opens the same database file. Stamping last_used_at on every hit turned a
+// read path into a fleet-wide write path; it is throttled now.
+func TestCheckThrottlesLastUsedWrites(t *testing.T) {
+	s := openTest(t)
+	token, k, err := s.Mint("hot path", "content", ScopeRead, time.Time{})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if _, ok := s.Check(token, "content"); !ok {
+		t.Fatal("freshly minted key was refused")
+	}
+	first := lastUsed(t, s, k.ID)
+	if first == "" {
+		t.Fatal("the first Check did not stamp last_used_at")
+	}
+
+	// Blank the column behind the store's back. Further Checks inside the
+	// interval must not rewrite it — proving they issued no UPDATE at all.
+	if _, err := s.db.Exec(`UPDATE api_keys SET last_used_at = NULL WHERE id = ?`, k.ID); err != nil {
+		t.Fatal(err)
+	}
+	for range 50 {
+		if _, ok := s.Check(token, "content"); !ok {
+			t.Fatal("valid key refused")
+		}
+	}
+	if got := lastUsed(t, s, k.ID); got != "" {
+		t.Errorf("last_used_at was rewritten within the throttle window (%q)", got)
+	}
+
+	// Once the recorded stamp ages past the interval, the next hit writes again.
+	s.stampMu.Lock()
+	s.stamped[k.ID] = time.Now().Add(-stampInterval - time.Minute)
+	s.stampMu.Unlock()
+	if _, ok := s.Check(token, "content"); !ok {
+		t.Fatal("valid key refused")
+	}
+	if lastUsed(t, s, k.ID) == "" {
+		t.Error("last_used_at was not refreshed after the throttle window")
+	}
+}
+
+func lastUsed(t *testing.T, s *Store, id string) string {
+	t.Helper()
+	var v sql.NullString
+	if err := s.db.QueryRow(`SELECT last_used_at FROM api_keys WHERE id = ?`, id).Scan(&v); err != nil {
+		t.Fatal(err)
+	}
+	return v.String
 }

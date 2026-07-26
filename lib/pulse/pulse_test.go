@@ -9,6 +9,8 @@ import (
 	"time"
 
 	_ "modernc.org/sqlite" // test-only: the library itself is stdlib-only
+
+	"github.com/iammatthias/farfield/lib/web"
 )
 
 func testDB(t *testing.T) *sql.DB {
@@ -172,19 +174,29 @@ func TestStatusDefaultsTo200(t *testing.T) {
 	}
 }
 
-// TestClientIPPrecedence checks CF header > first XFF hop > RemoteAddr.
-func TestClientIPPrecedence(t *testing.T) {
-	r := httptest.NewRequest("GET", "/", nil)
-	r.RemoteAddr = "10.0.0.1:1234"
-	if got := clientIP(r); got != "10.0.0.1" {
-		t.Fatalf("RemoteAddr ip = %q", got)
+// Address resolution now lives in web.ClientIP (one copy of a
+// security-sensitive rule), and is tested there. This checks the wiring: the
+// recorder attributes a request to the address that helper returns, and a
+// forwarded header from an untrusted peer does not move it.
+func TestVisitorKeyUsesResolvedClientIP(t *testing.T) {
+	s := newSalter(time.Now)
+
+	trusted := httptest.NewRequest("GET", "/", nil)
+	trusted.RemoteAddr = "10.0.0.1:1234" // private: a real proxy hop
+	trusted.Header.Set("CF-Connecting-IP", "203.0.113.2")
+
+	spoofer := httptest.NewRequest("GET", "/", nil)
+	spoofer.RemoteAddr = "198.51.100.9:1234" // public: talking to us directly
+	spoofer.Header.Set("CF-Connecting-IP", "203.0.113.2")
+
+	if got, want := web.ClientIP(trusted), "203.0.113.2"; got != want {
+		t.Fatalf("behind a proxy: ClientIP = %q, want %q", got, want)
 	}
-	r.Header.Set("X-Forwarded-For", "198.51.100.4, 10.0.0.1")
-	if got := clientIP(r); got != "198.51.100.4" {
-		t.Fatalf("XFF ip = %q", got)
+	if got, want := web.ClientIP(spoofer), "198.51.100.9"; got != want {
+		t.Fatalf("direct client: ClientIP = %q, want %q (header must be ignored)", got, want)
 	}
-	r.Header.Set("CF-Connecting-IP", "203.0.113.2")
-	if got := clientIP(r); got != "203.0.113.2" {
-		t.Fatalf("CF ip = %q", got)
+	// Different resolved addresses must land on different visitor keys.
+	if a, b := s.vkey(web.ClientIP(trusted), "UA"), s.vkey(web.ClientIP(spoofer), "UA"); a == b {
+		t.Error("a spoofed header collapsed two visitors onto one key")
 	}
 }

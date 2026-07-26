@@ -55,12 +55,22 @@ type opfPackage struct {
 	} `xml:"manifest"`
 }
 
-// parseEPUB reads bibliographic metadata and the cover image out of EPUB bytes.
-// It returns an error when the bytes are not a recognisable EPUB (no zip, no
-// container.xml, or no OPF package) — that error is the upload validation. A
-// missing or unreadable cover is not an error: coverBytes is simply nil.
+// parseEPUB reads bibliographic metadata and the cover image out of EPUB
+// bytes already in memory. Prefer parseEPUBAt for uploads — a book on disk
+// never needs to be buffered to be read.
 func parseEPUB(data []byte) (meta EpubMeta, coverBytes []byte, coverMime string, err error) {
-	zr, err := zip.NewReader(bytes.NewReader(data), int64(len(data)))
+	return parseEPUBAt(bytes.NewReader(data), int64(len(data)))
+}
+
+// parseEPUBAt reads bibliographic metadata and the cover image out of an EPUB
+// through random access, so the archive is never held in memory — only the
+// handful of small entries it actually reads (container.xml, the OPF, the
+// cover image). It returns an error when the source is not a recognisable
+// EPUB (no zip, no container.xml, or no OPF package) — that error is the
+// upload validation. A missing or unreadable cover is not an error:
+// coverBytes is simply nil.
+func parseEPUBAt(ra io.ReaderAt, size int64) (meta EpubMeta, coverBytes []byte, coverMime string, err error) {
+	zr, err := zip.NewReader(ra, size)
 	if err != nil {
 		return meta, nil, "", fmt.Errorf("not a zip archive: %w", err)
 	}

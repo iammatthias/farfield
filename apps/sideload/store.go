@@ -3,8 +3,11 @@ package main
 import (
 	"fmt"
 	"io"
+	"log/slog"
 	"os"
 	"path/filepath"
+	"strings"
+	"time"
 
 	"github.com/iammatthias/farfield/lib/cid"
 )
@@ -22,7 +25,37 @@ func newBlobStore(dir string) (*blobStore, error) {
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		return nil, err
 	}
-	return &blobStore{dir: dir}, nil
+	s := &blobStore{dir: dir}
+	s.pruneTemp()
+	return s, nil
+}
+
+// tempTTL is how long an upload temp file may linger before a startup sweep
+// reclaims it. Well past any legitimate in-flight upload.
+const tempTTL = 6 * time.Hour
+
+// pruneTemp removes .upload-* temp files a crash stranded. spool cleans up
+// after itself on every error path, so anything still here outlived the
+// process that created it — and these are .ipa files, so they are large.
+func (s *blobStore) pruneTemp() {
+	entries, err := os.ReadDir(s.dir)
+	if err != nil {
+		return
+	}
+	cutoff := time.Now().Add(-tempTTL)
+	for _, e := range entries {
+		if e.IsDir() || !strings.HasPrefix(e.Name(), ".upload-") {
+			continue
+		}
+		info, err := e.Info()
+		if err != nil || info.ModTime().After(cutoff) {
+			continue
+		}
+		path := filepath.Join(s.dir, e.Name())
+		if err := os.Remove(path); err != nil && !os.IsNotExist(err) {
+			slog.Warn("remove orphaned upload temp", "path", path, "err", err)
+		}
+	}
 }
 
 // path returns the on-disk location for a content address and extension

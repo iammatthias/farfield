@@ -4,6 +4,7 @@ import (
 	"database/sql"
 	"log/slog"
 	"net/http"
+	"net/url"
 	"os"
 	"strings"
 	"sync"
@@ -23,14 +24,30 @@ var (
 	fleetOnceAuth sync.Once
 	fleetSecret   string
 	cookieDomain  string
+	fleetEpoch    string
 )
 
 func fleetSessionConfig() (secret, domain string) {
+	loadFleetConfig()
+	return fleetSecret, cookieDomain
+}
+
+// sessionEpoch is the fleet-wide revocation lever. Every signed session is
+// bound to it, so changing SESSION_EPOCH and redeploying invalidates every
+// outstanding token at once — the stateless equivalent of clearing a session
+// table. Leave it unset until you need it; any value works, a timestamp reads
+// best in a config.
+func sessionEpoch() string {
+	loadFleetConfig()
+	return fleetEpoch
+}
+
+func loadFleetConfig() {
 	fleetOnceAuth.Do(func() {
 		fleetSecret = os.Getenv("SESSION_SECRET")
 		cookieDomain = os.Getenv("SESSION_COOKIE_DOMAIN")
+		fleetEpoch = os.Getenv("SESSION_EPOCH")
 	})
-	return fleetSecret, cookieDomain
 }
 
 // KeyChecker resolves an admin-issued token for an app to its scope —
@@ -62,6 +79,28 @@ type Auth struct {
 	CookieSecure bool
 	Keys         KeyChecker
 	App          string
+
+	// loginOnce/loginRL back the built-in login throttle. HandleLogin owns
+	// it rather than leaving it to each app's route table, so no app can
+	// ship an unthrottled front door by forgetting a wrapper.
+	loginOnce sync.Once
+	loginRL   *FailLimiter
+}
+
+// Login throttling: five wrong passwords per client per minute. Far above any
+// human retry rate, far below a useful guessing rate. It matters more than it
+// looks — with SESSION_SECRET set, a password cracked on any one app mints a
+// session every app in the fleet accepts.
+const (
+	loginMaxFails   = 5
+	loginFailWindow = time.Minute
+)
+
+func (a *Auth) loginLimiter() *FailLimiter {
+	a.loginOnce.Do(func() {
+		a.loginRL = NewFailLimiter(loginMaxFails, loginFailWindow)
+	})
+	return a.loginRL
 }
 
 // keyScope resolves the request's bearer token against the admin-issued key
@@ -77,11 +116,19 @@ func (a *Auth) keyScope(r *http.Request) (string, bool) {
 // redirects to the login page. A signed fleet session (SESSION_SECRET) is
 // accepted first; the app's own database sessions keep working either way,
 // so enabling the secret never logs anyone out.
+//
+// State-changing requests must also pass the cross-origin check below, so a
+// hostile page cannot drive an admin action on the strength of the session
+// cookie alone.
 func (a *Auth) RequireSession(next http.HandlerFunc) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
+		if !allowedOrigin(r) {
+			http.Error(w, "cross-origin request refused", http.StatusForbidden)
+			return
+		}
 		if token, ok := auth.Session(r); ok {
 			if secret, _ := fleetSessionConfig(); secret != "" &&
-				auth.VerifySignedSession(secret, token) {
+				auth.VerifySignedSession(secret, sessionEpoch(), token) {
 				next(w, r)
 				return
 			}
@@ -94,6 +141,56 @@ func (a *Auth) RequireSession(next http.HandlerFunc) http.HandlerFunc {
 		}
 		http.Redirect(w, r, "/login", http.StatusSeeOther)
 	}
+}
+
+// unsafeMethod reports whether a request can change state. GET/HEAD/OPTIONS
+// are excluded: the admin UI never mutates on those.
+func unsafeMethod(m string) bool {
+	switch m {
+	case http.MethodPost, http.MethodPut, http.MethodPatch, http.MethodDelete:
+		return true
+	}
+	return false
+}
+
+// allowedOrigin is the CSRF check for session-gated writes. The session
+// cookie is SameSite=Lax, which already blocks a cross-site form POST in a
+// current browser; this is the second layer, and it is the one that holds if
+// that cookie attribute is ever relaxed or a browser is lenient about it.
+//
+// A request declaring an Origin (or, failing that, a Referer) must name this
+// host or a sibling under SESSION_COOKIE_DOMAIN — the fleet's own apps. A
+// request declaring neither is allowed: browsers always send Origin on
+// cross-origin writes, so the header's absence means a non-browser client
+// (curl, an iOS Shortcut), which carries no ambient cookie to abuse.
+func allowedOrigin(r *http.Request) bool {
+	if !unsafeMethod(r.Method) {
+		return true
+	}
+	declared := r.Header.Get("Origin")
+	if declared == "" || declared == "null" {
+		declared = r.Header.Get("Referer")
+	}
+	if declared == "" {
+		return true
+	}
+	u, err := url.Parse(declared)
+	if err != nil || u.Host == "" {
+		return false
+	}
+	if strings.EqualFold(u.Host, r.Host) {
+		return true
+	}
+	// Fleet siblings share the session cookie, so they are same-site by
+	// construction; treat the configured cookie domain as the trust boundary.
+	if _, domain := fleetSessionConfig(); domain != "" {
+		suffix := "." + strings.TrimPrefix(domain, ".")
+		host := u.Hostname()
+		if strings.HasSuffix("."+host, suffix) {
+			return true
+		}
+	}
+	return false
 }
 
 // RequireAPIKey guards the JSON write endpoints. A missing or wrong key
@@ -178,19 +275,29 @@ func APIKeyFrom(r *http.Request) string {
 // HandleLogin verifies the posted password, opens a one-week session, and
 // redirects to the admin index. Wire it to POST /login; the GET form stays
 // app-owned (it renders through the app's templates).
+//
+// Failed attempts are rate-limited per client IP — see loginLimiter. A correct
+// password is never throttled, so replaying a valid login stays free.
 func (a *Auth) HandleLogin(w http.ResponseWriter, r *http.Request) {
+	ip := ClientIP(r)
+	limiter := a.loginLimiter()
+	if limiter.Blocked(ip) {
+		http.Error(w, "too many attempts — try again shortly", http.StatusTooManyRequests)
+		return
+	}
 	if err := r.ParseForm(); err != nil {
 		http.Error(w, "bad form", http.StatusBadRequest)
 		return
 	}
 	if a.Password == "" || !auth.VerifyPassword(r.FormValue("password"), a.Password) {
+		limiter.Fail(ip)
 		http.Redirect(w, r, "/login?error=Invalid+password", http.StatusSeeOther)
 		return
 	}
 	secret, domain := fleetSessionConfig()
 	if secret != "" {
 		// Fleet mode: a signed, stateless token every sibling app accepts.
-		token := auth.SignSession(secret, time.Now().Add(7*24*time.Hour))
+		token := auth.SignSession(secret, sessionEpoch(), time.Now().Add(7*24*time.Hour))
 		c := auth.SessionCookie(token, a.CookieSecure)
 		c.Domain = domain
 		http.SetCookie(w, c)

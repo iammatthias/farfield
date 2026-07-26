@@ -37,6 +37,10 @@ func (sr *statusRecorder) Flush() {
 	}
 }
 
+// Unwrap exposes the wrapped writer to http.ResponseController, so hijacking
+// and deadline control reach the real connection through this wrapper.
+func (sr *statusRecorder) Unwrap() http.ResponseWriter { return sr.ResponseWriter }
+
 // LogRequests logs every request with its method, path, response status, and
 // duration.
 func LogRequests(next http.Handler) http.Handler {
@@ -136,6 +140,41 @@ func (gw *gzipWriter) Write(b []byte) (int, error) {
 	return gw.ResponseWriter.Write(b)
 }
 
+// Flush pushes the compressor's buffered bytes out and then flushes the
+// connection, so a streaming handler (SSE, a progress log) reaches the client
+// incrementally instead of stalling inside the gzip buffer.
+func (gw *gzipWriter) Flush() {
+	if !gw.wroteHeader {
+		gw.WriteHeader(http.StatusOK)
+	}
+	if gw.zw != nil {
+		_ = gw.zw.Flush()
+	}
+	if f, ok := gw.ResponseWriter.(http.Flusher); ok {
+		f.Flush()
+	}
+}
+
+// ReadFrom keeps the kernel's sendfile path available for uncompressed
+// responses — http.ServeContent copies through it, and without this method the
+// wrapper would force every byte through userspace.
+func (gw *gzipWriter) ReadFrom(src io.Reader) (int64, error) {
+	if !gw.wroteHeader {
+		gw.WriteHeader(http.StatusOK)
+	}
+	if gw.zw != nil {
+		return io.Copy(gw.zw, src)
+	}
+	if rf, ok := gw.ResponseWriter.(io.ReaderFrom); ok {
+		return rf.ReadFrom(src)
+	}
+	// Copy through Write, not through this type, or ReadFrom recurses.
+	return io.Copy(struct{ io.Writer }{gw.ResponseWriter}, src)
+}
+
+// Unwrap exposes the wrapped writer to http.ResponseController.
+func (gw *gzipWriter) Unwrap() http.ResponseWriter { return gw.ResponseWriter }
+
 func (gw *gzipWriter) Close() error {
 	if gw.zw != nil {
 		return gw.zw.Close()
@@ -143,9 +182,41 @@ func (gw *gzipWriter) Close() error {
 	return nil
 }
 
+// GzipExcept is Gzip with an escape hatch: requests for which skip returns
+// true bypass the compressor entirely. It exists for the apps that serve raw
+// object bytes alongside an admin UI — blobs and library — which otherwise
+// have to choose between compressing their HTML and JSON or leaving their
+// byte routes alone. A nil skip is plain Gzip.
+func GzipExcept(next http.Handler, skip func(*http.Request) bool) http.Handler {
+	gz := Gzip(next)
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if skip != nil && skip(r) {
+			next.ServeHTTP(w, r)
+			return
+		}
+		gz.ServeHTTP(w, r)
+	})
+}
+
+// PathPrefixSkipper returns a skip function matching any of the given path
+// prefixes — the usual argument to GzipExcept.
+func PathPrefixSkipper(prefixes ...string) func(*http.Request) bool {
+	return func(r *http.Request) bool {
+		for _, p := range prefixes {
+			if strings.HasPrefix(r.URL.Path, p) {
+				return true
+			}
+		}
+		return false
+	}
+}
+
 // Gzip compresses text, JSON, Atom, and SVG responses when the client accepts
-// it. Range requests and already-encoded responses pass through untouched —
-// do not wrap routes that serve raw blob/file bytes via http.ServeContent.
+// it. Range requests and already-encoded responses pass through untouched.
+// Content-Type decides: raw blob bytes served via http.ServeContent are
+// classified as images/video/octet-stream and skipped already, but prefer
+// GzipExcept for routes that stream large objects, so they never enter the
+// wrapper at all.
 func Gzip(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if !strings.Contains(r.Header.Get("Accept-Encoding"), "gzip") ||
@@ -154,9 +225,20 @@ func Gzip(next http.Handler) http.Handler {
 			return
 		}
 		gw := &gzipWriter{ResponseWriter: w, r: r}
-		defer gw.Close()
+		// A failed Close means the compressed tail never reached the client,
+		// so the body is truncated under an already-sent 200. Nothing can
+		// repair the response at this point — log it so it is visible.
+		defer func() {
+			if err := gw.Close(); err != nil {
+				slog.Error("gzip close", "path", r.URL.Path, "err", err)
+			}
+		}()
 		next.ServeHTTP(gw, r)
 	})
 }
 
-var _ io.Closer = (*gzipWriter)(nil)
+var (
+	_ io.Closer     = (*gzipWriter)(nil)
+	_ io.ReaderFrom = (*gzipWriter)(nil)
+	_ http.Flusher  = (*gzipWriter)(nil)
+)

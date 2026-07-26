@@ -16,8 +16,11 @@
 // anything under /static/ (asset noise) — both would swamp the table with
 // rows that say nothing about real traffic.
 //
-// The package depends only on the standard library; the importing app
-// registers the SQLite driver, exactly like lib/store.
+// The package depends only on the standard library plus lib/web, for
+// web.ClientIP — resolving the client address is a security-sensitive
+// decision (forwarded headers are only believed from a trusted peer), and one
+// copy of that rule is the only safe number. The importing app registers the
+// SQLite driver, exactly like lib/store.
 package pulse
 
 import (
@@ -25,14 +28,16 @@ import (
 	"crypto/sha256"
 	"database/sql"
 	"encoding/hex"
+	"io"
 	"log/slog"
-	"net"
 	"net/http"
 	"net/url"
 	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
+
+	"github.com/iammatthias/farfield/lib/web"
 )
 
 // schema is the requests table the middleware self-creates on first use.
@@ -155,7 +160,7 @@ func (rec *Recorder) middleware(next http.Handler) http.Handler {
 			method:    r.Method,
 			status:    sw.code(),
 			latencyMS: time.Since(start).Milliseconds(),
-			vkey:      rec.salt.vkey(clientIP(r), r.UserAgent()),
+			vkey:      rec.salt.vkey(web.ClientIP(r), r.UserAgent()),
 			refHost:   refHost(r.Referer()),
 			country:   r.Header.Get("CF-IPCountry"),
 		}
@@ -267,6 +272,24 @@ func (sw *statusWriter) Flush() {
 	}
 }
 
+// ReadFrom keeps the kernel's sendfile path reachable. This wrapper sits
+// innermost — closest to the handler — so http.ServeContent's copy lands here
+// first; without it, every byte of an EPUB or a video download would be
+// dragged through userspace.
+func (sw *statusWriter) ReadFrom(src io.Reader) (int64, error) {
+	if sw.status == 0 {
+		sw.status = http.StatusOK
+	}
+	if rf, ok := sw.ResponseWriter.(io.ReaderFrom); ok {
+		return rf.ReadFrom(src)
+	}
+	// Copy through Write, not through this type, or ReadFrom recurses.
+	return io.Copy(struct{ io.Writer }{sw.ResponseWriter}, src)
+}
+
+// Unwrap exposes the wrapped writer to http.ResponseController.
+func (sw *statusWriter) Unwrap() http.ResponseWriter { return sw.ResponseWriter }
+
 // code returns the captured status, defaulting to 200 for handlers that
 // never call WriteHeader.
 func (sw *statusWriter) code() int {
@@ -309,26 +332,6 @@ func (s *salter) vkey(ip, ua string) string {
 	h.Write([]byte(ip))
 	h.Write([]byte(ua))
 	return hex.EncodeToString(h.Sum(nil)[:8])
-}
-
-// clientIP resolves the client address for vkey hashing only: the Cloudflare
-// header when present, else the first X-Forwarded-For hop, else the socket
-// peer. The value is hash input — it is never stored or logged.
-func clientIP(r *http.Request) string {
-	if v := r.Header.Get("CF-Connecting-IP"); v != "" {
-		return v
-	}
-	if v := r.Header.Get("X-Forwarded-For"); v != "" {
-		if i := strings.IndexByte(v, ','); i >= 0 {
-			v = v[:i]
-		}
-		return strings.TrimSpace(v)
-	}
-	host, _, err := net.SplitHostPort(r.RemoteAddr)
-	if err != nil {
-		return r.RemoteAddr
-	}
-	return host
 }
 
 // refHost reduces a Referer header to its host — the only part recorded.

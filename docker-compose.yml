@@ -8,6 +8,28 @@
 
 x-defaults: &defaults
   restart: unless-stopped
+  # The images run as uid/gid 65532 (distroless :nonroot), so the bind-mounted
+  # ./data must be writable by that uid. On an existing deployment whose data
+  # directory was created by the previous root containers, this is a ONE-TIME
+  # step before the first `up` — without it every app fails to open its
+  # database:
+  #
+  #     sudo chown -R 65532:65532 ./data
+  #
+  # Nothing here needs a privileged capability: the apps listen above 1024 and
+  # only touch their own files, so they drop every capability and are barred
+  # from regaining any through setuid binaries.
+  # Published ports bind to FARFIELD_BIND_IP, never every interface. The
+  # default (loopback) is right for local dev. On a host where the reverse
+  # proxy is itself a container reaching the apps through
+  # host.docker.internal, set this to the docker bridge gateway — 172.17.0.1
+  # — so ingress still resolves while the LAN cannot reach the apps directly.
+  # Binding 0.0.0.0 would put every admin UI on the local network, where a
+  # client can also forge the forwarded-IP headers the rate limiters key on.
+  cap_drop:
+    - ALL
+  security_opt:
+    - no-new-privileges:true
   logging:
     driver: json-file
     options:
@@ -28,13 +50,16 @@ services:
       args: { APP: blobs }
     image: farfield-blobs
     ports:
-      - "${BLOBS_PORT:-8789}:8789"
+      - "${FARFIELD_BIND_IP:-127.0.0.1}:${BLOBS_PORT:-8789}:8789"
     environment:
       - HOST=0.0.0.0
       - BLOBS_PORT=8789
       - BLOBS_DB_PATH=/data/blobs.sqlite
       - BLOBS_BACKEND=${BLOBS_BACKEND:-r2}
       - BLOBS_DIR=/data/blobs
+      # Uploads stage here before hashing, so large media never has to fit in
+      # memory. On the mounted volume, not the container's writable layer.
+      - BLOBS_SPOOL_DIR=/data/blob-spool
       - PASSWORD=${PASSWORD:-changeme}
       - SESSION_SECRET=${SESSION_SECRET:-}
       - SESSION_COOKIE_DOMAIN=${SESSION_COOKIE_DOMAIN:-}
@@ -60,7 +85,7 @@ services:
       args: { APP: library }
     image: farfield-library
     ports:
-      - "${LIBRARY_PORT:-8797}:8797"
+      - "${FARFIELD_BIND_IP:-127.0.0.1}:${LIBRARY_PORT:-8797}:8797"
     environment:
       - HOST=0.0.0.0
       - LIBRARY_PORT=8797
@@ -93,7 +118,7 @@ services:
       blobs:
         condition: service_healthy
     ports:
-      - "${CONTENT_PORT:-8787}:8787"
+      - "${FARFIELD_BIND_IP:-127.0.0.1}:${CONTENT_PORT:-8787}:8787"
     environment:
       - HOST=0.0.0.0
       - CONTENT_PORT=8787
@@ -126,7 +151,7 @@ services:
       blobs:
         condition: service_healthy
     ports:
-      - "${FEED_PORT:-8788}:8788"
+      - "${FARFIELD_BIND_IP:-127.0.0.1}:${FEED_PORT:-8788}:8788"
     environment:
       - HOST=0.0.0.0
       - FEED_PORT=8788
@@ -154,7 +179,7 @@ services:
       args: { APP: apex }
     image: farfield-apex
     ports:
-      - "${APEX_PORT:-8790}:8790"
+      - "${FARFIELD_BIND_IP:-127.0.0.1}:${APEX_PORT:-8790}:8790"
     environment:
       - HOST=0.0.0.0
       - APEX_PORT=8790
@@ -169,7 +194,7 @@ services:
       args: { APP: bard }
     image: farfield-bard
     ports:
-      - "${BARD_PORT:-8795}:8795"
+      - "${FARFIELD_BIND_IP:-127.0.0.1}:${BARD_PORT:-8795}:8795"
     environment:
       - HOST=0.0.0.0
       - BARD_PORT=8795
@@ -184,7 +209,7 @@ services:
       args: { APP: dead-presidents }
     image: farfield-dead-presidents
     ports:
-      - "${DEAD_PRESIDENTS_PORT:-8796}:8796"
+      - "${FARFIELD_BIND_IP:-127.0.0.1}:${DEAD_PRESIDENTS_PORT:-8796}:8796"
     environment:
       - HOST=0.0.0.0
       - DEAD_PRESIDENTS_PORT=8796
@@ -199,7 +224,7 @@ services:
       args: { APP: pulse }
     image: farfield-pulse
     ports:
-      - "${PULSE_PORT:-8798}:8798"
+      - "${FARFIELD_BIND_IP:-127.0.0.1}:${PULSE_PORT:-8798}:8798"
     environment:
       - HOST=0.0.0.0
       - PULSE_PORT=8798
@@ -218,7 +243,7 @@ services:
       args: { APP: daily }
     image: farfield-daily
     ports:
-      - "${DAILY_PORT:-8792}:8792"
+      - "${FARFIELD_BIND_IP:-127.0.0.1}:${DAILY_PORT:-8792}:8792"
     environment:
       - HOST=0.0.0.0
       - DAILY_PORT=8792
@@ -234,7 +259,7 @@ services:
       args: { APP: bookmarks }
     image: farfield-bookmarks
     ports:
-      - "${BOOKMARKS_PORT:-8793}:8793"
+      - "${FARFIELD_BIND_IP:-127.0.0.1}:${BOOKMARKS_PORT:-8793}:8793"
     environment:
       - HOST=0.0.0.0
       - BOOKMARKS_PORT=8793
@@ -256,7 +281,7 @@ services:
       args: { APP: qr }
     image: farfield-qr
     ports:
-      - "${QR_PORT:-8794}:8794"
+      - "${FARFIELD_BIND_IP:-127.0.0.1}:${QR_PORT:-8794}:8794"
     environment:
       - HOST=0.0.0.0
       - QR_PORT=8794
@@ -279,7 +304,7 @@ services:
       args: { APP: scrap }
     image: farfield-scrap
     ports:
-      - "${SCRAP_PORT:-8799}:8799"
+      - "${FARFIELD_BIND_IP:-127.0.0.1}:${SCRAP_PORT:-8799}:8799"
     environment:
       - HOST=0.0.0.0
       - SCRAP_PORT=8799
@@ -301,7 +326,7 @@ services:
       args: { APP: sideload }
     image: farfield-sideload
     ports:
-      - "${SIDELOAD_PORT:-8800}:8800"
+      - "${FARFIELD_BIND_IP:-127.0.0.1}:${SIDELOAD_PORT:-8800}:8800"
     environment:
       - HOST=0.0.0.0
       - SIDELOAD_PORT=8800
@@ -325,7 +350,7 @@ services:
       args: { APP: keys }
     image: farfield-keys
     ports:
-      - "${KEYS_PORT:-8801}:8801"
+      - "${FARFIELD_BIND_IP:-127.0.0.1}:${KEYS_PORT:-8801}:8801"
     environment:
       - HOST=0.0.0.0
       - KEYS_PORT=8801
@@ -347,7 +372,7 @@ services:
       blobs:
         condition: service_healthy
     ports:
-      - "${BACKUP_PORT:-8791}:8791"
+      - "${FARFIELD_BIND_IP:-127.0.0.1}:${BACKUP_PORT:-8791}:8791"
     environment:
       - HOST=0.0.0.0
       - BACKUP_PORT=8791

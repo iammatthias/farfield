@@ -442,6 +442,11 @@ dialog.doc-keys::backdrop { background: color-mix(in srgb, var(--ink) 25%, trans
 	white-space: nowrap;
 }
 
+/* login — the shared front door, one narrow plate centered on the page.
+   Every app rendered this with the same inline styles; it lives here now. */
+.login { max-width: 24rem; margin: 2rem auto; }
+.login h1 { font-size: 1.1rem; }
+
 /* login mark — the app's tile, same mark as its favicon */
 .login-mark {
 	width: 3.4rem; height: 3.4rem; margin-bottom: 1rem;
@@ -858,4 +863,109 @@ dialog.embed-modal::backdrop { background: color-mix(in srgb, var(--ink) 35%, tr
 		animation-duration: 0.01ms !important;
 		animation-iteration-count: 1 !important;
 	}
+}
+
+/* ── shared page furniture ─────────────────────────────────────────────── */
+/* Patterns several apps had each reimplemented in their own <style> block.
+   Kept here so a fix reaches every app at once. */
+
+/* pager — prev/next with a position readout, under a paginated list */
+.pager {
+  display: flex; gap: 1.5rem; justify-content: center; align-items: baseline;
+  margin-top: 2rem; font-family: var(--font-mono); font-size: 0.8rem;
+}
+.pager a { text-decoration: none; }
+.pager a:hover { color: var(--accent); }
+
+/* thumb — the small fixed square a media list shows per row */
+.thumb {
+  width: 52px; height: 52px; max-width: none; object-fit: cover; display: block;
+  border: 1px solid var(--hairline); border-radius: 4px;
+}
+video.thumb { pointer-events: none; background: var(--wash); }
+.thumb.glyph {
+  display: flex; align-items: center; justify-content: center;
+  font-size: 1.05rem; opacity: 0.55; background: var(--wash);
+}
+
+/* swatch — an inline color chip */
+.swatch {
+  display: inline-block; width: 0.9rem; height: 0.9rem;
+  vertical-align: -2px; border: 1px solid var(--hairline); border-radius: 3px;
+}
+
+/* action-row — the inline verbs at the end of a table row. Buttons read as
+   links here so a destructive POST does not look heavier than an <a>. */
+td.actions, th.actions {
+  display: table-cell; /* override the form .actions flex row */
+  margin-top: 0;
+  font: 0.78rem/1.3 var(--font-mono);
+  white-space: nowrap;
+  vertical-align: middle;
+}
+.action-row {
+  display: inline-flex; gap: 0.6rem; flex-wrap: nowrap; align-items: baseline;
+}
+td.actions form { display: inline-flex; align-items: baseline; margin: 0; }
+td.actions a, td.actions button { line-height: 1; }
+td.actions button {
+  border: 0; background: transparent; padding: 0;
+  color: var(--ink); text-decoration: underline;
+  text-underline-offset: 0.2em; font: inherit; cursor: pointer;
+}
+td.actions button.danger { color: var(--accent); }
+td.actions button:hover { background: transparent; text-decoration-thickness: 2px; }
+
+/* :target modal — a viewer that needs no JavaScript. The anchor opens it,
+   the backdrop link closes it. */
+.modal { display: none; position: fixed; inset: 0; z-index: 50; }
+.modal:target { display: flex; align-items: center; justify-content: center; padding: 1.5rem; }
+.modal .backdrop {
+  position: absolute; inset: 0;
+  background: color-mix(in srgb, var(--ink) 40%, transparent);
+}
+.modal .card {
+  position: relative; z-index: 1; width: 100%; max-width: 58rem; max-height: 88vh;
+  overflow: auto; background: var(--panel);
+  border: 1px solid var(--hairline); border-radius: var(--r-m);
+  box-shadow: var(--shadow-m);
+}
+.modal .close {
+  position: absolute; top: 0; right: 0; z-index: 2;
+  width: 2.1rem; height: 2.1rem;
+  display: flex; align-items: center; justify-content: center;
+  font-size: 1.3rem; line-height: 1; text-decoration: none;
+  color: var(--surface); background: var(--ink);
+  border-radius: 0 var(--r-m) 0 var(--r-s);
+}
+.modal .close:hover { background: var(--accent); }
+
+/* Responsive table → labelled cards. Give the table class "stack" and each
+   cell a data-label; on a phone the header row hides and every row becomes a
+   panel with its column names inline. This is the pattern that makes an admin
+   table usable on a phone, and it was copied into several apps. */
+@media (max-width: 46rem) {
+  .stack-wrap {
+    overflow: visible; background: none; border: 0;
+    border-radius: 0; box-shadow: none;
+  }
+  table.stack thead { display: none; }
+  table.stack, table.stack tbody, table.stack tr, table.stack td {
+    display: block; width: auto;
+  }
+  table.stack tr {
+    background: var(--panel); border: 1px solid var(--hairline);
+    border-radius: var(--r-s); padding: 0.5rem 0.75rem; margin-bottom: 0.6rem;
+  }
+  /* rows hidden via the hidden attribute must stay hidden */
+  table.stack tr[hidden] { display: none; }
+  table.stack td {
+    display: flex; gap: 0.7rem; align-items: baseline;
+    padding: 0.18rem 0; border: 0;
+  }
+  table.stack td::before {
+    content: attr(data-label); flex: 0 0 5rem;
+    font-size: 0.7rem; font-weight: 500; line-height: 1.7; opacity: 0.55;
+  }
+  table.stack td[data-label=""]::before { content: none; }
 }

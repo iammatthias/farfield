@@ -1,13 +1,7 @@
-{{define "base"}}<!DOCTYPE html>
-<html lang="en">
-<head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>{{block "title" .}}farfield · qr{{end}}</title>
-  <meta name="theme-color" content="#fcfbf8" media="(prefers-color-scheme: light)">
-  <meta name="theme-color" content="#181613" media="(prefers-color-scheme: dark)">
-  <link rel="icon" href="data:image/svg+xml,<svg%20xmlns='http://www.w3.org/2000/svg'%20viewBox='0%200%2064%2064'><rect%20width='64'%20height='64'%20rx='14'%20fill='%231f1b16'/><text%20x='32'%20y='42'%20font-family='ui-monospace,Menlo,monospace'%20font-size='26'%20font-weight='600'%20text-anchor='middle'%20fill='%23fcfbf8'>qr</text></svg>">
-  <link rel="stylesheet" href="/static/styles.css?v={{.AssetVer}}">
+{{/* qr: the shared layout supplies the shell and masthead;
+    only this app's own styles and partials live here. */}}
+
+{{define "styles"}}
   <style>
     .container { max-width: 60rem; }
 
@@ -91,21 +85,4 @@
       .qr-panel { grid-template-columns: 1fr; }
     }
   </style>
-</head>
-<body>
-  <main class="container">
-    {{block "content" .}}{{end}}
-  </main>
-</body>
-</html>{{end}}
-
-{{define "topbar"}}
-<header class="bar">
-  <h1><a href="/">farfield · qr</a></h1>
-  <nav>
-    <a href="/new">New code</a>
-    <a href="/logout">Log out</a>
-  </nav>
-    {{.FleetNav}}
-</header>
 {{end}}

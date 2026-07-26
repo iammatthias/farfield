@@ -1,8 +1,6 @@
 package web
 
 import (
-	"net/http"
-	"net/url"
 	"sync"
 	"time"
 )
@@ -71,26 +69,8 @@ func (l *FailLimiter) Fail(key string) {
 	l.fails[key] = append(l.prune(key), l.now())
 }
 
-// FailLimit wraps a login-style form handler: over-budget clients get a flat
-// 429 before the handler runs, and posts that redirect back with an ?error=
-// query — the farfield login-failure convention — count as failures. It
-// exists so a session login can be brute-force-limited in one line.
-func FailLimit(l *FailLimiter, next http.HandlerFunc) http.HandlerFunc {
-	return func(w http.ResponseWriter, r *http.Request) {
-		ip := ClientIP(r)
-		if l.Blocked(ip) {
-			http.Error(w, "too many attempts — try again shortly", http.StatusTooManyRequests)
-			return
-		}
-		rec := &statusRecorder{ResponseWriter: w}
-		next(rec, r)
-		// A failed login redirects back with ?error=...; success redirects
-		// without one. Only the failure consumes budget.
-		if rec.status == http.StatusSeeOther {
-			if u, err := url.Parse(rec.Header().Get("Location")); err == nil &&
-				u.Query().Has("error") {
-				l.Fail(ip)
-			}
-		}
-	}
-}
+// There is deliberately no FailLimit middleware for logins: Auth.HandleLogin
+// throttles itself (see lib/web/auth.go), so brute-force protection cannot be
+// lost by forgetting to wrap a route. Use FailLimiter directly for the other
+// guessable secrets — paste tokens, magic links — where the key is something
+// richer than the client IP alone.

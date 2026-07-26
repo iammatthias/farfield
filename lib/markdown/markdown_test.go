@@ -2,6 +2,7 @@ package markdown
 
 import (
 	"context"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -101,5 +102,37 @@ func TestRawHTMLIsOmitted(t *testing.T) {
 	got := string(r.Render(context.Background(), `<script>alert(1)</script>`))
 	if strings.Contains(got, "<script>") {
 		t.Errorf("raw HTML must not pass through:\n%s", got)
+	}
+}
+
+// The blob memo is keyed by content address and never invalidates, so it
+// needs a ceiling or it grows for the life of the process.
+func TestRendererCacheIsBounded(t *testing.T) {
+	var r Renderer
+	for i := range maxCacheEntries + 500 {
+		r.remember(fmt.Sprintf("bafkrei%08d", i), blobLookup{meta: &blobMeta{Mime: "image/png"}})
+	}
+	n := 0
+	r.cache.Range(func(_, _ any) bool { n++; return true })
+	if n > maxCacheEntries {
+		t.Errorf("cache holds %d entries, above the %d bound", n, maxCacheEntries)
+	}
+	if n == 0 {
+		t.Error("cache is empty — the reset dropped everything and kept nothing")
+	}
+	// The counter must track the map, or the next reset fires at the wrong time.
+	if got := int(r.cacheN.Load()); got != n {
+		t.Errorf("cacheN = %d but the map holds %d", got, n)
+	}
+}
+
+// Re-remembering a CID must not inflate the count toward a premature reset.
+func TestRendererCacheCountsDistinctEntries(t *testing.T) {
+	var r Renderer
+	for range 10 {
+		r.remember("bafkreisame", blobLookup{meta: &blobMeta{Mime: "image/png"}})
+	}
+	if got := r.cacheN.Load(); got != 1 {
+		t.Errorf("cacheN = %d after 10 writes of one CID, want 1", got)
 	}
 }

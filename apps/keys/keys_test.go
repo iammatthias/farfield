@@ -9,7 +9,6 @@ import (
 	"regexp"
 	"strings"
 	"testing"
-	"time"
 
 	"github.com/iammatthias/farfield/lib/keys"
 	"github.com/iammatthias/farfield/lib/store"
@@ -37,11 +36,10 @@ func newTestServer(t *testing.T) *Server {
 		t.Fatalf("ParseTemplates: %v", err)
 	}
 	return &Server{
-		db:    db,
-		ks:    ks,
-		auth:  &web.Auth{DB: db, Password: "secret"},
-		rd:    &web.Renderer{Templates: tmpl, AssetVer: "test"},
-		logrl: web.NewFailLimiter(5, time.Minute),
+		db:   db,
+		ks:   ks,
+		auth: &web.Auth{DB: db, Password: "secret"},
+		rd:   &web.Renderer{Templates: tmpl, AssetVer: "test"},
 	}
 }
 

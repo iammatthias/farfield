@@ -76,7 +76,13 @@ func run(host, port string) error {
 	if err != nil {
 		return err
 	}
-	s.rd = &web.Renderer{Templates: tmpl, AssetVer: theme.Version, Funcs: funcs}
+	s.rd = &web.Renderer{Templates: tmpl, AssetVer: theme.Version, Funcs: funcs,
+		App: "qr", Mark: "qr",
+		Nav: []web.NavItem{
+			{Label: "New code", URL: "/new"},
+			{Label: "Log out", URL: "/logout"},
+		},
+	}
 
 	defer keys.Attach(s.auth, "qr")() // admin-issued keys, when KEYS_DB_PATH is set
 

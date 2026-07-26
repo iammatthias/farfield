@@ -55,13 +55,7 @@
       </table>
     </div>
 
-    {{if gt .Pages 1}}
-      <nav class="pager">
-        {{if .HasPrev}}<a href="/?page={{.Prev}}">← Prev</a>{{else}}<span class="muted">← Prev</span>{{end}}
-        <span class="muted">Page {{.Page}} of {{.Pages}}</span>
-        {{if .HasNext}}<a href="/?page={{.Next}}">Next →</a>{{else}}<span class="muted">Next →</span>{{end}}
-      </nav>
-    {{end}}
+    {{template "pager" .}}
 
     {{/* one modal viewer per blob — opened by #m-<cid> */}}
     {{range .Blobs}}

@@ -13,7 +13,11 @@ RUN --mount=type=cache,target=/root/.cache/go-build \
     --mount=type=cache,target=/go/pkg/mod \
     CGO_ENABLED=0 GOOS=linux go build -trimpath -o /bin/app ./apps/${APP}
 
-FROM gcr.io/distroless/static-debian12
+# The :nonroot variant runs as uid/gid 65532 instead of root. The apps bind
+# ./data from the host, so a root container would write host files as root —
+# and a compromise would own them. See docker-compose.yml for the one-time
+# chown this requires on an existing deployment.
+FROM gcr.io/distroless/static-debian12:nonroot
 COPY --from=build /bin/app /app
 WORKDIR /data
 ENV HOST=0.0.0.0

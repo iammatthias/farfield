@@ -2,9 +2,11 @@ package main
 
 import (
 	"encoding/json"
+	"io"
 	"net/http"
 	"regexp"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/iammatthias/farfield/lib/web"
@@ -39,13 +41,54 @@ func (s *Server) handleFleetSearchPage(w http.ResponseWriter, r *http.Request) {
 	s.rd.Render(w, "search.html", nil)
 }
 
+// fleetCorpusLimit bounds how many documents of each kind enter the corpus.
+// The whole set is serialized into one response and embedded in the browser,
+// so it has to have a ceiling — without one the payload grows with the
+// archive forever. Newest-first ordering means the cap drops the oldest.
+const fleetCorpusLimit = 2000
+
 // handleFleetSearchData aggregates the corpus. Source failures degrade to
 // partial results with a warning — search over most of the fleet beats a 500.
 func (s *Server) handleFleetSearchData(w http.ResponseWriter, r *http.Request) {
 	var docs []fleetDoc
 	var warnings []string
 
-	entries, err := listEntriesFull(s.db, "", statusAll, 0, 0)
+	// The two sibling services are independent — fetch them while this app
+	// reads its own tables, so the page waits on the slowest source rather
+	// than on the sum of all three.
+	type feedShape struct {
+		Posts []struct {
+			Slug, CID, Body string
+			Tags            []string
+		} `json:"posts"`
+	}
+	type bookmarkShape struct {
+		Bookmarks []struct {
+			ID          int64
+			CID         string
+			URL, Title  string
+			Description string
+			Tags        []string
+		} `json:"bookmarks"`
+	}
+	var (
+		feed     feedShape
+		bm       bookmarkShape
+		feedOK   bool
+		bmOK     bool
+		siblings sync.WaitGroup
+	)
+	siblings.Add(2)
+	go func() {
+		defer siblings.Done()
+		feedOK = fleetFetch(s.feedURL+"/api/posts", s.feedReadKey, &feed)
+	}()
+	go func() {
+		defer siblings.Done()
+		bmOK = fleetFetch(s.bookmarksURL+"/api/bookmarks", s.bookmarksReadKey, &bm)
+	}()
+
+	entries, err := listEntriesFull(s.db, "", statusAll, fleetCorpusLimit, 0)
 	if err == nil {
 		for _, e := range entries {
 			docs = append(docs, fleetDoc{
@@ -76,14 +119,10 @@ func (s *Server) handleFleetSearchData(w http.ResponseWriter, r *http.Request) {
 		warnings = append(warnings, "series unavailable")
 	}
 
-	var feed struct {
-		Posts []struct {
-			Slug, CID, Body string
-			Tags            []string
-		} `json:"posts"`
-	}
-	if fleetFetch(s.feedURL+"/api/posts", s.feedReadKey, &feed) {
-		for _, p := range feed.Posts {
+	siblings.Wait()
+
+	if feedOK {
+		for _, p := range capSlice(feed.Posts, fleetCorpusLimit) {
 			docs = append(docs, fleetDoc{
 				Kind: "post", Key: p.CID,
 				Title:   searchSnippet(plainText(p.Body), 80),
@@ -95,17 +134,8 @@ func (s *Server) handleFleetSearchData(w http.ResponseWriter, r *http.Request) {
 		warnings = append(warnings, "feed unreachable")
 	}
 
-	var bm struct {
-		Bookmarks []struct {
-			ID          int64
-			CID         string
-			URL, Title  string
-			Description string
-			Tags        []string
-		} `json:"bookmarks"`
-	}
-	if fleetFetch(s.bookmarksURL+"/api/bookmarks", s.bookmarksReadKey, &bm) {
-		for _, b := range bm.Bookmarks {
+	if bmOK {
+		for _, b := range capSlice(bm.Bookmarks, fleetCorpusLimit) {
 			title := b.Title
 			if title == "" {
 				title = b.URL
@@ -125,6 +155,20 @@ func (s *Server) handleFleetSearchData(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
+// capSlice returns at most n elements of s — the corpus cap, applied to a
+// sibling service's response without assuming it honored any limit itself.
+func capSlice[T any](s []T, n int) []T {
+	if len(s) > n {
+		return s[:n]
+	}
+	return s
+}
+
+// maxFleetResponse bounds a sibling's JSON response. These are trusted
+// services, but a bounded read keeps one misbehaving upstream from
+// exhausting this process's memory.
+const maxFleetResponse = 64 << 20 // 64 MiB
+
 // fleetFetch GETs a sibling read API into out, sending the key when set.
 // False on any failure — the caller degrades rather than erroring.
 func fleetFetch(url, key string, out any) bool {
@@ -143,7 +187,7 @@ func fleetFetch(url, key string, out any) bool {
 	if resp.StatusCode != http.StatusOK {
 		return false
 	}
-	return json.NewDecoder(resp.Body).Decode(out) == nil
+	return json.NewDecoder(io.LimitReader(resp.Body, maxFleetResponse)).Decode(out) == nil
 }
 
 var (

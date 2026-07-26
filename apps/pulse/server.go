@@ -55,7 +55,15 @@ func run(host, port string) error {
 			Password:     store.Env("PASSWORD", ""),
 			CookieSecure: store.Env("COOKIE_SECURE", "false") == "true",
 		},
-		rd: &web.Renderer{Templates: tmpl, AssetVer: theme.Version},
+		rd: &web.Renderer{Templates: tmpl, AssetVer: theme.Version,
+			App: "pulse", Mark: "pu",
+			Nav: []web.NavItem{
+				{Label: "Overview", URL: "/"},
+				{Label: "Targets", URL: "/targets"},
+				{Label: "Traffic", URL: "/traffic"},
+				{Label: "Log out", URL: "/logout"},
+			},
+		},
 	}
 
 	startChecker(db)

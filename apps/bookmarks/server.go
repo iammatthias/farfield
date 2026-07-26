@@ -57,8 +57,14 @@ func run(host, port string) error {
 			ReadKey:      store.Env("BOOKMARKS_READ_KEY", ""),
 			CookieSecure: store.Env("COOKIE_SECURE", "false") == "true",
 		},
-		rd:   &web.Renderer{Templates: tmpl, AssetVer: theme.Version},
-		http: &http.Client{Timeout: fetchTimeout + 5*time.Second},
+		rd: &web.Renderer{Templates: tmpl, AssetVer: theme.Version,
+			App: "bookmarks", Mark: "bo",
+			Nav: []web.NavItem{
+				{Label: "New bookmark", URL: "/new"},
+				{Label: "Log out", URL: "/logout"},
+			},
+		},
+		http: newFetchClient(fetchTimeout + 5*time.Second),
 	}
 
 	defer keys.Attach(s.auth, "bookmarks")() // admin-issued keys, when KEYS_DB_PATH is set

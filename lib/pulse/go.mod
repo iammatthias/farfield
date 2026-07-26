@@ -10,6 +10,8 @@ require modernc.org/sqlite v1.50.1
 require (
 	github.com/dustin/go-humanize v1.0.1 // indirect
 	github.com/google/uuid v1.6.0 // indirect
+	github.com/iammatthias/farfield/lib/auth v0.0.0 // indirect
+	github.com/iammatthias/farfield/lib/store v0.0.0 // indirect
 	github.com/mattn/go-isatty v0.0.20 // indirect
 	github.com/ncruces/go-strftime v1.0.0 // indirect
 	github.com/remyoudompheng/bigfft v0.0.0-20230129092748-24d4a6f8daec // indirect
@@ -17,4 +19,12 @@ require (
 	modernc.org/libc v1.72.3 // indirect
 	modernc.org/mathutil v1.7.1 // indirect
 	modernc.org/memory v1.11.0 // indirect
+)
+
+require github.com/iammatthias/farfield/lib/web v0.0.0
+
+replace (
+	github.com/iammatthias/farfield/lib/auth => ../auth
+	github.com/iammatthias/farfield/lib/store => ../store
+	github.com/iammatthias/farfield/lib/web => ../web
 )

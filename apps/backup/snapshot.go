@@ -3,6 +3,7 @@ package main
 import (
 	"database/sql"
 	"fmt"
+	"io"
 	"log/slog"
 	"os"
 	"path/filepath"
@@ -171,13 +172,29 @@ func runRestore(app, cid string, confirm bool) error {
 	blobsURL := store.Env("BLOBS_URL", "http://127.0.0.1:8789")
 	apiKey := store.Env("BLOBS_API_KEY", "")
 
-	data, err := backup.Pull(blobsURL, apiKey, cid)
+	// The snapshot streams to a temp file rather than into memory, so a
+	// multi-hundred-MB restore costs no more than the backup that made it.
+	staged, err := os.CreateTemp(filepath.Dir(target.DBPath), "restore-*.sqlite")
 	if err != nil {
 		return err
 	}
+	stagedName := staged.Name()
+	defer os.Remove(stagedName)
+	err = backup.Pull(blobsURL, apiKey, cid, staged)
+	size, statErr := staged.Seek(0, io.SeekCurrent)
+	if closeErr := staged.Close(); err == nil {
+		err = closeErr
+	}
+	if err != nil {
+		return err
+	}
+	if statErr != nil {
+		return statErr
+	}
+
 	if !confirm {
 		slog.Info("restore DRY RUN — pass --confirm to apply",
-			"app", app, "cid", cid, "bytes", len(data), "target", target.DBPath)
+			"app", app, "cid", cid, "bytes", size, "target", target.DBPath)
 		return nil
 	}
 
@@ -192,7 +209,13 @@ func runRestore(app, cid string, confirm bool) error {
 		}
 	}
 
-	if err := backup.WriteDB(target.DBPath, data); err != nil {
+	src, err := os.Open(stagedName)
+	if err != nil {
+		return err
+	}
+	err = backup.WriteDB(target.DBPath, src)
+	src.Close()
+	if err != nil {
 		return err
 	}
 	slog.Info("restore complete — start the target service again",

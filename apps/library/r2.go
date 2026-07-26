@@ -86,25 +86,34 @@ func (r *R2) Put(key string, data []byte, contentType string) error {
 	return nil
 }
 
-// PutFile streams the file at path to R2 without buffering it. SigV4 signs
-// the payload hash, so the file is read twice: one pass to hash, one as the
-// request body — both sequential disk reads, never a whole-file buffer.
+// PutFile streams the file at path to R2 without buffering it.
 func (r *R2) PutFile(key, path, contentType string) error {
 	f, err := os.Open(path)
 	if err != nil {
 		return err
 	}
 	defer f.Close()
+	return r.PutSeeker(key, f, contentType)
+}
+
+// PutSeeker streams rs to R2 without buffering it. SigV4 signs the payload
+// hash, so the source is read twice from its start: one pass to hash, one as
+// the request body — never a whole-object buffer. It is what lets an EPUB
+// arrive over multipart or tus and reach R2 in constant space.
+func (r *R2) PutSeeker(key string, rs io.ReadSeeker, contentType string) error {
+	if _, err := rs.Seek(0, io.SeekStart); err != nil {
+		return err
+	}
 	h := sha256.New()
-	size, err := io.Copy(h, f)
+	size, err := io.Copy(h, rs)
 	if err != nil {
 		return err
 	}
-	if _, err := f.Seek(0, io.SeekStart); err != nil {
+	if _, err := rs.Seek(0, io.SeekStart); err != nil {
 		return err
 	}
 
-	req, err := http.NewRequest(http.MethodPut, r.objectURL(key), f)
+	req, err := http.NewRequest(http.MethodPut, r.objectURL(key), rs)
 	if err != nil {
 		return err
 	}

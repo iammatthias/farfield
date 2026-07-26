@@ -22,6 +22,9 @@ const userAgent = "farfield-daily/1.0 (+https://farfield.systems)"
 const (
 	nasaCooldown = 10 * time.Minute // pause upstream calls after a failure
 	negativeTTL  = 2 * time.Hour    // remember a failed date for this long
+	// negativeSweepAt is the size at which markNegative drops expired
+	// entries. Comfortably above the handful of dates in play at once.
+	negativeSweepAt = 512
 )
 
 // fetcher performs upstream HTTP calls and tracks the state that keeps the
@@ -104,8 +107,20 @@ func (f *fetcher) noteNASAError() {
 // request for the next negativeTTL.
 func (f *fetcher) markNegative(date string) {
 	f.mu.Lock()
+	defer f.mu.Unlock()
+	// Expired entries are dead weight — the map is keyed by date, so a
+	// long-running process browsing the archive accumulates one per day
+	// visited and never drops them. Sweeping on write keeps it to the dates
+	// that are actually still suppressed.
+	if len(f.negative) >= negativeSweepAt {
+		cutoff := time.Now().Add(-negativeTTL)
+		for d, at := range f.negative {
+			if at.Before(cutoff) {
+				delete(f.negative, d)
+			}
+		}
+	}
 	f.negative[date] = time.Now()
-	f.mu.Unlock()
 }
 
 // negativeHit reports whether a date failed recently enough to skip retrying.

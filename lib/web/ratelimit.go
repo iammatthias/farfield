@@ -1,8 +1,11 @@
 package web
 
 import (
+	"fmt"
+	"log/slog"
 	"net"
 	"net/http"
+	"os"
 	"strconv"
 	"strings"
 	"sync"
@@ -87,7 +90,16 @@ func RateLimit(l *RateLimiter, exempt func(*http.Request) bool, next http.Handle
 // header when present, else the first X-Forwarded-For hop, else the socket
 // peer. farfield runs behind a Cloudflare tunnel, so CF-Connecting-IP carries
 // the real remote address.
+//
+// Forwarded headers are believed ONLY when the request reached us from a
+// trusted peer. They are client-supplied strings: a caller that can open a
+// socket to the app directly would otherwise rotate CF-Connecting-IP per
+// request and walk straight through every limiter keyed on this value.
 func ClientIP(r *http.Request) string {
+	peer := peerIP(r)
+	if !trustedPeer(peer) {
+		return peer
+	}
 	if v := r.Header.Get("CF-Connecting-IP"); v != "" {
 		return v
 	}
@@ -97,9 +109,71 @@ func ClientIP(r *http.Request) string {
 		}
 		return strings.TrimSpace(v)
 	}
+	return peer
+}
+
+// peerIP is the socket peer address, without its port.
+func peerIP(r *http.Request) string {
 	host, _, err := net.SplitHostPort(r.RemoteAddr)
 	if err != nil {
 		return r.RemoteAddr
 	}
 	return host
+}
+
+var (
+	trustedOnce  sync.Once
+	trustedNets  []*net.IPNet
+	trustedIsSet bool
+)
+
+// trustedPeer reports whether forwarded client-IP headers from this peer may
+// be believed. FARFIELD_TRUSTED_PROXIES, when set, is a comma-separated CIDR
+// list and is authoritative. Unset, the default trusts loopback and private
+// address space — the shape every farfield deployment has, where cloudflared
+// and Caddy sit in front on the container network — while a request arriving
+// straight from a public address is taken at face value.
+func trustedPeer(ip string) bool {
+	trustedOnce.Do(func() {
+		raw := os.Getenv("FARFIELD_TRUSTED_PROXIES")
+		if raw == "" {
+			return
+		}
+		trustedIsSet = true
+		for _, part := range strings.Split(raw, ",") {
+			part = strings.TrimSpace(part)
+			if part == "" {
+				continue
+			}
+			if !strings.Contains(part, "/") {
+				// A bare address is its own /32 or /128.
+				if parsed := net.ParseIP(part); parsed != nil {
+					bits := 32
+					if parsed.To4() == nil {
+						bits = 128
+					}
+					part = fmt.Sprintf("%s/%d", part, bits)
+				}
+			}
+			if _, n, err := net.ParseCIDR(part); err == nil {
+				trustedNets = append(trustedNets, n)
+			} else {
+				slog.Warn("ignoring unparseable FARFIELD_TRUSTED_PROXIES entry", "entry", part)
+			}
+		}
+	})
+	parsed := net.ParseIP(ip)
+	if parsed == nil {
+		return false
+	}
+	if trustedIsSet {
+		for _, n := range trustedNets {
+			if n.Contains(parsed) {
+				return true
+			}
+		}
+		return false
+	}
+	return parsed.IsLoopback() || parsed.IsPrivate() ||
+		parsed.IsLinkLocalUnicast() || parsed.IsUnspecified()
 }

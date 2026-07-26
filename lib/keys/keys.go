@@ -20,6 +20,7 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/iammatthias/farfield/lib/store"
@@ -80,9 +81,35 @@ func (k *Key) Active() bool {
 	return true
 }
 
+// stampInterval bounds how often a key's last_used_at is rewritten. Check
+// runs on every authenticated request across the whole fleet, and each app
+// opens the same keys.sqlite over one bind mount — stamping every hit turned
+// a read path into a fleet-wide write path contending for the same file lock.
+// last_used_at is an audit hint, never a gate, so five-minute resolution is
+// all it ever needed.
+const stampInterval = 5 * time.Minute
+
 // Store hands out and checks keys against one SQLite database.
 type Store struct {
 	db *sql.DB
+
+	// stampMu guards stamped, the in-process record of when each key's
+	// last_used_at was last written.
+	stampMu sync.Mutex
+	stamped map[string]time.Time
+}
+
+// shouldStamp reports whether this key's last_used_at is due for a rewrite,
+// recording the decision. Per-process: several app containers may each stamp
+// once per interval, which is still a rounding error against once per request.
+func (s *Store) shouldStamp(id string, now time.Time) bool {
+	s.stampMu.Lock()
+	defer s.stampMu.Unlock()
+	if last, ok := s.stamped[id]; ok && now.Sub(last) < stampInterval {
+		return false
+	}
+	s.stamped[id] = now
+	return true
 }
 
 // Open opens (creating if needed) the key database at path. The calling
@@ -106,7 +133,7 @@ func New(db *sql.DB) (*Store, error) {
 	if _, err := db.Exec(schema); err != nil {
 		return nil, err
 	}
-	return &Store{db: db}, nil
+	return &Store{db: db, stamped: make(map[string]time.Time)}, nil
 }
 
 // Close releases the underlying database.
@@ -158,7 +185,8 @@ func (s *Store) Mint(name, app, scope string, expires time.Time) (string, *Key, 
 // Check resolves a presented token for app: it returns the key's scope when
 // the token names an active key issued for that app (or for every app).
 // Lookup is by SHA-256, so timing reveals nothing about stored tokens. A hit
-// stamps last_used_at best-effort — an audit hint, never a gate.
+// stamps last_used_at best-effort, at most once per stampInterval — an audit
+// hint, never a gate.
 func (s *Store) Check(token, app string) (string, bool) {
 	if token == "" || !strings.HasPrefix(token, tokenPrefix) {
 		return "", false
@@ -175,8 +203,10 @@ func (s *Store) Check(token, app string) (string, bool) {
 	if !k.Active() || (k.App != AppAny && k.App != app) {
 		return "", false
 	}
-	_, _ = s.db.Exec(`UPDATE api_keys SET last_used_at = ? WHERE id = ?`,
-		store.NowRFC3339(), k.ID)
+	if now := time.Now(); s.shouldStamp(k.ID, now) {
+		_, _ = s.db.Exec(`UPDATE api_keys SET last_used_at = ? WHERE id = ?`,
+			now.UTC().Format(time.RFC3339), k.ID)
+	}
 	return k.Scope, true
 }
 

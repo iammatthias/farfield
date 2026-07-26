@@ -1,0 +1,84 @@
+{{/*
+  The farfield page shell, shared by every app. Twelve apps each carried a
+  byte-identical copy of this <head> — charset, viewport, the two theme-color
+  meta tags, a hand-written favicon data URI, the stylesheet link — so a
+  change to any of it meant twelve edits. It lives here now.
+
+  An app supplies only what is actually its own:
+    {{define "title"}}   — the page title (defaults to "farfield · <app>")
+    {{define "styles"}}  — app-wide CSS the shared theme lacks (from base.html)
+    {{define "head"}}    — per-page head content: scripts, one-page styles
+    {{define "content"}} — the page body
+  and, from Go, its name and mark via Renderer.App / Renderer.Mark.
+
+  Any app can still override "base" or "topbar" wholesale by defining its own;
+  app templates parse after these, so the app's definition wins.
+*/}}
+
+{{define "base"}}<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>{{block "title" .}}farfield · {{.App}}{{end}}</title>
+  <meta name="theme-color" content="#fcfbf8" media="(prefers-color-scheme: light)">
+  <meta name="theme-color" content="#181613" media="(prefers-color-scheme: dark)">
+  {{.Favicon}}
+  <link rel="stylesheet" href="/static/styles.css?v={{.AssetVer}}">
+  {{/* "styles" is the app's own CSS, from its base.html; "head" is a
+       per-page slot for scripts or one-page styles. */}}
+  {{block "styles" .}}{{end}}
+  {{block "head" .}}{{end}}
+</head>
+<body>
+  <main class="container{{block "container_class" .}}{{end}}">
+    {{block "content" .}}{{end}}
+  </main>
+</body>
+</html>{{end}}
+
+{{/* The masthead. Nav items come from Renderer.Nav; "Log out" is appended
+     for every app that has a session, so no app spells it out. */}}
+{{define "topbar"}}
+<header class="bar">
+  <h1><a href="/">farfield · {{.App}}</a></h1>
+  {{if .Nav}}
+  <nav>
+    {{range .Nav}}<a href="{{.URL}}"{{if .Class}} class="{{.Class}}"{{end}}>{{.Label}}</a>{{end}}
+  </nav>
+  {{end}}
+  {{.FleetNav}}
+</header>
+{{end}}
+
+{{/* The login page, which was eleven files differing only in the app name.
+     Apps render it with the page name "login.html"; the Error key, when set,
+     shows above the form. */}}
+{{define "login_body"}}
+  <section class="login">
+    <div class="login-mark" aria-hidden="true">{{.Mark}}</div>
+    <h1>farfield · {{.App}}</h1>
+    {{with .Error}}<p class="error">{{.}}</p>{{end}}
+    <form method="post" action="/login">
+      <div class="field">
+        <label for="password">Password</label>
+        <input type="password" id="password" name="password" required autofocus>
+      </div>
+      <div class="actions"><button type="submit">Log in</button></div>
+    </form>
+  </section>
+{{end}}
+
+{{/* Prev/Next pagination. Expects .HasPrev/.Prev/.HasNext/.Next and an
+     optional .PageBase (the path to link, default "/"). */}}
+{{define "pager"}}
+{{if or .HasPrev .HasNext}}
+<nav class="pager">
+  {{if .HasPrev}}<a href="{{with .PageBase}}{{.}}{{else}}/{{end}}?page={{.Prev}}">← Prev</a>
+  {{else}}<span class="muted">← Prev</span>{{end}}
+  <span class="muted">{{.Page}} / {{.Pages}}</span>
+  {{if .HasNext}}<a href="{{with .PageBase}}{{.}}{{else}}/{{end}}?page={{.Next}}">Next →</a>
+  {{else}}<span class="muted">Next →</span>{{end}}
+</nav>
+{{end}}
+{{end}}

@@ -16,6 +16,10 @@ type ByteStore interface {
 	// PutFile streams the file at path into the store — for payloads too
 	// large to hold in memory.
 	PutFile(key, path, contentType string) error
+	// PutSeeker streams an already-open, seekable source into the store. It
+	// is how an upload reaches storage without ever being buffered: the
+	// multipart temp file and the tus staging file are both seekable.
+	PutSeeker(key string, rs io.ReadSeeker, contentType string) error
 	Get(key string) ([]byte, error) // returns (nil, nil) when absent
 	// GetStream returns the object's bytes as a stream plus its size, or
 	// (nil, 0, nil) when absent. The caller closes the reader.
@@ -49,21 +53,28 @@ func (d *LocalDir) Put(key string, data []byte, _ string) error {
 	return os.WriteFile(p, data, 0o644)
 }
 
-func (d *LocalDir) PutFile(key, path, _ string) error {
-	p, err := d.keyPath(key)
-	if err != nil {
-		return err
-	}
+func (d *LocalDir) PutFile(key, path, contentType string) error {
 	src, err := os.Open(path)
 	if err != nil {
 		return err
 	}
 	defer src.Close()
+	return d.PutSeeker(key, src, contentType)
+}
+
+func (d *LocalDir) PutSeeker(key string, rs io.ReadSeeker, _ string) error {
+	p, err := d.keyPath(key)
+	if err != nil {
+		return err
+	}
+	if _, err := rs.Seek(0, io.SeekStart); err != nil {
+		return err
+	}
 	dst, err := os.OpenFile(p, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0o644)
 	if err != nil {
 		return err
 	}
-	if _, err := io.Copy(dst, src); err != nil {
+	if _, err := io.Copy(dst, rs); err != nil {
 		dst.Close()
 		return err
 	}

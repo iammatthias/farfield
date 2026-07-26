@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"database/sql"
 	"embed"
 	"errors"
@@ -29,6 +30,11 @@ import (
 var assets embed.FS
 
 const defaultMaxUpload = 100 << 20 // 100 MiB
+
+// uploadMemoryLimit is how much of a multipart form Go keeps on the heap
+// before spilling the rest to a temp file. Small on purpose: books belong on
+// disk, and every upload path here reads them from a file handle.
+const uploadMemoryLimit = 1 << 20 // 1 MiB
 
 // maxUploadLimit resolves the per-file upload cap from LIBRARY_MAX_UPLOAD, an
 // integer number of MiB (e.g. "400" -> 400 MiB). A missing, non-numeric, or
@@ -115,10 +121,22 @@ func run(host, port string) error {
 			APIKey:       store.Env("LIBRARY_API_KEY", ""),
 			CookieSecure: store.Env("COOKIE_SECURE", "false") == "true",
 		},
-		rd:        &web.Renderer{Templates: tmpl, AssetVer: theme.Version, Funcs: tmplFuncs},
+		rd: &web.Renderer{Templates: tmpl, AssetVer: theme.Version, Funcs: tmplFuncs,
+			App: "library", Mark: "li",
+			Nav: []web.NavItem{
+				{Label: "Upload", URL: "/upload"},
+				{Label: "Log out", URL: "/logout"},
+			},
+		},
 		uploadKey: store.Env("LIBRARY_UPLOAD_KEY", ""),
 		tusDir:    store.Env("LIBRARY_TUS_DIR", "tus-staging"),
 		maxUpload: maxUploadLimit(),
+	}
+	// The staging directory holds both tus partials and the temp files the
+	// single-shot upload spools through, so it has to exist before any
+	// upload route runs — not lazily, on the first tus create.
+	if err := os.MkdirAll(s.tusDir, 0o755); err != nil {
+		return fmt.Errorf("creating upload staging dir %s: %w", s.tusDir, err)
 	}
 	s.pruneStaleUploads() // reclaim abandoned partial uploads from a prior run
 	s.resumeFinalizing()  // re-run finalizes a prior crash interrupted
@@ -175,23 +193,56 @@ func (s *Server) routes() http.Handler {
 	mux.HandleFunc("GET /status", s.handleStatus)
 	mux.HandleFunc("GET /static/styles.css", theme.CSSHandler())
 
-	// No Gzip: library's hot paths serve raw EPUB bytes and cover images,
-	// which are already compressed. Pulse traffic recording sits innermost so
-	// logged timings stay real. The tus OPTIONS shim sits outermost so the tus
-	// capability probe is answered with the protocol headers before the generic
-	// CORS handler turns every OPTIONS into a bare 204.
-	return s.tusOptionsShim(web.CORS(web.LogRequests(s.pulse.Wrap(mux)),
+	// Gzip everything but the raw-byte routes. EPUB downloads and cover images
+	// are already compressed and must reach ServeContent untouched so Range
+	// requests keep working, but the admin HTML and the OPDS feeds — which are
+	// XML, and the bulkiest thing an e-reader fetches — compress well. Pulse
+	// traffic recording sits innermost so logged timings stay real. The tus
+	// OPTIONS shim sits outermost so the tus capability probe is answered with
+	// the protocol headers before the generic CORS handler turns every OPTIONS
+	// into a bare 204.
+	handler := web.GzipExcept(s.pulse.Wrap(mux),
+		web.PathPrefixSkipper("/opds/download/", "/opds/cover/", "/api/upload/"))
+	return s.tusOptionsShim(web.CORS(web.LogRequests(handler),
 		"GET", "POST", "PUT", "PATCH", "DELETE", "HEAD", "OPTIONS"))
 }
 
-// storeUpload validates EPUB bytes, extracts metadata and the cover, writes
-// both to the byte store, and records the book row. filename is the original
-// upload name (best-effort) used for the download name and a title fallback.
+// storeUpload validates EPUB bytes already in memory. It exists for callers
+// that genuinely hold the bytes; upload paths use storeUploadSeeker, which
+// never buffers the book at all.
 func (s *Server) storeUpload(data []byte, filename, collection string) (*Book, error) {
 	if len(data) == 0 {
 		return nil, errors.New("empty upload")
 	}
-	meta, coverBytes, coverMime, err := parseEPUB(data)
+	return s.storeUploadSeeker(bytes.NewReader(data), int64(len(data)), filename, collection)
+}
+
+// storeUploadSeeker validates an EPUB read through rs, extracts metadata and
+// the cover, writes both to the byte store, and records the book row.
+// filename is the original upload name (best-effort) used for the download
+// name and a title fallback.
+//
+// rs is read several times from its start — to parse the archive, to hash it,
+// and to upload it — so it must be seekable. That is what keeps a 300 MB book
+// off the heap: the source stays the multipart or tus file on disk, and only
+// the cover image is ever held in memory.
+func (s *Server) storeUploadSeeker(rs io.ReadSeeker, size int64, filename, collection string) (*Book, error) {
+	if size == 0 {
+		return nil, errors.New("empty upload")
+	}
+	ra, ok := rs.(io.ReaderAt)
+	if !ok {
+		return nil, errors.New("upload source does not support random access")
+	}
+	meta, coverBytes, coverMime, err := parseEPUBAt(ra, size)
+	if err != nil {
+		return nil, err
+	}
+
+	if _, err := rs.Seek(0, io.SeekStart); err != nil {
+		return nil, err
+	}
+	bookCID, _, err := cid.OfReader(rs)
 	if err != nil {
 		return nil, err
 	}
@@ -201,7 +252,7 @@ func (s *Server) storeUpload(data []byte, filename, collection string) (*Book, e
 		title = titleFromFilename(filename)
 	}
 	b := &Book{
-		CID:         cid.Of(data),
+		CID:         bookCID,
 		Title:       title,
 		Author:      meta.Author,
 		Language:    meta.Language,
@@ -209,7 +260,7 @@ func (s *Server) storeUpload(data []byte, filename, collection string) (*Book, e
 		Description: meta.Description,
 		Collection:  strings.TrimSpace(collection),
 		Filename:    sanitizeFilename(filename),
-		Size:        int64(len(data)),
+		Size:        size,
 		CreatedAt:   store.NowRFC3339(),
 	}
 
@@ -232,7 +283,7 @@ func (s *Server) storeUpload(data []byte, filename, collection string) (*Book, e
 			}
 		}
 	}
-	if err := s.store.Put(b.CID, data, epubMime); err != nil {
+	if err := s.store.PutSeeker(b.CID, rs, epubMime); err != nil {
 		return nil, err
 	}
 	if err := upsertBook(s.db, b); err != nil {
@@ -325,10 +376,19 @@ func (s *Server) handleUploadForm(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleAdminUpload(w http.ResponseWriter, r *http.Request) {
-	if err := r.ParseMultipartForm(s.maxUpload); err != nil {
+	// The argument is how much of the form to keep in memory, NOT the upload
+	// cap — passing maxUpload asked Go to hold a whole book on the heap.
+	// Anything past uploadMemoryLimit spills to a temp file, which is where
+	// storeMultipartFile wants it anyway. The size cap is enforced per file.
+	if err := r.ParseMultipartForm(uploadMemoryLimit); err != nil {
 		http.Redirect(w, r, "/upload?error=Upload+failed", http.StatusSeeOther)
 		return
 	}
+	defer func() {
+		if r.MultipartForm != nil {
+			_ = r.MultipartForm.RemoveAll() // drop spill files promptly
+		}
+	}()
 	var files []*multipart.FileHeader
 	if r.MultipartForm != nil {
 		files = r.MultipartForm.File["file"]
@@ -363,21 +423,18 @@ func (s *Server) handleAdminUpload(w http.ResponseWriter, r *http.Request) {
 // storeMultipartFile reads one uploaded file (bounded by maxUpload) and stores
 // it as a book in the given collection.
 func (s *Server) storeMultipartFile(fh *multipart.FileHeader, collection string) error {
+	if fh.Size > s.maxUpload {
+		return fmt.Errorf("%s: file too large", fh.Filename)
+	}
 	f, err := fh.Open()
 	if err != nil {
 		return err
 	}
 	defer f.Close()
-	// Read one byte past the limit so an oversize file is detected and
-	// rejected rather than silently truncated into a corrupt EPUB.
-	data, err := io.ReadAll(io.LimitReader(f, s.maxUpload+1))
-	if err != nil {
-		return err
-	}
-	if int64(len(data)) > s.maxUpload {
-		return fmt.Errorf("%s: file too large", fh.Filename)
-	}
-	_, err = s.storeUpload(data, fh.Filename, collection)
+	// multipart.File is always seekable and random-access, whether the part
+	// landed in memory or (past uploadMemoryLimit) in a temp file — so the
+	// book goes straight from that file to storage without a heap copy.
+	_, err = s.storeUploadSeeker(f, fh.Size, fh.Filename, collection)
 	return err
 }
 
@@ -630,7 +687,19 @@ func (s *Server) handleCover(w http.ResponseWriter, r *http.Request) {
 // file at a time — so each file reports success or failure on its own.
 func (s *Server) handleUploadJSON(w http.ResponseWriter, r *http.Request) {
 	r.Body = http.MaxBytesReader(w, r.Body, s.maxUpload)
-	data, err := io.ReadAll(r.Body)
+	// Spool to disk rather than into memory: the ingest below needs random
+	// access over the archive, and a temp file provides that at a constant
+	// memory cost no matter how large the book is.
+	tmp, err := os.CreateTemp(s.tusDir, "upload-*.epub")
+	if err != nil {
+		slog.Error("upload: create temp", "err", err)
+		web.WriteError(w, http.StatusInternalServerError, "could not stage upload")
+		return
+	}
+	defer os.Remove(tmp.Name())
+	defer tmp.Close()
+
+	size, err := io.Copy(tmp, r.Body)
 	if err != nil {
 		web.WriteError(w, http.StatusRequestEntityTooLarge, "upload too large")
 		return
@@ -641,7 +710,7 @@ func (s *Server) handleUploadJSON(w http.ResponseWriter, r *http.Request) {
 	if filename == "" {
 		filename = r.Header.Get("X-Filename")
 	}
-	b, err := s.storeUpload(data, filename, r.URL.Query().Get("collection"))
+	b, err := s.storeUploadSeeker(tmp, size, filename, r.URL.Query().Get("collection"))
 	if err != nil {
 		web.WriteError(w, http.StatusBadRequest, err.Error())
 		return

@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"html"
 	"io"
+	"net"
 	"net/http"
 	"net/url"
 	"strings"
@@ -38,6 +39,79 @@ type metaResult struct {
 	Favicon       string
 }
 
+// errBlockedTarget rejects a fetch aimed at the private network.
+var errBlockedTarget = errors.New("refusing to fetch a private or loopback address")
+
+// blockedIP reports whether an address is one this fetcher must never reach.
+// A bookmark URL is attacker-influenced data pointed at an outbound fetcher
+// living inside a homelab, so without this it doubles as a probe for every
+// sibling service on 127.0.0.1, the router, and cloud metadata endpoints.
+func blockedIP(ip net.IP) bool {
+	return ip == nil || ip.IsLoopback() || ip.IsPrivate() ||
+		ip.IsLinkLocalUnicast() || ip.IsLinkLocalMulticast() ||
+		ip.IsInterfaceLocalMulticast() || ip.IsUnspecified() ||
+		// Carrier-grade NAT and IPv4-mapped-in-IPv6 forms of the above.
+		ip.IsMulticast() || inCGNAT(ip)
+}
+
+var cgnat = &net.IPNet{IP: net.IPv4(100, 64, 0, 0), Mask: net.CIDRMask(10, 32)}
+
+func inCGNAT(ip net.IP) bool {
+	v4 := ip.To4()
+	return v4 != nil && cgnat.Contains(v4)
+}
+
+// safeDialContext refuses a connection to a blocked address. It runs on the
+// resolved IP at dial time, which is the only place the check is sound: a
+// hostname can resolve to a public address on one lookup and a private one on
+// the next, and redirects re-enter here for every hop.
+func safeDialContext(dialer *net.Dialer) func(context.Context, string, string) (net.Conn, error) {
+	return func(ctx context.Context, network, addr string) (net.Conn, error) {
+		host, port, err := net.SplitHostPort(addr)
+		if err != nil {
+			return nil, err
+		}
+		ips, err := net.DefaultResolver.LookupIP(ctx, "ip", host)
+		if err != nil {
+			return nil, err
+		}
+		for _, ip := range ips {
+			if blockedIP(ip) {
+				return nil, fmt.Errorf("%w: %s resolves to %s", errBlockedTarget, host, ip)
+			}
+		}
+		// Dial the address we just vetted, not the name — re-resolving here
+		// would reopen the window between the check and the connection.
+		return dialer.DialContext(ctx, network, net.JoinHostPort(ips[0].String(), port))
+	}
+}
+
+// newFetchClient builds the HTTP client used for metadata fetches: bounded in
+// time, capped at a sane redirect depth, and unable to reach the private
+// network at any hop.
+func newFetchClient(timeout time.Duration) *http.Client {
+	dialer := &net.Dialer{Timeout: 10 * time.Second, KeepAlive: 30 * time.Second}
+	return &http.Client{
+		Timeout: timeout,
+		Transport: &http.Transport{
+			DialContext:           safeDialContext(dialer),
+			TLSHandshakeTimeout:   10 * time.Second,
+			ResponseHeaderTimeout: 10 * time.Second,
+		},
+		CheckRedirect: func(req *http.Request, via []*http.Request) error {
+			if len(via) >= 5 {
+				return errors.New("too many redirects")
+			}
+			// The dialer vets the destination of every hop, but a redirect to
+			// a non-HTTP scheme never reaches the dialer at all.
+			if req.URL.Scheme != "http" && req.URL.Scheme != "https" {
+				return fmt.Errorf("refusing redirect to scheme %q", req.URL.Scheme)
+			}
+			return nil
+		},
+	}
+}
+
 // fetchMetadata retrieves rawURL and returns the metadata extracted from its
 // HTML. A network or parse failure returns an empty result and an error — the
 // caller treats that as "do not block the save" and stores what it can.
@@ -51,6 +125,11 @@ func fetchMetadata(ctx context.Context, client *http.Client, rawURL string) (met
 	}
 	if base.Scheme != "http" && base.Scheme != "https" {
 		return metaResult{}, fmt.Errorf("unsupported scheme %q", base.Scheme)
+	}
+	// A literal private address is refused before any DNS work happens; names
+	// are caught at dial time, after resolution.
+	if ip := net.ParseIP(base.Hostname()); ip != nil && blockedIP(ip) {
+		return metaResult{}, fmt.Errorf("%w: %s", errBlockedTarget, base.Hostname())
 	}
 
 	reqCtx, cancel := context.WithTimeout(ctx, fetchTimeout)

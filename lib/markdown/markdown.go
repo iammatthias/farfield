@@ -16,6 +16,7 @@ import (
 	"regexp"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/yuin/goldmark"
@@ -58,9 +59,9 @@ type blobMeta struct {
 
 // Renderer turns markdown bodies into HTML. It is safe for concurrent use and
 // meant to live for the server's lifetime: successful blob metadata lookups
-// are memoized forever (CIDs are content-addressed and immutable), failures
-// only for a single Render call, so a blip in the blobs service is retried on
-// the next request.
+// are memoized (CIDs are content-addressed and immutable, so a hit can never
+// be stale) up to maxCacheEntries, failures only for a single Render call, so
+// a blip in the blobs service is retried on the next request.
 type Renderer struct {
 	MetaBase   string // internal blobs base URL — metadata lookups
 	PublicBase string // browser-facing blobs base URL — src attributes; MetaBase when empty
@@ -72,7 +73,28 @@ type Renderer struct {
 
 	Client *http.Client // nil uses a shared 10s-timeout client
 
-	cache sync.Map // cid → blobLookup, successes only, server-lifetime
+	cache  sync.Map     // cid → blobLookup, successes only
+	cacheN atomic.Int64 // entries in cache, for the bound below
+}
+
+// maxCacheEntries bounds the memoized blob lookups. Each entry is tiny (a
+// CID and a mime string), but the map is keyed by content address and never
+// invalidates, so without a bound it grows for the life of the process as new
+// media is embedded. Past the cap the whole map is dropped rather than evicted
+// piecemeal — the next renders simply re-fetch, and a CID's metadata is
+// immutable so nothing can be stale. Same trade as qr's SVG memo.
+const maxCacheEntries = 4096
+
+// remember memoizes a successful lookup, resetting the map if it has grown
+// past the bound.
+func (r *Renderer) remember(cid string, hit blobLookup) {
+	if r.cacheN.Load() >= maxCacheEntries {
+		r.cache.Clear()
+		r.cacheN.Store(0)
+	}
+	if _, loaded := r.cache.LoadOrStore(cid, hit); !loaded {
+		r.cacheN.Add(1)
+	}
 }
 
 // embedKind classifies a farfield embed token.
@@ -167,6 +189,7 @@ func (r *Renderer) Render(ctx context.Context, body string) template.HTML {
 	// failed memoizes this call's unsuccessful lookups so a body with many
 	// references to one dead blob does a single lookup per render.
 	failed := make(map[string]blobLookup)
+	r.prefetch(ctx, embeds, failed)
 	for i, e := range embeds {
 		p := placeholderTok(i)
 		var out string
@@ -185,6 +208,65 @@ func (r *Renderer) Render(ctx context.Context, body string) template.HTML {
 		html = strings.ReplaceAll(html, p, out)
 	}
 	return template.HTML(html)
+}
+
+// prefetchConcurrency bounds the parallel metadata lookups one render fires
+// at the blobs service. Enough to hide the round-trip latency of a gallery,
+// low enough that a long body can't open a connection per image.
+const prefetchConcurrency = 8
+
+// prefetch resolves every distinct blob CID in one render concurrently, so a
+// body with N images costs one round-trip's latency rather than N of them.
+// Results land in the shared cache (successes) and failed (this call only) —
+// exactly where meta looks — so the substitution loop that follows finds
+// everything already resolved and never blocks on the network.
+func (r *Renderer) prefetch(ctx context.Context, embeds []embedRef, failed map[string]blobLookup) {
+	pending := make([]string, 0, len(embeds))
+	seen := make(map[string]bool, len(embeds))
+	for _, e := range embeds {
+		if e.kind == embedSeries || e.cid == "" || seen[e.cid] {
+			continue
+		}
+		seen[e.cid] = true
+		if _, cached := r.cache.Load(e.cid); cached {
+			continue
+		}
+		pending = append(pending, e.cid)
+	}
+	if len(pending) < 2 {
+		return // nothing to overlap; the render loop's own lookup is cheaper
+	}
+
+	type result struct {
+		cid  string
+		meta *blobMeta
+		err  error
+	}
+	results := make(chan result, len(pending))
+	sem := make(chan struct{}, prefetchConcurrency)
+	var wg sync.WaitGroup
+	for _, c := range pending {
+		wg.Add(1)
+		go func(c string) {
+			defer wg.Done()
+			sem <- struct{}{}
+			defer func() { <-sem }()
+			meta, err := r.fetchMeta(ctx, c)
+			results <- result{cid: c, meta: meta, err: err}
+		}(c)
+	}
+	wg.Wait()
+	close(results)
+
+	// Collected on the calling goroutine: failed is a plain map owned by this
+	// render, and the cache keeps its success-only contract.
+	for res := range results {
+		if res.err != nil {
+			failed[res.cid] = blobLookup{meta: res.meta, err: res.err}
+		} else {
+			r.remember(res.cid, blobLookup{meta: res.meta})
+		}
+	}
 }
 
 // renderBlobLink renders a [text](blob://cid) file link; attrs (with a
@@ -292,7 +374,7 @@ func (r *Renderer) meta(ctx context.Context, cid string, failed map[string]blobL
 	if err != nil {
 		failed[cid] = blobLookup{meta: meta, err: err}
 	} else {
-		r.cache.Store(cid, blobLookup{meta: meta})
+		r.remember(cid, blobLookup{meta: meta})
 	}
 	return meta, err
 }

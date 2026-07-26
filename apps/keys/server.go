@@ -47,11 +47,10 @@ var scopes = []struct{ Value, Label string }{
 
 // Server holds the running keys service.
 type Server struct {
-	db    *sql.DB
-	ks    *keys.Store
-	auth  *web.Auth
-	rd    *web.Renderer
-	logrl *web.FailLimiter // failed logins, per client IP
+	db   *sql.DB
+	ks   *keys.Store
+	auth *web.Auth
+	rd   *web.Renderer
 
 	// pulse records request telemetry; nil disables it (tests never start it).
 	pulse *pulse.Recorder
@@ -88,8 +87,13 @@ func run(host, port string) error {
 			Password:     store.Env("PASSWORD", ""),
 			CookieSecure: store.Env("COOKIE_SECURE", "false") == "true",
 		},
-		rd:    &web.Renderer{Templates: tmpl, AssetVer: theme.Version, Funcs: tmplFuncs},
-		logrl: web.NewFailLimiter(5, time.Minute),
+		rd: &web.Renderer{Templates: tmpl, AssetVer: theme.Version, Funcs: tmplFuncs,
+			App: "keys", Mark: "ke",
+			Nav: []web.NavItem{
+				{Label: "New key", URL: "/new"},
+				{Label: "Log out", URL: "/logout"},
+			},
+		},
 	}
 
 	s.pulse = pulse.New(s.db, "keys")
@@ -108,10 +112,9 @@ func (s *Server) routes() http.Handler {
 	mux.HandleFunc("POST /keys/{id}/revoke", s.auth.RequireSession(s.handleRevoke))
 	mux.HandleFunc("POST /keys/{id}/delete", s.auth.RequireSession(s.handleDelete))
 
-	// Login — failure-limited: this app mints credentials, so its own front
-	// door gets brute-force protection.
+	// Login — HandleLogin throttles failed attempts itself, in every app.
 	mux.HandleFunc("GET /login", s.handleLoginForm)
-	mux.HandleFunc("POST /login", web.FailLimit(s.logrl, s.auth.HandleLogin))
+	mux.HandleFunc("POST /login", s.auth.HandleLogin)
 	mux.HandleFunc("GET /logout", s.auth.HandleLogout)
 
 	mux.HandleFunc("GET /status", s.handleStatus)

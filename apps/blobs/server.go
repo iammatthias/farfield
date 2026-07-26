@@ -11,10 +11,12 @@ import (
 	"net/http"
 	"net/url"
 	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"time"
 
+	"github.com/iammatthias/farfield/lib/cid"
 	"github.com/iammatthias/farfield/lib/keys"
 	"github.com/iammatthias/farfield/lib/pulse"
 	"github.com/iammatthias/farfield/lib/store"
@@ -28,6 +30,10 @@ var assets embed.FS
 const (
 	defaultMaxUpload = 100 << 20 // 100 MiB
 	pageSize         = 48        // blobs per admin page
+	// uploadMemoryLimit is how much of a multipart form Go keeps on the heap
+	// before spilling to a temp file. Small on purpose — blobs are media, and
+	// every upload path here reads them from a file handle.
+	uploadMemoryLimit = 1 << 20 // 1 MiB
 )
 
 // Server holds the running blob service.
@@ -37,6 +43,9 @@ type Server struct {
 	auth      *web.Auth
 	rd        *web.Renderer
 	maxUpload int64
+	// spoolDir stages uploads on disk while they are hashed and inspected, so
+	// a large blob never has to fit in memory.
+	spoolDir string
 	// sources locates the services whose bodies reference blobs — the
 	// hygiene page scans them. See hygieneSources for the env vars.
 	sources hygieneSources
@@ -97,8 +106,16 @@ func run(host, port string) error {
 			ReadKey:      store.Env("BLOBS_READ_KEY", ""),
 			CookieSecure: store.Env("COOKIE_SECURE", "false") == "true",
 		},
-		rd:        &web.Renderer{Templates: tmpl, AssetVer: theme.Version, Funcs: tmplFuncs},
+		rd: &web.Renderer{Templates: tmpl, AssetVer: theme.Version, Funcs: tmplFuncs,
+			App: "blobs", Mark: "bl",
+			Nav: []web.NavItem{
+				{Label: "Upload", URL: "/upload"},
+				{Label: "Hygiene", URL: "/hygiene"},
+				{Label: "Log out", URL: "/logout"},
+			},
+		},
 		maxUpload: defaultMaxUpload,
+		spoolDir:  store.Env("BLOBS_SPOOL_DIR", "blob-spool"),
 		sources: hygieneSources{
 			ContentURL: store.Env("CONTENT_URL", "http://127.0.0.1:8787"),
 			ContentKey: store.Env("CONTENT_API_KEY", ""),
@@ -106,6 +123,8 @@ func run(host, port string) error {
 			FeedKey:    store.Env("FEED_READ_KEY", ""),
 		},
 	}
+
+	s.pruneSpool() // reclaim upload spool files a crash stranded
 
 	defer keys.Attach(s.auth, "blobs")() // admin-issued keys, when KEYS_DB_PATH is set
 
@@ -150,15 +169,135 @@ func (s *Server) routes() http.Handler {
 	// Shared theme stylesheet.
 	mux.HandleFunc("GET /static/styles.css", theme.CSSHandler())
 
-	// No Gzip here: blobs serves raw, often already-compressed bytes (images),
-	// and the immutable blob responses are better left untouched. Pulse traffic
-	// recording sits innermost so logged timings stay real.
-	return web.CORS(web.LogRequests(s.pulse.Wrap(mux)),
+	// Gzip everywhere except the raw-byte routes: the admin HTML and the JSON
+	// index compress well, while /blobs/<cid> and /backups/<cid> stream
+	// already-compressed media and must reach ServeContent untouched so Range
+	// requests keep working. Pulse traffic recording sits innermost so logged
+	// timings stay real.
+	rawBytes := web.PathPrefixSkipper("/backups/")
+	handler := web.GzipExcept(s.pulse.Wrap(mux), func(r *http.Request) bool {
+		// /blobs and /blobs/{cid}/meta are JSON; /blobs/{cid} is bytes.
+		if strings.HasPrefix(r.URL.Path, "/blobs/") && !strings.HasSuffix(r.URL.Path, "/meta") {
+			return true
+		}
+		return rawBytes(r)
+	})
+	return web.CORS(web.LogRequests(handler),
 		"GET", "POST", "PUT", "DELETE", "OPTIONS")
 }
 
+// spoolTTL is how long a stranded spool file may sit before a startup sweep
+// reclaims it. Well past any legitimate in-flight upload.
+const spoolTTL = 6 * time.Hour
+
+// pruneSpool removes upload spool files a crash stranded. Every live upload
+// removes its own file by defer, so anything older than spoolTTL outlived the
+// process that created it.
+func (s *Server) pruneSpool() {
+	entries, err := os.ReadDir(s.spoolDir)
+	if err != nil {
+		return // no spool directory yet — nothing to reclaim
+	}
+	cutoff := time.Now().Add(-spoolTTL)
+	for _, e := range entries {
+		if e.IsDir() || !strings.HasPrefix(e.Name(), "upload-") {
+			continue
+		}
+		info, err := e.Info()
+		if err != nil || info.ModTime().After(cutoff) {
+			continue
+		}
+		path := filepath.Join(s.spoolDir, e.Name())
+		if err := os.Remove(path); err != nil && !os.IsNotExist(err) {
+			slog.Warn("remove orphaned upload spool", "path", path, "err", err)
+		}
+	}
+}
+
+// inspectLimit is the size below which an upload is read into memory so its
+// pixels can be decoded and thumbnailed. Above it — the videos and audio that
+// make up the large end of the bucket, which never get a thumbnail anyway —
+// the bytes go from the spool file straight to the backend and only the
+// header is examined. It is what keeps a 100 MiB upload off the heap.
+const inspectLimit = 32 << 20 // 32 MiB
+
+// storeUploadFrom spools an upload to disk, then stores it. Nothing larger
+// than inspectLimit is ever held in memory: the spool file is hashed in one
+// streaming pass, deduped against what is already stored, and handed to the
+// backend as a file.
+func (s *Server) storeUploadFrom(src io.Reader) (*Meta, error) {
+	if err := os.MkdirAll(s.spoolDir, 0o755); err != nil {
+		return nil, err
+	}
+	tmp, err := os.CreateTemp(s.spoolDir, "upload-*")
+	if err != nil {
+		return nil, err
+	}
+	defer os.Remove(tmp.Name())
+	defer tmp.Close()
+
+	// Read one byte past the cap so an oversize upload is rejected rather
+	// than silently truncated into a corrupt blob.
+	size, err := io.Copy(tmp, io.LimitReader(src, s.maxUpload+1))
+	if err != nil {
+		return nil, err
+	}
+	if size > s.maxUpload {
+		return nil, fmt.Errorf("upload exceeds %d byte limit", s.maxUpload)
+	}
+	if size == 0 {
+		return nil, errors.New("empty upload")
+	}
+
+	// Small enough to inspect: take the in-memory path so images still get
+	// their dimensions, palette, and thumbnail.
+	if size <= inspectLimit {
+		data := make([]byte, size)
+		if _, err := tmp.ReadAt(data, 0); err != nil {
+			return nil, err
+		}
+		return s.storeUpload(data)
+	}
+
+	if _, err := tmp.Seek(0, io.SeekStart); err != nil {
+		return nil, err
+	}
+	blobCID, _, err := cid.OfReader(tmp)
+	if err != nil {
+		return nil, err
+	}
+	if existing, err := getMeta(s.db, blobCID); err != nil {
+		return nil, err
+	} else if existing != nil {
+		return existing, nil // content-addressed: already stored
+	}
+
+	// http.DetectContentType and the ftyp sniffer both read only the first
+	// few hundred bytes, so a header slice classifies the file exactly as a
+	// full read would.
+	head := make([]byte, 512)
+	n, err := tmp.ReadAt(head, 0)
+	if err != nil && err != io.EOF {
+		return nil, err
+	}
+	m := Meta{
+		CID:       blobCID,
+		Size:      size,
+		Mime:      sniffMime(head[:n]),
+		CreatedAt: store.NowRFC3339(),
+	}
+	if err := s.store.PutFile(m.CID, tmp.Name(), m.Mime); err != nil {
+		return nil, err
+	}
+	if err := upsertMeta(s.db, &m); err != nil {
+		return nil, err
+	}
+	return &m, nil
+}
+
 // storeUpload derives metadata, writes the bytes to the store, generates a
-// thumbnail for large images, and records the metadata row.
+// thumbnail for large images, and records the metadata row. Callers holding
+// only a stream should use storeUploadFrom, which never buffers.
 func (s *Server) storeUpload(data []byte) (*Meta, error) {
 	if len(data) == 0 {
 		return nil, errors.New("empty upload")
@@ -236,10 +375,19 @@ func (s *Server) handleUploadForm(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleAdminUpload(w http.ResponseWriter, r *http.Request) {
-	if err := r.ParseMultipartForm(s.maxUpload); err != nil {
+	// The argument is how much of the form to keep on the heap, NOT the
+	// upload cap — passing maxUpload asked Go to hold a whole 100 MiB video
+	// in memory. Past uploadMemoryLimit the part spills to a temp file, and
+	// storeUploadFrom streams from there. The size cap is enforced below.
+	if err := r.ParseMultipartForm(uploadMemoryLimit); err != nil {
 		http.Redirect(w, r, "/upload?error=Upload+failed", http.StatusSeeOther)
 		return
 	}
+	defer func() {
+		if r.MultipartForm != nil {
+			_ = r.MultipartForm.RemoveAll()
+		}
+	}()
 	file, _, err := r.FormFile("file")
 	if err != nil {
 		http.Redirect(w, r, "/upload?error=No+file+selected", http.StatusSeeOther)
@@ -247,18 +395,7 @@ func (s *Server) handleAdminUpload(w http.ResponseWriter, r *http.Request) {
 	}
 	defer file.Close()
 
-	// Read one byte past the limit so an oversize file is detected and
-	// rejected rather than silently truncated into a corrupt blob.
-	data, err := io.ReadAll(io.LimitReader(file, s.maxUpload+1))
-	if err != nil {
-		http.Redirect(w, r, "/upload?error=Could+not+read+file", http.StatusSeeOther)
-		return
-	}
-	if int64(len(data)) > s.maxUpload {
-		http.Redirect(w, r, "/upload?error=File+too+large", http.StatusSeeOther)
-		return
-	}
-	if _, err := s.storeUpload(data); err != nil {
+	if _, err := s.storeUploadFrom(file); err != nil {
 		http.Redirect(w, r, "/upload?error="+url.QueryEscape(err.Error()), http.StatusSeeOther)
 		return
 	}
@@ -440,12 +577,7 @@ func (s *Server) handleAPIGetMeta(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) handleAPIUpload(w http.ResponseWriter, r *http.Request) {
 	r.Body = http.MaxBytesReader(w, r.Body, s.maxUpload)
-	data, err := io.ReadAll(r.Body)
-	if err != nil {
-		web.WriteError(w, http.StatusRequestEntityTooLarge, "upload too large")
-		return
-	}
-	m, err := s.storeUpload(data)
+	m, err := s.storeUploadFrom(r.Body)
 	if err != nil {
 		web.WriteError(w, http.StatusBadRequest, err.Error())
 		return
