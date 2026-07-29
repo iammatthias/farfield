@@ -443,15 +443,30 @@ td.nowrap, th.nowrap { white-space: nowrap; }
 }
 
 .ff-recipe-grid .ff-r-op { text-align: center; }
+.ff-recipe-grid .ff-r-lbl { display: block; }
+
+/* The duration is data, so it takes the mono face and recedes behind the
+   label it belongs to. */
+.ff-recipe-grid .ff-r-for {
+	display: block;
+	font-family: var(--font-mono); font-size: 0.86em; opacity: 0.5;
+	white-space: nowrap;
+}
 
 /* Rotation is what lets six or eight operations fit across a page, and what
    keeps the grid narrow enough to swipe rather than zoom. vertical-rl plus a
-   half-turn reads bottom-to-top, the way a spanning bracket should. */
+   half-turn reads bottom-to-top, the way a spanning bracket should.
+   In vertical writing the block axis runs horizontally, so the label and its
+   duration become two side-by-side columns rather than two stacked lines —
+   which is why the rotation heuristic measures the longer of the two rather
+   than their sum. */
 .ff-recipe-grid .ff-r-vert { padding: 0.55rem 0.3rem; }
-.ff-recipe-grid .ff-r-vert > span {
+.ff-recipe-grid .ff-r-vert .ff-r-lbl,
+.ff-recipe-grid .ff-r-vert .ff-r-for {
 	display: inline-block; white-space: nowrap;
 	writing-mode: vertical-rl; transform: rotate(180deg);
 }
+.ff-recipe-grid .ff-r-vert .ff-r-for { margin-right: 0.3em; }
 
 /* A filler cell drops its right border so the row runs into the bracket that
    claims it. That join is the whole visual argument of the format. */
