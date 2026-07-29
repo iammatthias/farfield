@@ -487,6 +487,11 @@ td.nowrap, th.nowrap { white-space: nowrap; }
 .ff-recipe-steps li::marker { font-variant-numeric: tabular-nums; opacity: 0.45; }
 /* The grid label repeated as the step's lead-in, so the two halves are legible
    as the same recipe. */
+.ff-recipe-steps .ff-r-for {
+	float: right; margin-left: 0.75rem;
+	font-family: var(--font-mono); font-size: 0.8rem; opacity: 0.45;
+	white-space: nowrap;
+}
 .ff-recipe-steps .ff-r-do { font-weight: 600; }
 .ff-recipe-steps .ff-r-do::after { content: " —"; font-weight: 400; opacity: 0.45; }
 

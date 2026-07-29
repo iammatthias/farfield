@@ -26,8 +26,10 @@ type Row struct {
 // Cell is one operation cell, or the empty filler that holds a row's place
 // under an operation that starts further right.
 type Cell struct {
-	Step     *Step
-	Text     string
+	Step *Step
+	Text string
+	// For is the operation's duration, shown under the label.
+	For      string
 	RowSpan  int
 	ColSpan  int
 	Vertical bool
@@ -155,6 +157,7 @@ func (r *Recipe) layoutRoot(root Step, stepAt, ingAt map[string]int) (Grid, erro
 				g.Rows[ri].Cells = append(g.Rows[ri].Cells, Cell{
 					Step:     st,
 					Text:     st.Do,
+					For:      st.For,
 					RowSpan:  span[st.ID],
 					ColSpan:  1,
 					Vertical: verticalFor(st, span[st.ID]),
@@ -183,9 +186,15 @@ func (r *Recipe) layoutRoot(root Step, stepAt, ingAt map[string]int) (Grid, erro
 // a grid carry six or eight operations without running off the page, but it
 // only pays when the cell is tall enough to hold the text and the text is
 // short enough to read.
+// The duration sits beside the label in a rotated cell, so it counts toward
+// how tall that cell has to be.
 func verticalFor(st *Step, rowSpan int) bool {
 	if st.Vertical != nil {
 		return *st.Vertical
 	}
-	return rowSpan >= 2 && len([]rune(strings.TrimSpace(st.Do))) <= autoVerticalMax
+	n := len([]rune(strings.TrimSpace(st.Do)))
+	if d := len([]rune(strings.TrimSpace(st.For))); d > n {
+		n = d
+	}
+	return rowSpan >= 2 && n <= autoVerticalMax
 }

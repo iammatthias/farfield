@@ -68,6 +68,10 @@ type Step struct {
 	// Detail is the full prose for the traditional numbered list. Empty falls
 	// back to Do.
 	Detail string `yaml:"detail,omitempty"`
+	// For is how long the operation takes — "20 min", "2–3 h", "overnight".
+	// It rides in the grid cell beneath the label, so the grid reads as a
+	// timeline, and repeats in the numbered list.
+	For string `yaml:"for,omitempty"`
 	// Phase groups numbered steps under a subheading ("Prep", "Grill").
 	Phase string `yaml:"phase,omitempty"`
 	// Title captions this step's grid. Only meaningful on a finishing step —

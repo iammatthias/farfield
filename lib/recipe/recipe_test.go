@@ -198,6 +198,73 @@ steps:
 	}
 }
 
+func TestDurations(t *testing.T) {
+	rec, err := Parse(`
+ingredients:
+  - {item: butter, amount: 3 Tbs.}
+  - {item: marshmallows, amount: 10 oz.}
+steps:
+  - {id: melt, in: [butter], do: melt, for: 2 min}
+  - {in: [melt, marshmallows], do: stir until melted, for: 3–4 min}
+`)
+	if err != nil {
+		t.Fatalf("parse: %v", err)
+	}
+	g, err := rec.Layout()
+	if err != nil {
+		t.Fatalf("layout: %v", err)
+	}
+	if got := g[0].Rows[0].Cells[0].For; got != "2 min" {
+		t.Errorf("cell duration = %q, want %q", got, "2 min")
+	}
+
+	html := string(Render(rec))
+	for _, want := range []string{
+		`class="ff-r-lbl">melt`,
+		`class="ff-r-for">2 min`,
+		`class="ff-r-for">3–4 min`,
+	} {
+		if !strings.Contains(html, want) {
+			t.Errorf("rendered HTML missing %q", want)
+		}
+	}
+	// The duration reaches the numbered list too, not only the grid.
+	if n := strings.Count(html, `>2 min<`); n != 2 {
+		t.Errorf("2 min appears %d times, want 2 (grid cell and method)", n)
+	}
+}
+
+func TestDurationCountsTowardRotation(t *testing.T) {
+	// A rotated cell puts the label and the duration side by side, so the
+	// cell's height is the longer of the two — not their sum. A short label
+	// with a short duration must still rotate.
+	rec, err := Parse(`
+ingredients: [{item: flour}, {item: water}]
+steps:
+  - {in: [flour, water], do: rest, for: overnight}
+`)
+	if err != nil {
+		t.Fatalf("parse: %v", err)
+	}
+	g, _ := rec.Layout()
+	if !g[0].Rows[0].Cells[0].Vertical {
+		t.Error("short label with a short duration should still rotate")
+	}
+
+	long, err := Parse(`
+ingredients: [{item: flour}, {item: water}]
+steps:
+  - {in: [flour, water], do: rest, for: "at least 12 hours, and up to 3 days in the fridge"}
+`)
+	if err != nil {
+		t.Fatalf("parse: %v", err)
+	}
+	lg, _ := long.Layout()
+	if lg[0].Rows[0].Cells[0].Vertical {
+		t.Error("an over-long duration should keep the cell horizontal")
+	}
+}
+
 func TestTwoWaysMakesTwoGrids(t *testing.T) {
 	rec, err := Parse(`
 ingredients:

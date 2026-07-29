@@ -137,14 +137,21 @@ func (rr *Renderer) grid(b *strings.Builder, g Grid) {
 			if c.ColSpan > 1 {
 				b.WriteString(` colspan="` + strconv.Itoa(c.ColSpan) + `"`)
 			}
-			switch {
-			case c.Gap:
+			if c.Gap {
 				b.WriteString(` class="ff-r-gap"></td>`)
-			case c.Vertical:
-				b.WriteString(` class="ff-r-op ff-r-vert"><span>` + esc(c.Text) + `</span></td>`)
-			default:
-				b.WriteString(` class="ff-r-op"><span>` + esc(c.Text) + `</span></td>`)
+				continue
 			}
+			cls := "ff-r-op"
+			if c.Vertical {
+				cls += " ff-r-vert"
+			}
+			// The label and the duration are separate spans in both
+			// orientations; rotated, they become two columns of the cell.
+			b.WriteString(` class="` + cls + `"><span class="ff-r-lbl">` + esc(c.Text) + `</span>`)
+			if c.For != "" {
+				b.WriteString(`<span class="ff-r-for">` + esc(c.For) + `</span>`)
+			}
+			b.WriteString(`</td>`)
 		}
 		b.WriteString(`</tr>`)
 	}
@@ -196,6 +203,9 @@ func (rr *Renderer) steps(b *strings.Builder, rec *Recipe) {
 			open = true
 		}
 		b.WriteString(`<li>`)
+		if st.For != "" {
+			b.WriteString(`<span class="ff-r-for">` + esc(st.For) + `</span>`)
+		}
 		switch {
 		case st.Detail == "":
 			b.WriteString(rr.prose(st.Do))
