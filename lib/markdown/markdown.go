@@ -173,7 +173,8 @@ func restoreEmbeds(s string, embeds []embedRef) string {
 // — which need mime-aware <img>/<video>/<audio> tags or spliced fragments
 // markdown cannot express — are substituted back into the output.
 func (r *Renderer) Render(ctx context.Context, body string) template.HTML {
-	src, embeds := r.prepass(body)
+	src, recipes := extractRecipes(body)
+	src, embeds := r.prepass(src)
 	md := mdSoft
 	if r.HardWraps {
 		md = mdHard
@@ -205,6 +206,12 @@ func (r *Renderer) Render(ctx context.Context, body string) template.HTML {
 			// A block embed gets unwrapped from the paragraph markdown put it in.
 			html = strings.ReplaceAll(html, "<p>"+p+"</p>", out)
 		}
+		html = strings.ReplaceAll(html, p, out)
+	}
+	for i, block := range recipes {
+		p := recipeTok(i)
+		out := renderRecipe(block)
+		html = strings.ReplaceAll(html, "<p>"+p+"</p>", out)
 		html = strings.ReplaceAll(html, p, out)
 	}
 	return template.HTML(html)

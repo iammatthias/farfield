@@ -205,6 +205,24 @@ rendering:
   fragment's `body` markdown in place of the whole image construct. The
   fragment itself contains `blob://` images.
 
+## Recipe blocks
+
+Entries in the `recipes` collection carry their structure in a fenced
+` ```recipe ` block of YAML inside the body. One block renders two views of the
+same recipe — the Cooking-for-Engineers grid and a traditional ingredients
+table with numbered steps — so the two can never disagree. A body may hold
+several blocks, and everything around them is ordinary markdown.
+
+Lift the blocks out **before** the markdown renderer sees the body, the same
+way `blob://` and `series://` are resolved; otherwise they render as code.
+
+**[docs/RECIPES.md](RECIPES.md)** is the full specification: the YAML schema,
+the validation rules, the grid layout algorithm, a drop-in TypeScript
+implementation, and the markup/CSS contract. `lib/recipe` is the Go
+implementation both the admin preview and that document describe; its layout is
+pinned by test against the published Cooking for Engineers table, and the
+TypeScript in the spec is diffed against it across the whole recipe corpus.
+
 ## Client module
 
 Drop this into the Astro project as `src/lib/farfield.ts`:

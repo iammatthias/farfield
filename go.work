@@ -23,6 +23,7 @@ use (
 	./lib/markdown
 	./lib/pulse
 	./lib/qrenc
+	./lib/recipe
 	./lib/store
 	./lib/theme
 	./lib/web

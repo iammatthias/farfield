@@ -357,6 +357,170 @@ td.nowrap, th.nowrap { white-space: nowrap; }
 	font-family: var(--font-mono); font-size: 0.8rem; opacity: 0.5;
 }
 
+/* ── recipes ───────────────────────────────────────────────────────────── */
+/* The tabular format from Cooking for Engineers: ingredients down the left,
+   operations bracketing them rightward, each spanning the rows it absorbs.
+   Read a row left to right and you see everything that happens to that
+   ingredient; read a column top to bottom and you see one operation's input.
+
+   The left column IS the ingredient list — amount, item and note — so nothing
+   repeats it underneath. It pins to the left edge while the operations scroll,
+   because the grid is wider than a phone and a row must never lose its label. */
+
+.ff-recipe { margin: 1.75rem 0; }
+
+.ff-recipe-meta {
+	display: flex; flex-wrap: wrap; gap: 0.3rem 1.5rem;
+	margin: 0 0 0.9rem; padding: 0;
+}
+.ff-recipe-meta div { display: flex; gap: 0.45rem; align-items: baseline; }
+.ff-recipe-meta dt {
+	font-size: 0.68rem; text-transform: uppercase; letter-spacing: 0.07em;
+	opacity: 0.5;
+}
+.ff-recipe-meta dd { margin: 0; font-size: 0.88rem; }
+
+.ff-recipe-grid-wrap { margin: 0 0 1.5rem; }
+.ff-recipe-grid-wrap + .ff-recipe-grid-wrap { margin-top: -0.25rem; }
+.ff-recipe-grid-wrap figcaption {
+	font-size: 0.7rem; font-weight: 500; letter-spacing: 0.08em;
+	text-transform: uppercase; color: var(--accent); margin-bottom: 0.45rem;
+}
+
+.ff-recipe-scroll {
+	overflow-x: auto;
+	-webkit-overflow-scrolling: touch;
+	overscroll-behavior-x: contain;
+	scrollbar-width: thin;
+	border-radius: var(--r-s);
+}
+.ff-recipe-scroll:focus-visible { outline: none; box-shadow: var(--ring); }
+
+/* display:table and width:auto both fight .prose table, which is the more
+   specific selector — hence the .ff-recipe prefix. width:auto lets the grid
+   shrink to its content instead of stretching to the column. Never
+   overflow:hidden here: it clips the rotated labels. */
+.ff-recipe .ff-recipe-grid {
+	display: table; width: auto; border-collapse: collapse;
+	font-size: 0.78rem; line-height: 1.25;
+	background: var(--panel);
+	border: 1px solid var(--line-strong);
+}
+.ff-recipe-grid th, .ff-recipe-grid td {
+	border: 0;
+	border-right: 1px solid var(--hairline);
+	border-bottom: 1px solid var(--hairline);
+	padding: 0.42rem 0.55rem;
+	text-align: left; font-weight: 400; vertical-align: middle;
+}
+.ff-recipe-grid tr:last-child th, .ff-recipe-grid tr:last-child td {
+	border-bottom: 0;
+}
+
+/* The ingredient column. A sticky cell in a collapsed table loses its border —
+   the border belongs to the table, not the cell — so the right edge and the
+   depth cue under the scrolling operations are drawn with shadows instead. */
+.ff-recipe-grid .ff-r-ing {
+	position: sticky; left: 0; z-index: 2;
+	background: var(--panel);
+	min-width: 9rem; max-width: 17rem;
+	padding: 0.45rem 0.7rem;
+	box-shadow: inset -1px 0 0 var(--line-strong),
+		8px 0 10px -8px color-mix(in srgb, var(--ink) 30%, transparent);
+}
+.ff-recipe-grid .ff-r-line { display: block; text-wrap: pretty; }
+.ff-recipe-grid .ff-r-amt {
+	font-family: var(--font-mono); font-size: 0.9em; opacity: 0.6;
+	margin-right: 0.4em;
+}
+.ff-recipe-grid .ff-r-note {
+	display: block; font-size: 0.88em; opacity: 0.5; margin-top: 0.1rem;
+}
+.ff-recipe-grid .ff-r-group {
+	display: block; font-size: 0.62rem; font-weight: 500;
+	text-transform: uppercase; letter-spacing: 0.09em;
+	color: var(--accent); margin-bottom: 0.25rem;
+}
+
+.ff-recipe-grid .ff-r-op { text-align: center; }
+
+/* Rotation is what lets six or eight operations fit across a page, and what
+   keeps the grid narrow enough to swipe rather than zoom. vertical-rl plus a
+   half-turn reads bottom-to-top, the way a spanning bracket should. */
+.ff-recipe-grid .ff-r-vert { padding: 0.55rem 0.3rem; }
+.ff-recipe-grid .ff-r-vert > span {
+	display: inline-block; white-space: nowrap;
+	writing-mode: vertical-rl; transform: rotate(180deg);
+}
+
+/* A filler cell drops its right border so the row runs into the bracket that
+   claims it. That join is the whole visual argument of the format. */
+.ff-recipe-grid .ff-r-gap { border-right: 0; }
+
+/* Fallback list for a recipe whose shape no table can draw. */
+.ff-recipe-ingredients { list-style: none; padding: 0; margin: 0 0 1.5rem; }
+.ff-recipe-ingredients li {
+	padding: 0.35rem 0; border-bottom: 1px solid var(--hairline);
+}
+.ff-recipe-ingredients .ff-r-amt {
+	font-family: var(--font-mono); font-size: 0.9em; opacity: 0.6;
+	margin-right: 0.4em;
+}
+.ff-recipe-ingredients .ff-r-note { font-size: 0.88em; opacity: 0.5; }
+.ff-recipe-ingredients .ff-r-grouprow {
+	font-size: 0.65rem; font-weight: 500; text-transform: uppercase;
+	letter-spacing: 0.09em; color: var(--accent);
+	padding-top: 0.9rem; border-bottom: 0;
+}
+
+.ff-recipe-h {
+	font-size: 0.7rem; font-weight: 500; letter-spacing: 0.08em;
+	text-transform: uppercase; opacity: 0.5;
+	margin: 1.75rem 0 0.7rem;
+}
+.ff-recipe-phase {
+	font-size: 0.92rem; font-weight: 600; margin: 1.2rem 0 0.5rem;
+}
+
+.ff-recipe-steps { padding-left: 1.35rem; }
+.ff-recipe-steps li { margin-top: 0.55rem; text-wrap: pretty; }
+.ff-recipe-steps li::marker { font-variant-numeric: tabular-nums; opacity: 0.45; }
+/* The grid label repeated as the step's lead-in, so the two halves are legible
+   as the same recipe. */
+.ff-recipe-steps .ff-r-do { font-weight: 600; }
+.ff-recipe-steps .ff-r-do::after { content: " —"; font-weight: 400; opacity: 0.45; }
+
+.ff-recipe-notes { margin-top: 1.2rem; font-size: 0.92rem; opacity: 0.8; }
+.ff-recipe-source { margin-top: 1.2rem; font-size: 0.82rem; opacity: 0.65; }
+
+.ff-recipe-error {
+	border: 1px solid var(--accent-line); background: var(--accent-soft);
+	border-radius: var(--r-s); padding: 0.75rem 0.9rem; margin: 1.5rem 0;
+}
+.ff-recipe-error p {
+	margin: 0 0 0.5rem; color: var(--accent);
+	font-family: var(--font-mono); font-size: 0.82rem;
+}
+.ff-recipe-error pre { margin: 0; font-size: 0.78rem; overflow-x: auto; }
+
+@media (max-width: 40rem) {
+	/* Tighten the grid rather than reflowing it: the rotated operations are
+	   already narrow, so what buys the most room is a smaller ingredient
+	   column and less padding. The column stays pinned, so the operations
+	   scroll past a label that is always on screen. */
+	.ff-recipe .ff-recipe-grid { font-size: 0.73rem; }
+	.ff-recipe-grid .ff-r-ing {
+		min-width: 7rem; max-width: 11rem; padding: 0.4rem 0.5rem;
+	}
+	.ff-recipe-grid th, .ff-recipe-grid td { padding: 0.35rem 0.4rem; }
+	.ff-recipe-grid .ff-r-vert { padding: 0.45rem 0.25rem; }
+	.ff-recipe-steps { padding-left: 1.15rem; }
+}
+
+@media (prefers-reduced-motion: no-preference) {
+	.ff-recipe-scroll { scroll-behavior: smooth; }
+}
+
 /* ── document forms ────────────────────────────────────────────────────── */
 
 /* The entry title as a document headline, not a boxed control. */
