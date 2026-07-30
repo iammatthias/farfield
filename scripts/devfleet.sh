@@ -40,6 +40,8 @@ start() {
       "${envname}_DB_PATH=$DATA/$app.sqlite" \
       "${envname}_API_KEY=dev-$app-key" \
       BLOBS_BACKEND=local BLOBS_DIR="$DATA/blobs-data" \
+      SIDELOAD_DIR="$DATA/sideload-blobs" LIBRARY_TUS_DIR="$DATA/tus-staging" \
+      BLOBS_SPOOL_DIR="$DATA/blob-spool" \
       BLOBS_URL=http://127.0.0.1:8789 BLOBS_API_KEY=dev-blobs-key \
       BLOBS_PUBLIC_URL=http://127.0.0.1:8789 \
       CONTENT_URL=http://127.0.0.1:8787 CONTENT_API_KEY=dev-content-key \

@@ -177,11 +177,16 @@
       font: 0.74rem/1.4 var(--font-mono); opacity: 0.65;
     }
     .vcard .vactions { display: flex; gap: 1rem; margin-top: 0.5rem; }
+    /* Ink for the ordinary actions, accent for the one that destroys a build.
+       Painting all three red flattened the hierarchy and left "delete"
+       indistinguishable from "install". */
     .vcard .vactions a, .vcard .vactions button {
-      font: 0.78rem/1.3 var(--font-mono); color: var(--accent);
+      font: 0.78rem/1.3 var(--font-mono); color: var(--ink);
       text-decoration: underline; text-underline-offset: 0.2em;
       border: 0; background: transparent; padding: 0; cursor: pointer;
     }
+    .vcard .vactions a:hover { color: var(--accent); }
+    .vcard .vactions button[type="submit"] { color: var(--accent); }
     .vcard .vactions form { margin: 0; display: inline; }
     .vcard .changelog { margin-top: 0.6rem; }
 

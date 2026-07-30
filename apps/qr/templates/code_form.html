@@ -1,7 +1,7 @@
 {{define "title"}}{{if .IsNew}}New code{{else}}Edit code{{end}} · farfield qr{{end}}
 {{define "content"}}
   {{template "topbar" .}}
-  <h2 style="font-size:1rem">{{if .IsNew}}New code{{else}}Edit code · {{.Code.ID}}{{end}}</h2>
+  <h2 class="page-title">{{if .IsNew}}New code{{else}}Edit code · {{.Code.ID}}{{end}}</h2>
   {{with .Error}}<p class="error">{{.}}</p>{{end}}
 
   <form method="post" action="{{.Action}}">

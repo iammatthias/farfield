@@ -1,7 +1,7 @@
 {{define "title"}}New key · farfield keys{{end}}
 {{define "content"}}
   {{template "topbar" .}}
-  <h2>Issue a key</h2>
+  <h2 class="page-title">Issue a key</h2>
   {{with .Error}}<p class="error">{{.}}</p>{{end}}
   <form method="post" action="/keys">
     <div class="field">

@@ -25,9 +25,9 @@
     .queue-item .state.err { color: var(--accent); opacity: 1; }
   </style>
 
-  <section class="prose">
-    <p><a href="/">← Books</a></p>
-    <h1>Upload EPUBs</h1>
+  {{template "topbar" .}}
+  <section class="measure">
+    <h2 class="page-title">Upload EPUBs</h2>
     {{with .Error}}<p class="error">{{.}}</p>{{end}}
     <form id="up" method="post" action="/upload" enctype="multipart/form-data">
       <div class="field">

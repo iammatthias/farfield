@@ -187,6 +187,15 @@ hr { border: 0; border-top: 1px solid var(--hairline); margin-block: 1.6rem; }
 }
 .section-head h2 { font-size: 0.95rem; font-weight: 600; }
 
+/* The heading on a form or sub-page — "New code", "Issue a key". Four
+   templates each hand-wrote `<h2 style="font-size:1rem">` and a fifth left the
+   h2 at its display size, so the same heading arrived a third larger on some
+   pages than others. One class, one size, everywhere. */
+.page-title {
+	font-size: 1rem; font-weight: 600; line-height: 1.3;
+	margin-bottom: 1rem;
+}
+
 /* filter bar — a control row under a section head */
 .filter-bar {
 	display: flex; flex-wrap: wrap; align-items: baseline;
@@ -244,8 +253,33 @@ input:focus, textarea:focus, select:focus {
 }
 textarea { min-height: 8rem; resize: vertical; line-height: 1.55;
 	font-family: var(--font-mono); font-size: 0.85rem; }
-input[type="checkbox"], input[type="file"] { width: auto; box-shadow: none; }
-input[type="checkbox"] { accent-color: var(--accent); width: 1rem; height: 1rem; }
+input[type="checkbox"] { width: auto; box-shadow: none;
+	accent-color: var(--accent); width: 1rem; height: 1rem; }
+
+/* The file picker was opted out of the input box and never given anything in
+   its place, so it fell back to the raw browser widget beside themed fields.
+   The dashed well reads as a drop target; the button matches a real button. */
+input[type="file"] {
+	width: 100%; box-shadow: none;
+	padding: 0.55rem 0.7rem;
+	background: var(--wash);
+	border: 1px dashed var(--line-strong);
+	border-radius: var(--r-s);
+	font-size: 0.9rem; cursor: pointer;
+}
+input[type="file"]::file-selector-button {
+	margin-right: 0.8rem; padding: 0.3rem 0.75rem;
+	font: inherit; font-size: 0.85rem; font-weight: 500;
+	background: var(--panel); color: var(--ink);
+	border: 1px solid var(--hairline); border-radius: var(--r-s);
+	cursor: pointer;
+	transition: border-color 0.15s ease-out, background 0.15s ease-out;
+}
+input[type="file"]::file-selector-button:hover {
+	background: var(--surface); border-color: var(--line-strong);
+}
+input[type="file"]:focus { outline: none; border-color: var(--line-strong);
+	box-shadow: var(--ring); }
 
 /* iOS zooms the page when a focused control renders under 16px — keep every
    form control at native size on touch-scale screens. !important so app-local
@@ -627,9 +661,37 @@ dialog.doc-keys::backdrop { background: color-mix(in srgb, var(--ink) 25%, trans
 }
 
 /* login — the shared front door, one narrow plate centered on the page.
-   Every app rendered this with the same inline styles; it lives here now. */
-.login { max-width: 24rem; margin: 2rem auto; }
+   Every app rendered this with the same inline styles; it lives here now.
+
+   It is the only thing on the page, so it centers on both axes. Pinned to the
+   top it left most of the viewport empty below a very small form. The
+   min-height is capped in rem so a tall desktop window does not push it into
+   the middle distance, and it collapses on short screens rather than
+   scrolling. */
+.login {
+	max-width: 22rem; margin-inline: auto;
+	min-height: min(68vh, 30rem);
+	display: grid; align-content: center;
+}
 .login h1 { font-size: 1.1rem; }
+.login .field { margin-top: 1.2rem; }
+.login .actions { margin-top: 1.1rem; }
+
+/* standalone — a public page with no masthead and nowhere to navigate: an
+   install link, a registration form, an expired-link notice. Four of these
+   hand-wrote an inline wrapper with four different widths and two different
+   top margins; this is the one column they all wanted.
+   .notice is the terminal variant — a short message with nothing to do, so it
+   centers on both axes rather than hanging from the top. */
+.standalone { max-width: 30rem; margin: 2.5rem auto; }
+.standalone.wide { max-width: 34rem; }
+.standalone.notice {
+	max-width: 26rem; text-align: center;
+	min-height: min(60vh, 24rem);
+	display: grid; align-content: center;
+}
+.standalone > .label { margin-bottom: 0.5rem; }
+.standalone h1 { font-size: 1.35rem; }
 
 /* login mark — the app's tile, same mark as its favicon */
 .login-mark {
