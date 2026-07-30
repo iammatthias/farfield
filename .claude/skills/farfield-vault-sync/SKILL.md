@@ -55,11 +55,10 @@ CONTENT_API_KEY=<write key> \
 /tmp/ff-content sync-vault --dry-run "<vault>/content"   # always dry-run first
 ```
 
-The write key lives in the homelab `.env` — fetch it into the environment
-without printing it:
-`KEY=$(ssh iam@homelab.local 'grep "^CONTENT_API_KEY=" ~/projects/farfield/.env | cut -d= -f2')`.
-The client sends a browser-shaped User-Agent (the Cloudflare edge rejects
-bot agents).
+The write key lives in the deployment `.env`, never in this repo. Read it into
+the environment without printing it — the `farfield-deploy` skill (local, not
+committed) has the host and path. The client sends a browser-shaped
+User-Agent, because the Cloudflare edge rejects bot agents.
 
 ## Media rules (history that bites)
 
