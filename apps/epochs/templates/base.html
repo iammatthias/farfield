@@ -57,7 +57,14 @@
   <meta property="og:site_name" content="Epochs">
   <meta property="og:title" content="Epochs">
   <meta property="og:description" content="A wayfinding system for Good Ancestors">
-  <meta name="twitter:card" content="summary_large_image">
+  {{/*
+    The capture said summary_large_image, which is only correct alongside the
+    image it declared — see the note below. With no image, that card type asks
+    every platform for a large preview it cannot fill; "summary" is what the
+    tags we actually have describe. Restore summary_large_image if the art is
+    ever recovered.
+  */}}
+  <meta name="twitter:card" content="summary">
   <meta name="twitter:site" content="@cosmiccomlab">
   <meta name="twitter:title" content="Epochs">
   <meta name="twitter:description" content="A wayfinding system for Good Ancestors">

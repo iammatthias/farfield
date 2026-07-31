@@ -84,6 +84,17 @@ type Renderer struct {
 	App  string
 	Mark string
 
+	// Description is the app's meta description and og:description — one
+	// sentence, plain text. Left empty the social tags are omitted entirely
+	// rather than emitted blank, which renders as an empty card when a link
+	// is shared. Only public apps need it; the gated ones are never unfurled.
+	Description string
+
+	// PublicURL is where this deployment is reachable ("https://x.farfield.systems"),
+	// used for og:url and rel=canonical. Empty omits both: a canonical
+	// pointing at the wrong origin is worse than none.
+	PublicURL string
+
 	// Nav is the masthead's link list. Apps with a session should end it with
 	// a logout link; apps with no masthead can leave it nil.
 	Nav []NavItem
@@ -149,6 +160,14 @@ func (rd *Renderer) Render(w http.ResponseWriter, page string, data map[string]a
 	data["App"] = rd.App
 	data["Mark"] = rd.mark()
 	data["Favicon"] = rd.favicon()
+	// Set only when the handler has not, so a page can carry its own
+	// description without the shell overwriting it.
+	if _, set := data["Description"]; !set {
+		data["Description"] = rd.Description
+	}
+	if _, set := data["PublicURL"]; !set {
+		data["PublicURL"] = rd.PublicURL
+	}
 	if _, set := data["Nav"]; !set {
 		data["Nav"] = rd.Nav
 	}

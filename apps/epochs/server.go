@@ -151,6 +151,8 @@ func (s *Server) Routes() http.Handler {
 	mux.HandleFunc("GET /{$}", s.index)
 	mux.HandleFunc("GET /api/current", s.current)
 	mux.HandleFunc("GET /status", s.status)
+	mux.HandleFunc("GET /robots.txt", web.RobotsHandler("/sitemap.xml"))
+	mux.HandleFunc("GET /sitemap.xml", web.SitemapHandler("/"))
 	if s.fontsDir != "" {
 		mux.Handle("GET /fonts/", http.StripPrefix("/fonts/", s.fonts()))
 	}

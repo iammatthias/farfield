@@ -9,6 +9,7 @@ import (
 	"log/slog"
 	"net/http"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/iammatthias/farfield/lib/pulse"
@@ -99,7 +100,12 @@ func run(host, port string) error {
 		db:      db,
 		fetcher: newFetcher(store.Env("NASA_API_KEY", "DEMO_KEY")),
 		rd: &web.Renderer{Templates: tmpl, AssetVer: theme.Version, Funcs: templateFuncs,
-			App: "daily", Mark: "da"},
+			App: "daily", Mark: "da",
+			// daily serves public HTML, so its links get shared — the shell
+			// turns these into the description and og tags.
+			Description: "A hub of daily artifacts, beginning with NASA's Astronomy " +
+				"Picture of the Day — cached so an upstream outage never breaks the archive.",
+			PublicURL: strings.TrimSuffix(store.Env("DAILY_PUBLIC_URL", "https://daily.farfield.systems"), "/")},
 	}
 
 	// Backfill the whole photo archive — Jan 1 through today — in the background so
@@ -126,6 +132,12 @@ func (s *Server) routes() http.Handler {
 	// (TestHubRouting pins this down). Non-date strays 404 in the handler.
 	mux.HandleFunc("GET /{$}", s.handleHubToday)
 	mux.HandleFunc("GET /{date}", s.handleHubDay)
+
+	// Crawler metadata. The sitemap names the stable artifact pages, not the
+	// per-date URLs — those are unbounded and a crawler reaches them from the
+	// archive anyway.
+	mux.HandleFunc("GET /robots.txt", web.RobotsHandler("/sitemap.xml"))
+	mux.HandleFunc("GET /sitemap.xml", web.SitemapHandler("/", "/photo", "/photo/archive"))
 
 	// Legacy paths from when the photo was the whole app. They redirect
 	// permanently to the /photo artifact.

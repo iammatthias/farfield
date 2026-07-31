@@ -46,6 +46,10 @@ func main() {
 			OK      bool   `json:"ok"`
 		}{Service: "bard", OK: true})
 	})
+	// Ahead of the file server: a single-page site still needs its own robots
+	// per hostname, and these are more specific than the "/" catch-all.
+	mux.HandleFunc("GET /robots.txt", web.RobotsHandler("/sitemap.xml"))
+	mux.HandleFunc("GET /sitemap.xml", web.SitemapHandler("/"))
 	mux.Handle("/", cacheControl(http.FileServerFS(site)))
 
 	// Bard is otherwise database-free; this SQLite file exists purely so the

@@ -24,6 +24,24 @@
   <meta name="theme-color" content="#fcfbf8" media="(prefers-color-scheme: light)">
   <meta name="theme-color" content="#181613" media="(prefers-color-scheme: dark)">
   {{.Favicon}}
+  {{/* Social and search metadata. Everything here is opt-in: an app supplies
+       Renderer.Description (and PublicURL for a public one) and its links
+       unfurl with a real title and summary instead of a bare URL. Gated apps
+       set neither and emit nothing, which is correct — they are never shared.
+
+       og:title is its own block rather than a reuse of "title": html/template
+       refuses a template used in two escaping contexts, and "title" already
+       renders inside <title>. */}}
+  {{block "meta" .}}{{if .Description}}
+  <meta name="description" content="{{.Description}}">
+  <meta property="og:type" content="website">
+  <meta property="og:site_name" content="farfield">
+  <meta property="og:title" content="{{block "og_title" .}}{{.App}}{{end}}">
+  <meta property="og:description" content="{{.Description}}">
+  <meta name="twitter:card" content="summary">
+  {{if .PublicURL}}<meta property="og:url" content="{{.PublicURL}}/">
+  <link rel="canonical" href="{{.PublicURL}}/">{{end}}
+  {{end}}{{end}}
   <link rel="stylesheet" href="/static/styles.css?v={{.AssetVer}}">
   {{/* "styles" is the app's own CSS, from its base.html; "head" is a
        per-page slot for scripts or one-page styles. */}}

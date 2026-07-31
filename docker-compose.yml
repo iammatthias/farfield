@@ -30,6 +30,16 @@ x-defaults: &defaults
     - ALL
   security_opt:
     - no-new-privileges:true
+  # Resource ceilings, not reservations — unused headroom stays free for the
+  # host. Measured 2026-07-31: every app idles at 14-22 MiB, so 512m is ~25x
+  # real usage. The point is not to run apps close to a limit, it is that a
+  # leak or a runaway request in one service cannot take the other fifteen
+  # down with it. blobs and library override this below; they stream uploads.
+  mem_limit: 512m
+  # A quarter of the 16-core host. Enough that a single app can still burst,
+  # bounded enough that it cannot starve the rest or the reverse proxy.
+  cpus: 4.0
+  pids_limit: 512
   logging:
     driver: json-file
     options:
@@ -49,6 +59,10 @@ services:
       context: .
       args: { APP: blobs }
     image: farfield-blobs
+    # Streams uploads of up to ~100 MiB and spools them to disk rather than
+    # memory, but gzip and hashing buffers make the peak lumpier than an
+    # idle app's. Double the fleet ceiling rather than tune it precisely.
+    mem_limit: 1g
     ports:
       - "${FARFIELD_BIND_IP:-127.0.0.1}:${BLOBS_PORT:-8789}:8789"
     environment:
@@ -84,6 +98,9 @@ services:
       context: .
       args: { APP: library }
     image: farfield-library
+    # LIBRARY_MAX_UPLOAD is 400 MiB and tus reassembles chunks on disk; same
+    # reasoning as blobs.
+    mem_limit: 1g
     ports:
       - "${FARFIELD_BIND_IP:-127.0.0.1}:${LIBRARY_PORT:-8797}:8797"
     environment:

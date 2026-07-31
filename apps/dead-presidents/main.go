@@ -66,6 +66,10 @@ func main() {
 	// dead-presidents inherits the canonical stylesheet instead of a local copy
 	// that drifts.
 	mux.HandleFunc("GET /static/styles.css", theme.CSSHandler())
+	// Ahead of the file server: a single-page site still needs its own robots
+	// per hostname, and these are more specific than the "/" catch-all.
+	mux.HandleFunc("GET /robots.txt", web.RobotsHandler("/sitemap.xml"))
+	mux.HandleFunc("GET /sitemap.xml", web.SitemapHandler("/"))
 	mux.Handle("/", cacheControl(http.FileServerFS(site)))
 
 	// Dead-presidents is otherwise database-free; this SQLite file exists

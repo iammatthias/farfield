@@ -1,6 +1,10 @@
 {{/* daily: the shared layout supplies the shell and masthead;
     only this app's own styles and partials live here. */}}
 
+{{/* The og:title for a shared link. Pages set "title" per view; this stays
+    the stable name of the app, since a card titled "2026-07-31" says nothing. */}}
+{{define "og_title"}}farfield · daily{{end}}
+
 {{define "styles"}}
   <style>
     /* photo — a single-plate viewer, one image at a time */

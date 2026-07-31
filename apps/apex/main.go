@@ -56,6 +56,20 @@ var docPages = []doc{
 	{"skills", "skills", "Skills", "Skills — Farfield Docs"},
 }
 
+// sitemapPaths is the landing page plus every docs page, in registry order.
+// The "index" entry is the docs root itself, already listed as /docs/, and the
+// legacyDocs redirects are left out — a sitemap should name canonical URLs.
+func sitemapPaths() []string {
+	paths := []string{"/", "/docs/"}
+	for _, d := range docPages {
+		if d.Key == "index" {
+			continue
+		}
+		paths = append(paths, "/docs/"+d.Key)
+	}
+	return paths
+}
+
 // legacyDocs maps renamed docs pages to their current homes — old URLs keep
 // working with a permanent redirect.
 var legacyDocs = map[string]string{
@@ -65,7 +79,11 @@ var legacyDocs = map[string]string{
 // pageData is the template context for a rendered docs page. AssetVer
 // fingerprints the shared theme stylesheet so it can cache as immutable.
 type pageData struct {
-	Title    string
+	Title string
+	// Label is the short page name ("Epochs") without the "— Farfield Docs"
+	// suffix Title carries, so the meta description can name the page without
+	// repeating the title back at itself.
+	Label    string
 	Active   string
 	Nav      []doc
 	AssetVer string
@@ -142,7 +160,7 @@ func renderDocs() (map[string]page, error) {
 		}
 		var buf bytes.Buffer
 		if err := t.ExecuteTemplate(&buf, "layout",
-			pageData{Title: d.Title, Active: d.Key, Nav: docPages, AssetVer: theme.Version}); err != nil {
+			pageData{Title: d.Title, Label: d.Label, Active: d.Key, Nav: docPages, AssetVer: theme.Version}); err != nil {
 			return nil, err
 		}
 		body := buf.Bytes()
@@ -197,6 +215,12 @@ func routes() (http.Handler, error) {
 	mux.HandleFunc("GET /status", func(w http.ResponseWriter, r *http.Request) {
 		web.WriteJSON(w, http.StatusOK, map[string]any{"service": "apex", "ok": true})
 	})
+
+	// Crawlers fetch these per hostname. apex is the only farfield host with
+	// more than one page, so its sitemap enumerates the docs registry —
+	// nothing to keep in sync by hand.
+	mux.HandleFunc("GET /robots.txt", web.RobotsHandler("/sitemap.xml"))
+	mux.HandleFunc("GET /sitemap.xml", web.SitemapHandler(sitemapPaths()...))
 
 	// Docs: /docs/ is the index; /docs/<page> serves a pre-rendered page; the
 	// legacy .html forms 301 to the canonical extensionless URL; other
