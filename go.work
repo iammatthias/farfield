@@ -9,6 +9,7 @@ use (
 	./apps/content
 	./apps/daily
 	./apps/dead-presidents
+	./apps/epochs
 	./apps/feed
 	./apps/keys
 	./apps/library
