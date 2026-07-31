@@ -234,30 +234,6 @@ services:
     volumes:
       - ./data:/data
 
-  epochs:
-    <<: *defaults
-    build:
-      context: .
-      args: { APP: epochs }
-    image: farfield-epochs
-    ports:
-      - "${FARFIELD_BIND_IP:-127.0.0.1}:${EPOCHS_PORT:-8802}:8802"
-    environment:
-      - HOST=0.0.0.0
-      - EPOCHS_PORT=8802
-      - EPOCHS_DB_PATH=/data/epochs.sqlite
-      # Comma-separated JSON-RPC endpoints, tried in order. The built-in
-      # defaults are public and rate-limited; set your own provider here.
-      - EPOCHS_RPC_URL=${EPOCHS_RPC_URL:-}
-      - EPOCHS_POLL_INTERVAL=${EPOCHS_POLL_INTERVAL:-12s}
-      # Where this deployment is reachable — canonical and og:url.
-      - EPOCHS_PUBLIC_URL=${EPOCHS_PUBLIC_URL:-https://epochs.farfield.systems}
-      # Optional: a directory holding the original New Spirit / Söhne Mono
-      # woff2 files. Unset, the page uses system serif and mono.
-      - EPOCHS_FONTS_DIR=${EPOCHS_FONTS_DIR:-}
-    volumes:
-      - ./data:/data
-
   pulse:
     <<: *defaults
     build:

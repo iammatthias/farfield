@@ -50,7 +50,6 @@ var docPages = []doc{
 	{"keys", "keys", "Keys", "Keys — Farfield Docs"},
 	{"sideload", "sideload", "Sideload", "Sideload — Farfield Docs"},
 	{"bard", "bard", "Bard", "Bard — Farfield Docs"},
-	{"epochs", "epochs", "Epochs", "Epochs — Farfield Docs"},
 	{"dead-presidents", "dead-presidents", "Dead Presidents", "Dead Presidents — Farfield Docs"},
 	{"backup", "backup", "Backup", "Backup — Farfield Docs"},
 	{"skills", "skills", "Skills", "Skills — Farfield Docs"},

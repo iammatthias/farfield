@@ -10,11 +10,11 @@ import (
 
 func TestOriginUsesForwardedProtoFromTrustedPeer(t *testing.T) {
 	r := httptest.NewRequest("GET", "/robots.txt", nil)
-	r.Host = "epochs.farfield.systems"
+	r.Host = "daily.farfield.systems"
 	r.RemoteAddr = "172.17.0.1:5555" // the docker bridge — private, trusted
 	r.Header.Set("X-Forwarded-Proto", "https")
 
-	if got, want := Origin(r), "https://epochs.farfield.systems"; got != want {
+	if got, want := Origin(r), "https://daily.farfield.systems"; got != want {
 		t.Fatalf("Origin = %q, want %q", got, want)
 	}
 }
@@ -23,11 +23,11 @@ func TestOriginUsesForwardedProtoFromTrustedPeer(t *testing.T) {
 // believed from a peer that reached the app directly.
 func TestOriginIgnoresForwardedProtoFromUntrustedPeer(t *testing.T) {
 	r := httptest.NewRequest("GET", "/robots.txt", nil)
-	r.Host = "epochs.farfield.systems"
+	r.Host = "daily.farfield.systems"
 	r.RemoteAddr = "203.0.113.9:5555" // public address, not a proxy we trust
 	r.Header.Set("X-Forwarded-Proto", "https")
 
-	if got, want := Origin(r), "http://epochs.farfield.systems"; got != want {
+	if got, want := Origin(r), "http://daily.farfield.systems"; got != want {
 		t.Fatalf("Origin = %q, want %q — a public peer must not set the scheme", got, want)
 	}
 }
@@ -87,13 +87,13 @@ func TestSitemapHandlerEmitsAbsoluteURLs(t *testing.T) {
 	r.RemoteAddr = "172.17.0.1:5555"
 	r.Header.Set("X-Forwarded-Proto", "https")
 
-	SitemapHandler("/", "/docs/", "/docs/epochs")(w, r)
+	SitemapHandler("/", "/docs/", "/docs/daily")(w, r)
 
 	body := w.Body.String()
 	for _, want := range []string{
 		"<loc>https://farfield.systems/</loc>",
 		"<loc>https://farfield.systems/docs/</loc>",
-		"<loc>https://farfield.systems/docs/epochs</loc>",
+		"<loc>https://farfield.systems/docs/daily</loc>",
 	} {
 		if !strings.Contains(body, want) {
 			t.Errorf("sitemap missing %q:\n%s", want, body)
