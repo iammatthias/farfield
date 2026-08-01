@@ -47,7 +47,6 @@ focus, selection, live badges — is cobalt.
 | `--accent-soft` / `--accent-line` | accent 9% / 32% | Tinted fills / accent borders |
 | `--alarm-soft` / `--alarm-line` | alarm 9% / 34% | Error fills / error borders |
 | `--ring` | accent 16% ×3px | Input focus ring |
-| `--laid` / `--laid-fine` | ink 3.5% / 1.8% | The paper — chain lines every 30px, laid lines every 3px, on `body` only |
 | `--shadow-s` / `--shadow-m` | faint, ink-tinted | Panel depth / modals & hover lift |
 | `--r-s` / `--r-m` | `3px` / `5px` | Controls / panels & cards |
 
@@ -56,9 +55,12 @@ carry a little more weight than in v2. Depth comes from panel-on-ground plus a
 whisper of shadow — ink does not cast one. Radii are tight: an engraved plate
 has crisp corners, and the only real curve on the page is the badge cartouche.
 
+The ground is flat ivory — a colour, not a texture. Do not simulate paper
+grain, laid lines or tooth: nothing decorative earns its place unless it
+carries information, and a drawn tooth carries none.
+
 Dark mode inverts the plate into a cyanotype — pale ivory lines on a deep
-Prussian ground (`#101833` / `#ece6d6`), with the laid texture faded to almost
-nothing.
+Prussian ground (`#101833` / `#ece6d6`).
 
 ### Visual hierarchy via opacity — not gray values
 

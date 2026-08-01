@@ -39,14 +39,6 @@
 	--alarm-soft: color-mix(in srgb, var(--alarm) 9%, transparent);
 	--alarm-line: color-mix(in srgb, var(--alarm) 34%, transparent);
 
-	/* The laid paper. Chain lines are rare and far apart — closer together they
-	   stop reading as a sheet and start reading as graph paper — and the laid
-	   lines between them are the engraver's hatching, fine enough to be tone
-	   rather than line. Shows on the ground only; panels are opaque sheets
-	   laid over it. */
-	--laid: color-mix(in srgb, var(--ink) 2.6%, transparent);
-	--laid-fine: color-mix(in srgb, var(--ink) 1.5%, transparent);
-
 	/* Ink does not cast a shadow; these are the faintest lift that still
 	   separates a pasted sheet from the ground, tinted with the ink itself. */
 	--shadow-s: 0 1px 1px rgba(23, 38, 92, 0.04), 0 1px 4px rgba(23, 38, 92, 0.05);
@@ -75,8 +67,8 @@
 
 /* Dark mode — the plate inverted, which is a cyanotype: pale ivory lines on a
    deep Prussian ground. The same four base colors, every derived tint
-   following via color-mix. Shadows deepen (light shadows vanish on dark
-   surfaces) and the laid texture fades to almost nothing. */
+   following via color-mix. Shadows deepen — light shadows vanish on dark
+   surfaces. */
 @media (prefers-color-scheme: dark) {
 	:root {
 		color-scheme: dark;
@@ -85,8 +77,6 @@
 		--ink: #ece6d6;
 		--accent: #8fa9ff;
 		--alarm: #f2907d;
-		--laid: color-mix(in srgb, var(--ink) 2.5%, transparent);
-		--laid-fine: color-mix(in srgb, var(--ink) 1.2%, transparent);
 		--shadow-s: 0 1px 2px rgba(0, 0, 0, 0.32), 0 2px 8px rgba(0, 0, 0, 0.28);
 		--shadow-m: 0 2px 4px rgba(0, 0, 0, 0.38), 0 10px 28px rgba(0, 0, 0, 0.45);
 	}
@@ -109,25 +99,16 @@
 
 html { -webkit-text-size-adjust: 100%; }
 
-/* The sheet. Chain lines and laid lines are drawn at a whisper so the ground
-   reads as handmade paper rather than as flat fill; panels sit opaque on top
-   of it. background-attachment stays default so the texture scrolls with the
-   page — a fixed one reads as a screen artifact. */
+/* The sheet. Flat ivory, no simulated grain: the paper is a colour here, not a
+   texture. Nothing decorative earns its place unless it carries information,
+   and a drawn tooth carries none. */
 body {
-	background-color: var(--surface);
-	background-image:
-		repeating-linear-gradient(90deg, var(--laid) 0 1px, transparent 1px 104px),
-		repeating-linear-gradient(0deg, var(--laid-fine) 0 1px, transparent 1px 4px);
+	background: var(--surface);
 	color: var(--ink);
 	font-family: var(--font-serif);
 	font-size: 16px;
 	line-height: 1.6;
 	-webkit-font-smoothing: antialiased;
-}
-
-/* Texture is decoration; anyone asking for more contrast gets a clean sheet. */
-@media (prefers-contrast: more) {
-	body { background-image: none; }
 }
 
 img, picture, video, canvas, svg { display: block; max-width: 100%; }
