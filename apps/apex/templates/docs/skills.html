@@ -67,28 +67,29 @@
 
   <article class="skill-section">
     <h2>Farfield Style</h2>
-    <p>Function and form, with function first — but kind. The aesthetic keeps its Braun / JPL / Swiss-typography lineage (warm paper, ink, one signal red, restrained type) and softens the delivery: soft white panels, hairline borders, rounded corners, gentle shadows. Nothing decorative earns its place unless it carries information.</p>
+    <p>An 18th-century French copperplate print: deep cobalt ink on ivory laid paper, toile de Jouy monochrome. Function still comes first — the engraving is a way of drawing structure, not decoration. Rules do the work colour used to: a double rule under the masthead, hairlines everywhere below it, small caps for the engraved labels.</p>
 
     <h3>Palette</h3>
     <table>
       <tr><th>Token</th><th>Value</th><th>Usage</th></tr>
-      <tr><td>--surface</td><td><code>#fcfbf8</code></td><td>Page ground — bright warm white (Display&nbsp;P3 upgraded)</td></tr>
-      <tr><td>--panel</td><td><code>#ffffff</code></td><td>Cards, inputs, bars</td></tr>
-      <tr><td>--ink</td><td><code>#1f1b16</code></td><td>All text — warm near-black</td></tr>
-      <tr><td>--accent</td><td><code>#e63d00</code></td><td>Signal red — status, callouts; never body text (more vivid on P3 displays)</td></tr>
+      <tr><td>--surface</td><td><code>#f7f3e8</code></td><td>Page ground — ivory laid paper, faint chain and laid lines (Display&nbsp;P3 upgraded)</td></tr>
+      <tr><td>--panel</td><td><code>#fdfbf4</code></td><td>Cards, inputs, bars — a fresh sheet laid over the ground</td></tr>
+      <tr><td>--ink</td><td><code>#17265c</code></td><td>All text — deep cobalt engraving ink, never black</td></tr>
+      <tr><td>--accent</td><td><code>#2c53c8</code></td><td>Fresh cobalt — links on hover, selection, live status; never body text</td></tr>
+      <tr><td>--alarm</td><td><code>#b3271e</code></td><td>The rubricator's second plate — madder red for errors and destruction only</td></tr>
     </table>
 
-    <p>No gradients. Depth comes from panel-on-ground plus soft, low-alpha shadows; every tint derives from ink or accent via <code>color-mix()</code>. No additional colours.</p>
+    <p>No gradients. Depth comes from panel-on-ground plus a faint ink-tinted shadow; every tint derives from ink, accent or alarm via <code>color-mix()</code>. No additional colours. Dark mode inverts the plate into a cyanotype — pale ivory lines on a deep Prussian ground.</p>
 
     <h3>Hierarchy via opacity</h3>
     <table>
       <tr><th>Level</th><th>Opacity</th><th>Usage</th></tr>
       <tr><td>Primary</td><td>1.0</td><td>Headings, body, links</td></tr>
       <tr><td>Secondary</td><td>0.7</td><td>Labels, captions, meta</td></tr>
-      <tr><td>Tertiary</td><td>0.5</td><td>Timestamps, table headers, footnotes</td></tr>
+      <tr><td>Tertiary</td><td>0.55</td><td>Timestamps, table headers, footnotes</td></tr>
       <tr><td>Muted</td><td>0.3</td><td>Placeholders, disabled, empty states</td></tr>
     </table>
 
-    <p>System fonts only. Mono for numerals, codes, identifiers, telemetry — anywhere alignment matters. Sans for prose.</p>
+    <p>System fonts only. An old-style serif for everything human; mono for numerals, codes, identifiers, telemetry — anywhere alignment matters. Labels, column heads and section heads take <code>font-variant-caps: small-caps</code> rather than uppercase, so the markup stays sentence case and the caps come from the face.</p>
   </article>
 {{end}}

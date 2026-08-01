@@ -1,7 +1,7 @@
 // app.js -- the farfield UI glue over the OpenAI-shaped DeadPresidents client.
 // The client (openai.js) runs the char-level GPT in a Web Worker; this file only
 // wires the controls to it and streams the continuation into the page.
-const ASSET_VERSION = '20260609-dp-1';
+const ASSET_VERSION = '20260731-dp-2';
 const client = DeadPresidents.createClient({ workerUrl: `./worker.js?v=${ASSET_VERSION}` });
 
 const $ = (id) => document.getElementById(id);

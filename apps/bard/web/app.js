@@ -1,4 +1,4 @@
-const ASSET_VERSION = '20260609-bard-4';
+const ASSET_VERSION = '20260731-bard-5';
 const DEFAULT_RPC = 'https://ethereum-sepolia-rpc.publicnode.com';
 const worker = new Worker(`./worker.js?v=${ASSET_VERSION}`, { type: 'module' });
 

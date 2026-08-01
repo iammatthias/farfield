@@ -1,69 +1,103 @@
-/* farfield — shared theme, v2 "warm instrument".
-   Warm paper ground, soft white panels, ink text, NASA-red accent. Function
-   first, but kind: rounded corners, hairline borders, soft shadows, sentence-
-   case labels. Mono is reserved for data — slugs, counts, telemetry.
+/* farfield — shared theme, v3 "engraved plate".
+   An 18th-century French copperplate print: deep cobalt ink on ivory laid
+   paper, toile de Jouy monochrome. One ink, two densities — the settled ink
+   is the text, the fresh ink is the signal. Old-style serif for everything
+   human, small caps for the engraved labels, mono reserved for data — slugs,
+   counts, telemetry. Structure is drawn with rules, not filled with color:
+   a double rule under the masthead, hairlines everywhere below it.
    Semantic HTML, vanilla CSS, no build step. See .claude/skills/farfield-style. */
 
 :root {
-	/* Base palette — bright warm ground, white panels, warm ink, vivid red.
-	   Everything else derives from these four via color-mix, so iterating on
-	   the palette means touching only this block (and the P3 override). */
+	/* Base palette — ivory ground, a fresh sheet for panels, cobalt ink at two
+	   densities. Everything else derives from these four via color-mix, so
+	   iterating on the palette means touching only this block (and the P3
+	   override). */
 	color-scheme: light;
-	--surface: #fcfbf8;
-	--panel: #ffffff;
-	--ink: #1f1b16;
-	--accent: #e63d00;
+	--surface: #f7f3e8;
+	--panel: #fdfbf4;
+	--ink: #17265c;
+	--accent: #2c53c8;
 
-	/* derived — ink alphas */
-	--hairline: color-mix(in srgb, var(--ink) 13%, transparent);
-	--line-strong: color-mix(in srgb, var(--ink) 36%, transparent);
-	--wash: color-mix(in srgb, var(--ink) 4.5%, transparent);
+	/* The second plate. A toile is monochrome, but a printed book of the same
+	   century is not: the rubricator came back over the sheet in madder red for
+	   the things that must not be missed. Red here means error or destruction
+	   and nothing else — cobalt still carries every ordinary signal. */
+	--alarm: #b3271e;
+
+	/* derived — ink alphas. Blue ink at low alpha reads fainter than warm
+	   near-black did, so the rules carry a little more weight than in v2. */
+	--hairline: color-mix(in srgb, var(--ink) 16%, transparent);
+	--line-strong: color-mix(in srgb, var(--ink) 38%, transparent);
+	--wash: color-mix(in srgb, var(--ink) 5%, transparent);
 
 	/* derived — accent tints */
-	--accent-soft: color-mix(in srgb, var(--accent) 8%, transparent);
+	--accent-soft: color-mix(in srgb, var(--accent) 9%, transparent);
 	--accent-line: color-mix(in srgb, var(--accent) 32%, transparent);
-	--ring: 0 0 0 3px color-mix(in srgb, var(--accent) 15%, transparent);
+	--ring: 0 0 0 3px color-mix(in srgb, var(--accent) 16%, transparent);
 
-	--shadow-s: 0 1px 2px rgba(31, 27, 22, 0.05), 0 2px 8px rgba(31, 27, 22, 0.04);
-	--shadow-m: 0 2px 4px rgba(31, 27, 22, 0.06), 0 10px 28px rgba(31, 27, 22, 0.08);
-	--r-s: 6px;
-	--r-m: 10px;
+	/* derived — alarm tints */
+	--alarm-soft: color-mix(in srgb, var(--alarm) 9%, transparent);
+	--alarm-line: color-mix(in srgb, var(--alarm) 34%, transparent);
+
+	/* The laid paper. Chain lines are rare and far apart — closer together they
+	   stop reading as a sheet and start reading as graph paper — and the laid
+	   lines between them are the engraver's hatching, fine enough to be tone
+	   rather than line. Shows on the ground only; panels are opaque sheets
+	   laid over it. */
+	--laid: color-mix(in srgb, var(--ink) 2.6%, transparent);
+	--laid-fine: color-mix(in srgb, var(--ink) 1.5%, transparent);
+
+	/* Ink does not cast a shadow; these are the faintest lift that still
+	   separates a pasted sheet from the ground, tinted with the ink itself. */
+	--shadow-s: 0 1px 1px rgba(23, 38, 92, 0.04), 0 1px 4px rgba(23, 38, 92, 0.05);
+	--shadow-m: 0 1px 2px rgba(23, 38, 92, 0.06), 0 8px 24px rgba(23, 38, 92, 0.11);
+	--r-s: 3px;
+	--r-m: 5px;
+	--font-serif: ui-serif, "Iowan Old Style", "Palatino Linotype", Palatino,
+		"Book Antiqua", "Hoefler Text", Georgia, "Times New Roman", serif;
 	--font-sans: ui-sans-serif, system-ui, -apple-system, "Helvetica Neue",
 		Helvetica, Arial, sans-serif;
 	--font-mono: ui-monospace, "SF Mono", SFMono-Regular, Menlo, Consolas, monospace;
 }
 
-/* Wide-gamut displays get the true palette — a warmer white and a red the
-   sRGB gamut can't reach. The derived tints track automatically. */
+/* Wide-gamut displays get the true palette — an ivory the sRGB gamut renders
+   flat and a cobalt it cannot reach at all. The derived tints track
+   automatically. */
 @supports (color: color(display-p3 1 1 1)) {
 	:root {
-		--surface: color(display-p3 0.989 0.985 0.973);
-		--panel: color(display-p3 1 1 1);
-		--ink: color(display-p3 0.121 0.106 0.087);
-		--accent: color(display-p3 0.918 0.263 0.031);
+		--surface: color(display-p3 0.966 0.951 0.909);
+		--panel: color(display-p3 0.991 0.982 0.957);
+		--ink: color(display-p3 0.082 0.147 0.358);
+		--accent: color(display-p3 0.13 0.312 0.815);
+		--alarm: color(display-p3 0.66 0.16 0.115);
 	}
 }
 
-/* Dark mode — the same four base colors flipped to a warm dark ground; every
-   derived tint follows via color-mix. Shadows deepen (light shadows vanish on
-   dark surfaces). */
+/* Dark mode — the plate inverted, which is a cyanotype: pale ivory lines on a
+   deep Prussian ground. The same four base colors, every derived tint
+   following via color-mix. Shadows deepen (light shadows vanish on dark
+   surfaces) and the laid texture fades to almost nothing. */
 @media (prefers-color-scheme: dark) {
 	:root {
 		color-scheme: dark;
-		--surface: #181613;
-		--panel: #211f1b;
-		--ink: #ece8e1;
-		--accent: #ff5a1f;
-		--shadow-s: 0 1px 2px rgba(0, 0, 0, 0.3), 0 2px 8px rgba(0, 0, 0, 0.25);
-		--shadow-m: 0 2px 4px rgba(0, 0, 0, 0.35), 0 10px 28px rgba(0, 0, 0, 0.4);
+		--surface: #101833;
+		--panel: #172140;
+		--ink: #ece6d6;
+		--accent: #8fa9ff;
+		--alarm: #f2907d;
+		--laid: color-mix(in srgb, var(--ink) 2.5%, transparent);
+		--laid-fine: color-mix(in srgb, var(--ink) 1.2%, transparent);
+		--shadow-s: 0 1px 2px rgba(0, 0, 0, 0.32), 0 2px 8px rgba(0, 0, 0, 0.28);
+		--shadow-m: 0 2px 4px rgba(0, 0, 0, 0.38), 0 10px 28px rgba(0, 0, 0, 0.45);
 	}
 
 	@supports (color: color(display-p3 1 1 1)) {
 		:root {
-			--surface: color(display-p3 0.094 0.087 0.075);
-			--panel: color(display-p3 0.13 0.122 0.107);
-			--ink: color(display-p3 0.925 0.91 0.883);
-			--accent: color(display-p3 1 0.4 0.17);
+			--surface: color(display-p3 0.063 0.094 0.196);
+			--panel: color(display-p3 0.09 0.128 0.25);
+			--ink: color(display-p3 0.925 0.902 0.842);
+			--accent: color(display-p3 0.58 0.66 1);
+			--alarm: color(display-p3 0.94 0.575 0.5);
 		}
 	}
 }
@@ -75,13 +109,25 @@
 
 html { -webkit-text-size-adjust: 100%; }
 
+/* The sheet. Chain lines and laid lines are drawn at a whisper so the ground
+   reads as handmade paper rather than as flat fill; panels sit opaque on top
+   of it. background-attachment stays default so the texture scrolls with the
+   page — a fixed one reads as a screen artifact. */
 body {
-	background: var(--surface);
+	background-color: var(--surface);
+	background-image:
+		repeating-linear-gradient(90deg, var(--laid) 0 1px, transparent 1px 104px),
+		repeating-linear-gradient(0deg, var(--laid-fine) 0 1px, transparent 1px 4px);
 	color: var(--ink);
-	font-family: var(--font-sans);
+	font-family: var(--font-serif);
 	font-size: 16px;
-	line-height: 1.55;
+	line-height: 1.6;
 	-webkit-font-smoothing: antialiased;
+}
+
+/* Texture is decoration; anyone asking for more contrast gets a clean sheet. */
+@media (prefers-contrast: more) {
+	body { background-image: none; }
 }
 
 img, picture, video, canvas, svg { display: block; max-width: 100%; }
@@ -91,34 +137,43 @@ p, h1, h2, h3, h4, h5, h6 { overflow-wrap: break-word; }
 
 /* ── typography ────────────────────────────────────────────────────────── */
 
+/* An engraved title line is set open, not tight — the negative tracking a
+   grotesque wants would close up the serifs. */
 h1 { font-weight: 600; font-size: clamp(1.5rem, 3vw, 2.1rem);
-	line-height: 1.15; letter-spacing: -0.01em; }
-h2 { font-weight: 600; font-size: clamp(1.15rem, 2.2vw, 1.4rem); line-height: 1.2; }
-h3 { font-weight: 600; font-size: 1.05rem; line-height: 1.3; }
+	line-height: 1.2; letter-spacing: 0.005em; }
+h2 { font-weight: 600; font-size: clamp(1.15rem, 2.2vw, 1.4rem); line-height: 1.25; }
+h3 { font-weight: 600; font-size: 1.05rem; line-height: 1.35; }
 
 a { color: var(--ink); text-underline-offset: 0.2em;
 	text-decoration-color: var(--line-strong); }
-a:hover { text-decoration-color: var(--ink); }
+a:hover { color: var(--accent); text-decoration-color: var(--accent); }
 
-code, kbd, samp, pre { font-family: var(--font-mono); font-size: 0.9em; }
-code { background: var(--wash); padding: 0.1em 0.35em; border-radius: 4px; }
+code, kbd, samp, pre { font-family: var(--font-mono); font-size: 0.88em; }
+code { background: var(--wash); padding: 0.1em 0.35em; border-radius: 3px; }
+/* A block of source is a plate of its own: washed ground inside a fine rule. */
 pre { background: var(--wash); padding: 1rem; overflow-x: auto;
-	border-radius: var(--r-s); }
+	border: 1px solid var(--hairline); border-radius: var(--r-s); }
+pre code { background: none; padding: 0; }
 small { font-size: 0.875rem; }
 
-/* The label — a quiet, friendly field name. Mono stays for data values. */
+/* The label — an engraved field name. Small caps rather than uppercase, so the
+   source text stays sentence case and the caps come from the face. Mono stays
+   for data values. */
 .label {
 	display: block;
-	font-size: 0.8rem; font-weight: 500; line-height: 1.3;
-	opacity: 0.68;
+	font-variant-caps: small-caps; letter-spacing: 0.05em;
+	font-size: 0.84rem; font-weight: 500; line-height: 1.3;
+	opacity: 0.72;
 }
 
 /* Hierarchy via opacity on the ink — never a gray hex value. */
-.muted { opacity: 0.65; }
-.hint { opacity: 0.62; font-size: 0.8rem; }
+.muted { opacity: 0.68; }
+.hint { opacity: 0.65; font-size: 0.82rem; }
 .mono { font-family: var(--font-mono); font-size: 0.8rem; }
 
-hr { border: 0; border-top: 1px solid var(--hairline); margin-block: 1.6rem; }
+/* The rule between sections of a document: a double rule, the way a printed
+   page breaks a passage. */
+hr { border: 0; border-top: 3px double var(--line-strong); margin-block: 1.7rem; }
 
 /* ── layout ────────────────────────────────────────────────────────────── */
 
@@ -140,16 +195,20 @@ hr { border: 0; border-top: 1px solid var(--hairline); margin-block: 1.6rem; }
 
 /* ── masthead ──────────────────────────────────────────────────────────── */
 
+/* The double rule under the masthead is the loudest line on the page and the
+   only one that isn't a hairline — a title-page device. Every rule below it is
+   subordinate and single. */
 .bar {
 	display: flex; justify-content: space-between; align-items: baseline;
 	gap: 0.6rem 1.5rem; flex-wrap: wrap;
-	padding-bottom: 0.9rem; margin-bottom: 1.6rem;
-	border-bottom: 1px solid var(--hairline);
+	padding-bottom: 0.85rem; margin-bottom: 1.6rem;
+	border-bottom: 3px double var(--line-strong);
 }
-.bar h1 { font-size: 1.05rem; font-weight: 600; }
+.bar h1 { font-size: 1.05rem; font-weight: 600;
+	font-variant-caps: small-caps; letter-spacing: 0.06em; }
 .bar h1 a { text-decoration: none; }
-.bar nav { display: flex; gap: 1.4rem; flex-wrap: wrap; font-size: 0.9rem; }
-.bar nav a { text-decoration: none; opacity: 0.72; }
+.bar nav { display: flex; gap: 1.4rem; flex-wrap: wrap; font-size: 0.92rem; }
+.bar nav a { text-decoration: none; opacity: 0.75; }
 .bar nav a:hover { opacity: 1; text-decoration: underline; }
 
 /* fleet switcher — the cross-app constellation menu in the masthead */
@@ -185,14 +244,16 @@ hr { border: 0; border-top: 1px solid var(--hairline); margin-block: 1.6rem; }
 	margin: 1.9rem 0 0.8rem; padding-bottom: 0.45rem;
 	border-bottom: 1px solid var(--hairline);
 }
-.section-head h2 { font-size: 0.95rem; font-weight: 600; }
+.section-head h2 { font-size: 1rem; font-weight: 600;
+	font-variant-caps: small-caps; letter-spacing: 0.06em; }
 
 /* The heading on a form or sub-page — "New code", "Issue a key". Four
    templates each hand-wrote `<h2 style="font-size:1rem">` and a fifth left the
    h2 at its display size, so the same heading arrived a third larger on some
    pages than others. One class, one size, everywhere. */
 .page-title {
-	font-size: 1rem; font-weight: 600; line-height: 1.3;
+	font-size: 1.05rem; font-weight: 600; line-height: 1.3;
+	font-variant-caps: small-caps; letter-spacing: 0.06em;
 	margin-bottom: 1rem;
 }
 
@@ -225,18 +286,19 @@ button:hover, .btn:hover { border-color: var(--line-strong);
 button:disabled { opacity: 0.4; cursor: default; box-shadow: none; }
 button:disabled:hover { border-color: var(--hairline); }
 
-/* The main action reads solid; destructive actions read warm-red and soft. */
+/* The main action reads solid — a block of ink. Destructive actions come off
+   the second plate: madder red, soft, filling only on hover. */
 button[type="submit"], .btn.primary {
 	background: var(--ink); color: var(--surface); border-color: var(--ink);
 }
 button[type="submit"]:hover, .btn.primary:hover { opacity: 0.88;
 	border-color: var(--ink); }
 button.danger, .danger {
-	background: var(--panel); color: var(--accent);
-	border-color: var(--accent-line);
+	background: var(--panel); color: var(--alarm);
+	border-color: var(--alarm-line);
 }
 button.danger:hover, .danger:hover {
-	background: var(--accent-soft); border-color: color-mix(in srgb, var(--accent) 55%, transparent);
+	background: var(--alarm-soft); border-color: color-mix(in srgb, var(--alarm) 55%, transparent);
 }
 
 input, textarea, select {
@@ -292,8 +354,9 @@ input[type="file"]:focus { outline: none; border-color: var(--line-strong);
 .field { margin: 1rem 0; }
 .field > label, label.label {
 	display: block; margin-bottom: 0.4rem;
-	font-size: 0.8rem; font-weight: 500; line-height: 1.3;
-	opacity: 0.68;
+	font-variant-caps: small-caps; letter-spacing: 0.05em;
+	font-size: 0.84rem; font-weight: 500; line-height: 1.3;
+	opacity: 0.72;
 }
 .field .hint { margin-top: 0.35rem; }
 .check { display: flex; align-items: center; gap: 0.5rem; }
@@ -304,10 +367,10 @@ input[type="file"]:focus { outline: none; border-color: var(--line-strong);
 }
 
 .error {
-	background: var(--accent-soft);
-	border: 1px solid var(--accent-line); border-radius: var(--r-s);
-	color: var(--accent);
-	padding: 0.6rem 0.85rem; font-size: 0.9rem;
+	background: var(--alarm-soft);
+	border: 1px solid var(--alarm-line); border-radius: var(--r-s);
+	color: var(--alarm);
+	padding: 0.6rem 0.85rem; font-size: 0.92rem;
 }
 
 /* ── table ─────────────────────────────────────────────────────────────── */
@@ -318,12 +381,18 @@ input[type="file"]:focus { outline: none; border-color: var(--line-strong);
 	border: 1px solid var(--hairline); border-radius: var(--r-m);
 	box-shadow: var(--shadow-s);
 }
-table { border-collapse: collapse; width: 100%; font-size: 0.9rem; }
+table { border-collapse: collapse; width: 100%; font-size: 0.92rem; }
 th, td {
 	padding: 0.6rem 0.9rem; text-align: left;
 	border-bottom: 1px solid var(--hairline);
 }
-th { font-size: 0.78rem; font-weight: 500; opacity: 0.62; }
+/* Column heads are engraved captions — small caps, and the head row closes
+   with the heavier rule that separates a legend from its entries. */
+th {
+	font-variant-caps: small-caps; letter-spacing: 0.06em;
+	font-size: 0.82rem; font-weight: 500; opacity: 0.7;
+	border-bottom-color: var(--line-strong);
+}
 tbody tr:last-child td { border-bottom: 0; }
 tbody tr:hover { background: var(--wash); }
 td.nowrap, th.nowrap { white-space: nowrap; }
@@ -345,13 +414,18 @@ td.nowrap, th.nowrap { white-space: nowrap; }
 
 /* ── status badge — a soft pill ────────────────────────────────────────── */
 
+/* The pill keeps its round ends — a cartouche, the one curve on an otherwise
+   ruled page — but it is now outlined rather than only filled. */
 .badge {
 	display: inline-block;
-	font-size: 0.72rem; font-weight: 500; line-height: 1;
-	padding: 0.3rem 0.6rem; border-radius: 999px;
+	font-variant-caps: small-caps; letter-spacing: 0.06em;
+	font-size: 0.78rem; font-weight: 500; line-height: 1;
+	padding: 0.26rem 0.62rem; border-radius: 999px;
 	background: var(--wash);
+	border: 1px solid var(--hairline);
 }
-.badge.live { color: var(--accent); background: var(--accent-soft); }
+.badge.live { color: var(--accent); background: var(--accent-soft);
+	border-color: var(--accent-line); }
 .badge.draft { opacity: 0.6; }
 
 /* ── rendered markdown ─────────────────────────────────────────────────── */
@@ -367,8 +441,8 @@ td.nowrap, th.nowrap { white-space: nowrap; }
 .prose li + li { margin-top: 0.3rem; }
 .prose li > ul, .prose li > ol { margin-top: 0.3rem; }
 .prose blockquote {
-	border-left: 3px solid color-mix(in srgb, var(--accent) 55%, transparent);
-	padding-left: 1rem; opacity: 0.78;
+	border-left: 3px double color-mix(in srgb, var(--accent) 70%, transparent);
+	padding-left: 1rem; opacity: 0.82; font-style: italic;
 }
 .prose table { display: block; overflow-x: auto; }
 .prose input[type="checkbox"] { width: auto; margin-right: 0.35rem; }
@@ -409,16 +483,16 @@ td.nowrap, th.nowrap { white-space: nowrap; }
 }
 .ff-recipe-meta div { display: flex; gap: 0.45rem; align-items: baseline; }
 .ff-recipe-meta dt {
-	font-size: 0.68rem; text-transform: uppercase; letter-spacing: 0.07em;
-	opacity: 0.5;
+	font-size: 0.8rem; font-variant-caps: small-caps; letter-spacing: 0.07em;
+	opacity: 0.58;
 }
 .ff-recipe-meta dd { margin: 0; font-size: 0.88rem; }
 
 .ff-recipe-grid-wrap { margin: 0 0 1.5rem; }
 .ff-recipe-grid-wrap + .ff-recipe-grid-wrap { margin-top: -0.25rem; }
 .ff-recipe-grid-wrap figcaption {
-	font-size: 0.7rem; font-weight: 500; letter-spacing: 0.08em;
-	text-transform: uppercase; color: var(--accent); margin-bottom: 0.45rem;
+	font-size: 0.84rem; font-weight: 500; letter-spacing: 0.08em;
+	font-variant-caps: small-caps; color: var(--accent); margin-bottom: 0.45rem;
 }
 
 .ff-recipe-scroll {
@@ -471,8 +545,8 @@ td.nowrap, th.nowrap { white-space: nowrap; }
 	display: block; font-size: 0.88em; opacity: 0.5; margin-top: 0.1rem;
 }
 .ff-recipe-grid .ff-r-group {
-	display: block; font-size: 0.62rem; font-weight: 500;
-	text-transform: uppercase; letter-spacing: 0.09em;
+	display: block; font-size: 0.76rem; font-weight: 500;
+	font-variant-caps: small-caps; letter-spacing: 0.09em;
 	color: var(--accent); margin-bottom: 0.25rem;
 }
 
@@ -517,14 +591,14 @@ td.nowrap, th.nowrap { white-space: nowrap; }
 }
 .ff-recipe-ingredients .ff-r-note { font-size: 0.88em; opacity: 0.5; }
 .ff-recipe-ingredients .ff-r-grouprow {
-	font-size: 0.65rem; font-weight: 500; text-transform: uppercase;
+	font-size: 0.8rem; font-weight: 500; font-variant-caps: small-caps;
 	letter-spacing: 0.09em; color: var(--accent);
 	padding-top: 0.9rem; border-bottom: 0;
 }
 
 .ff-recipe-h {
-	font-size: 0.7rem; font-weight: 500; letter-spacing: 0.08em;
-	text-transform: uppercase; opacity: 0.5;
+	font-size: 0.84rem; font-weight: 500; letter-spacing: 0.08em;
+	font-variant-caps: small-caps; opacity: 0.58;
 	margin: 1.75rem 0 0.7rem;
 }
 .ff-recipe-phase {
@@ -548,11 +622,11 @@ td.nowrap, th.nowrap { white-space: nowrap; }
 .ff-recipe-source { margin-top: 1.2rem; font-size: 0.82rem; opacity: 0.65; }
 
 .ff-recipe-error {
-	border: 1px solid var(--accent-line); background: var(--accent-soft);
+	border: 1px solid var(--alarm-line); background: var(--alarm-soft);
 	border-radius: var(--r-s); padding: 0.75rem 0.9rem; margin: 1.5rem 0;
 }
 .ff-recipe-error p {
-	margin: 0 0 0.5rem; color: var(--accent);
+	margin: 0 0 0.5rem; color: var(--alarm);
 	font-family: var(--font-mono); font-size: 0.82rem;
 }
 .ff-recipe-error pre { margin: 0; font-size: 0.78rem; overflow-x: auto; }
@@ -616,8 +690,8 @@ td.nowrap, th.nowrap { white-space: nowrap; }
 }
 .rail-panel .field { margin: 0 0 0.95rem; }
 .rail-panel .field:last-child, .rail-panel .check:last-child { margin-bottom: 0; }
-.rail-panel textarea { min-height: 4.2rem; font-family: var(--font-sans);
-	font-size: 0.9rem; }
+.rail-panel textarea { min-height: 4.2rem; font-family: var(--font-serif);
+	font-size: 0.92rem; }
 .rail-meta {
 	display: flex; justify-content: space-between; align-items: baseline;
 	gap: 0.75rem; flex-wrap: wrap;
@@ -694,11 +768,12 @@ dialog.doc-keys::backdrop { background: color-mix(in srgb, var(--ink) 25%, trans
 .standalone h1 { font-size: 1.35rem; }
 
 /* login mark — the app's tile, same mark as its favicon */
+/* The app's mark, inked solid — the printer's device at the head of the page. */
 .login-mark {
 	width: 3.4rem; height: 3.4rem; margin-bottom: 1rem;
 	display: flex; align-items: center; justify-content: center;
 	background: var(--ink); color: var(--surface);
-	border-radius: 14px;
+	border-radius: var(--r-m);
 	font: 600 1.3rem/1 var(--font-mono);
 	box-shadow: var(--shadow-s);
 }
@@ -781,7 +856,7 @@ dialog.doc-keys::backdrop { background: color-mix(in srgb, var(--ink) 25%, trans
 .doc-enhanced .doc-fallback { display: none; }
 
 .save-note { font-size: 0.8rem; opacity: 0.6; }
-.save-note.err { color: var(--accent); opacity: 1; }
+.save-note.err { color: var(--alarm); opacity: 1; }
 
 /* ── document editor — a full-screen writing surface ───────────────────── */
 
@@ -808,7 +883,7 @@ dialog.doc-editor[open] { display: flex; flex-direction: column; }
 	font: 500 0.72rem/1 var(--font-mono);
 	opacity: 0.55; white-space: nowrap;
 }
-.doc-meta.dirty { color: var(--accent); opacity: 1; }
+.doc-meta.dirty { color: var(--alarm); opacity: 1; }
 
 /* Edit | Markdown — a soft segmented control. */
 .seg {
@@ -940,7 +1015,7 @@ dialog.embed-modal::backdrop { background: color-mix(in srgb, var(--ink) 35%, tr
 	border: 0; background: transparent; padding: 0 0.25rem; box-shadow: none;
 	font-size: 1.3rem; line-height: 1; cursor: pointer; opacity: 0.6;
 }
-.embed-x:hover { background: transparent; color: var(--accent); opacity: 1;
+.embed-x:hover { background: transparent; color: var(--alarm); opacity: 1;
 	border-color: transparent; box-shadow: none; }
 
 .embed-content, .embed-pane { flex: 1; min-height: 0; display: flex; flex-direction: column; }
@@ -1007,7 +1082,7 @@ dialog.embed-modal::backdrop { background: color-mix(in srgb, var(--ink) 35%, tr
 	position: absolute; top: 0.25rem; right: 0.25rem;
 	min-width: 1.35rem; height: 1.35rem; border-radius: 999px;
 	display: none; align-items: center; justify-content: center;
-	padding: 0 0.3rem; background: var(--accent); color: #fff;
+	padding: 0 0.3rem; background: var(--accent); color: var(--surface);
 	font: 700 0.72rem/1 var(--font-mono);
 }
 .embed-cell.sel .embed-badge { display: flex; }
@@ -1059,7 +1134,7 @@ dialog.embed-modal::backdrop { background: color-mix(in srgb, var(--ink) 35%, tr
 	font-size: 0.95rem; line-height: 1; box-shadow: none;
 	display: flex; align-items: center; justify-content: center;
 }
-.embed-tray-rm:hover { background: var(--accent); color: #fff; }
+.embed-tray-rm:hover { background: var(--alarm); color: var(--surface); }
 
 .embed-input { margin-bottom: 0.4rem; }
 
@@ -1068,7 +1143,7 @@ dialog.embed-modal::backdrop { background: color-mix(in srgb, var(--ink) 35%, tr
 	gap: 1rem; padding: 0.8rem 1.1rem; border-top: 1px solid var(--hairline);
 }
 .embed-foot-count { font-size: 0.8rem; opacity: 0.6; font-family: var(--font-mono); }
-.embed-foot-count.err { color: var(--accent); opacity: 1; }
+.embed-foot-count.err { color: var(--alarm); opacity: 1; }
 .embed-go { flex: none; background: var(--ink); color: var(--surface);
 	border-color: var(--ink); }
 .embed-go:hover { opacity: 0.88; border-color: var(--ink); }
@@ -1159,7 +1234,7 @@ td.actions button {
   color: var(--ink); text-decoration: underline;
   text-underline-offset: 0.2em; font: inherit; cursor: pointer;
 }
-td.actions button.danger { color: var(--accent); }
+td.actions button.danger { color: var(--alarm); }
 td.actions button:hover { background: transparent; text-decoration-thickness: 2px; }
 
 /* :target modal — a viewer that needs no JavaScript. The anchor opens it,
@@ -1184,7 +1259,7 @@ td.actions button:hover { background: transparent; text-decoration-thickness: 2p
   color: var(--surface); background: var(--ink);
   border-radius: 0 var(--r-m) 0 var(--r-s);
 }
-.modal .close:hover { background: var(--accent); }
+.modal .close:hover { background: var(--alarm); }
 
 /* Responsive table → labelled cards. Give the table class "stack" and each
    cell a data-label; on a phone the header row hides and every row becomes a
@@ -1209,9 +1284,12 @@ td.actions button:hover { background: transparent; text-decoration-thickness: 2p
     display: flex; gap: 0.7rem; align-items: baseline;
     padding: 0.18rem 0; border: 0;
   }
+  /* The column name moves inline beside its value — the same engraved caption
+     the hidden <th> was carrying, so it takes the same small caps. */
   table.stack td::before {
     content: attr(data-label); flex: 0 0 5rem;
-    font-size: 0.7rem; font-weight: 500; line-height: 1.7; opacity: 0.55;
+    font-variant-caps: small-caps; letter-spacing: 0.05em;
+    font-size: 0.8rem; font-weight: 500; line-height: 1.65; opacity: 0.62;
   }
   table.stack td[data-label=""]::before { content: none; }
 }
