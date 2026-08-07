@@ -4,30 +4,47 @@ import (
 	"net/http"
 
 	"github.com/iammatthias/farfield/lib/auth"
-	"github.com/iammatthias/farfield/lib/store"
+	"github.com/iammatthias/farfield/lib/keys"
 	"github.com/iammatthias/farfield/lib/web"
 )
 
 // requireCatalogAuth guards the OPDS catalog endpoints. It passes for a logged
 // in admin session — so the browser loads covers and downloads without a Basic
 // prompt — otherwise it falls back to HTTP Basic Auth, the scheme OPDS readers
-// speak: any username with the password set to LIBRARY_API_KEY. A failure returns
-// 401 with a Basic challenge so a reader knows to prompt for credentials.
+// speak: any username with the password set to a catalog credential. A failure
+// returns 401 with a Basic challenge so a reader knows to prompt for
+// credentials.
 func (s *Server) requireCatalogAuth(next http.HandlerFunc) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		if s.validSession(r) {
+		if s.auth.SessionValid(r) || s.catalogCredential(r) {
 			next(w, r)
 			return
-		}
-		if s.auth.APIKey != "" {
-			if _, password, ok := r.BasicAuth(); ok && auth.VerifyAPIKey(password, s.auth.APIKey) {
-				next(w, r)
-				return
-			}
 		}
 		w.Header().Set("WWW-Authenticate", `Basic realm="farfield library"`)
 		web.WriteError(w, http.StatusUnauthorized, "authentication required")
 	}
+}
+
+// catalogCredential reports whether the request's Basic password is a catalog
+// credential: the full LIBRARY_API_KEY, or an admin-issued key with read or
+// write scope — so an e-reader can hold a revocable key instead of the master
+// one. Upload scope stays out, matching requireUploadKey's contract: that key
+// adds books but must not read the library.
+func (s *Server) catalogCredential(r *http.Request) bool {
+	_, password, ok := r.BasicAuth()
+	if !ok || password == "" {
+		return false
+	}
+	if s.auth.APIKey != "" && auth.VerifyAPIKey(password, s.auth.APIKey) {
+		return true
+	}
+	if s.auth.Keys != nil {
+		if scope, ok := s.auth.Keys.Check(password, s.auth.App); ok &&
+			(scope == keys.ScopeRead || scope == keys.ScopeWrite) {
+			return true
+		}
+	}
+	return false
 }
 
 // requireUploadKey guards the book-upload and regroup endpoints. It accepts
@@ -55,14 +72,4 @@ func (s *Server) requireUploadKey(next http.HandlerFunc) http.HandlerFunc {
 		}
 		web.WriteError(w, http.StatusUnauthorized, "missing or invalid API key")
 	}
-}
-
-// validSession reports whether the request carries a live admin session cookie.
-func (s *Server) validSession(r *http.Request) bool {
-	token, ok := auth.Session(r)
-	if !ok {
-		return false
-	}
-	valid, err := store.ValidSession(s.auth.DB, token)
-	return err == nil && valid
 }

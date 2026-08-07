@@ -987,3 +987,63 @@ func TestCatalogFlow(t *testing.T) {
 		t.Errorf("status = %+v", status)
 	}
 }
+
+// stubKeys resolves fixed tokens to scopes, standing in for the admin key
+// store the keys app maintains.
+type stubKeys map[string]string
+
+func (k stubKeys) Check(token, app string) (string, bool) {
+	scope, ok := k[token]
+	return scope, ok
+}
+
+// TestCatalogCredentials pins the two ways into the OPDS catalog besides the
+// env key: the browser's admin session (no Basic prompt after login) and an
+// admin-issued key as the Basic password — read and write scope pass, upload
+// stays scoped out per requireUploadKey's contract.
+func TestCatalogCredentials(t *testing.T) {
+	s := newTestServer(t)
+	s.auth.Keys = stubKeys{"ffk_read": "read", "ffk_up": "upload", "ffk_write": "write"}
+	s.auth.App = "library"
+	srv := httptest.NewServer(s.routes())
+	defer srv.Close()
+
+	get := func(mod func(*http.Request)) int {
+		req, _ := http.NewRequest(http.MethodGet, srv.URL+"/opds", nil)
+		mod(req)
+		resp, err := srv.Client().Do(req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		resp.Body.Close()
+		return resp.StatusCode
+	}
+
+	// The admin session that renders the index also loads the catalog, covers,
+	// and downloads — the session check is shared with RequireSession, not a
+	// database-only reimplementation.
+	token := auth.NewSessionToken()
+	if err := store.InsertSession(s.db, token, time.Now().Add(time.Hour)); err != nil {
+		t.Fatal(err)
+	}
+	if got := get(func(r *http.Request) { r.AddCookie(auth.SessionCookie(token, false)) }); got != http.StatusOK {
+		t.Errorf("catalog with admin session = %d, want 200", got)
+	}
+
+	for pw, want := range map[string]int{
+		"ffk_read":  http.StatusOK,
+		"ffk_write": http.StatusOK,
+		"ffk_up":    http.StatusUnauthorized,
+		"wrong":     http.StatusUnauthorized,
+		"":          http.StatusUnauthorized,
+	} {
+		got := get(func(r *http.Request) {
+			if pw != "" {
+				r.SetBasicAuth("reader", pw)
+			}
+		})
+		if got != want {
+			t.Errorf("catalog with Basic password %q = %d, want %d", pw, got, want)
+		}
+	}
+}

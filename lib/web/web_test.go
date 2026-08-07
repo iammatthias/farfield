@@ -349,6 +349,13 @@ func TestFleetSession(t *testing.T) {
 		t.Fatal("signed fleet session not accepted by a sibling app")
 	}
 
+	// The exported check agrees with the middleware — an app gate built on
+	// SessionValid (the OPDS catalog, scrap's author view) recognizes the
+	// same fleet login the admin pages do.
+	if !otherApp.SessionValid(req) {
+		t.Error("SessionValid must accept the fleet token RequireSession accepts")
+	}
+
 	// Tampered and expired tokens are refused.
 	for name, bad := range map[string]string{
 		"tampered": token + "x",

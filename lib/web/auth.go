@@ -126,21 +126,35 @@ func (a *Auth) RequireSession(next http.HandlerFunc) http.HandlerFunc {
 			http.Error(w, "cross-origin request refused", http.StatusForbidden)
 			return
 		}
-		if token, ok := auth.Session(r); ok {
-			if secret, _ := fleetSessionConfig(); secret != "" &&
-				auth.VerifySignedSession(secret, sessionEpoch(), token) {
-				next(w, r)
-				return
-			}
-			if a.DB != nil {
-				if valid, err := store.ValidSession(a.DB, token); err == nil && valid {
-					next(w, r)
-					return
-				}
-			}
+		if a.SessionValid(r) {
+			next(w, r)
+			return
 		}
 		http.Redirect(w, r, "/login", http.StatusSeeOther)
 	}
+}
+
+// SessionValid reports whether the request carries a live admin session —
+// a signed fleet token (SESSION_SECRET) or one of the app's own database
+// sessions. It is the exact check RequireSession enforces, exported for
+// gates that need the answer without the redirect (the library's OPDS
+// catalog, scrap's author view). An app-local reimplementation that checks
+// only the database silently breaks the moment fleet sessions turn on.
+func (a *Auth) SessionValid(r *http.Request) bool {
+	token, ok := auth.Session(r)
+	if !ok {
+		return false
+	}
+	if secret, _ := fleetSessionConfig(); secret != "" &&
+		auth.VerifySignedSession(secret, sessionEpoch(), token) {
+		return true
+	}
+	if a.DB != nil {
+		if valid, err := store.ValidSession(a.DB, token); err == nil && valid {
+			return true
+		}
+	}
+	return false
 }
 
 // unsafeMethod reports whether a request can change state. GET/HEAD/OPTIONS

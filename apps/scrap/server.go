@@ -196,14 +196,12 @@ func validID(id string) bool {
 
 // ── view gates ─────────────────────────────────────────────────────────────
 
-// sessionValid reports whether the request carries a live author session.
+// sessionValid reports whether the request carries a live author session —
+// fleet or database-backed, the same check RequireSession runs on the
+// compose and manage pages, so the author's browser is recognized on paste
+// views under either session scheme.
 func (s *Server) sessionValid(r *http.Request) bool {
-	token, ok := auth.Session(r)
-	if !ok {
-		return false
-	}
-	valid, err := store.ValidSession(s.db, token)
-	return err == nil && valid
+	return s.auth.SessionValid(r)
 }
 
 // presentedTokens collects every token credential on the request: the ?t=
