@@ -29,6 +29,8 @@ jobs:
 
       - run: make test
 
+      - run: make race
+
       - name: Obsidian plugin harness
         run: node obsidian-plugin/farfield-sync/test.js
 

@@ -9,6 +9,7 @@ import (
 	"net/url"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -55,6 +56,11 @@ func TestSplitFrontmatter(t *testing.T) {
 }
 
 func TestRenderPostBodyResolvesBlobEmbeds(t *testing.T) {
+	// The renderer resolves distinct CIDs in parallel, so the stub's handler
+	// runs on several goroutines at once and the tally needs a lock — without
+	// one the map write races, which the runtime reports as a fatal error
+	// rather than a test failure.
+	var mu sync.Mutex
 	counts := map[string]int{}
 	blobs := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if !strings.HasSuffix(r.URL.Path, "/meta") {
@@ -62,7 +68,9 @@ func TestRenderPostBodyResolvesBlobEmbeds(t *testing.T) {
 			return
 		}
 		cid := strings.TrimSuffix(strings.TrimPrefix(r.URL.Path, "/blobs/"), "/meta")
+		mu.Lock()
 		counts[cid]++
+		mu.Unlock()
 		mime := map[string]string{
 			"bimg":  "image/png",
 			"bvid":  "video/mp4",
@@ -101,6 +109,8 @@ func TestRenderPostBodyResolvesBlobEmbeds(t *testing.T) {
 	if strings.Contains(out, "<b>world</b>") {
 		t.Fatalf("raw HTML leaked into rendered body:\n%s", out)
 	}
+	mu.Lock()
+	defer mu.Unlock()
 	if counts["bimg"] != 1 || counts["bvid"] != 1 || counts["baud"] != 1 || counts["bfile"] != 1 {
 		t.Fatalf("metadata fetch counts = %#v, want each CID once", counts)
 	}
