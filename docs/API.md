@@ -17,7 +17,10 @@ single-binary services; the website reads three of them.
 
 The `backup` service is internal (tailnet-only) and has no public API. The
 `keys` service (`https://keys.farfield.systems`) is the admin credential
-minter — a password-gated UI, no public API beyond `/status`.
+minter — a password-gated UI, no public API beyond `/status`. The `pulse`
+service (`https://pulse.farfield.systems`) is uptime monitoring + traffic
+analytics — session-gated console, no public API beyond `/status`; see
+`docs/PULSE.md`.
 
 ## Conventions
 
