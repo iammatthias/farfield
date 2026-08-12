@@ -85,3 +85,44 @@ func TestRoutes(t *testing.T) {
 		t.Errorf("GET /docs/nope.html = %d, want 404", rec.Code)
 	}
 }
+
+// TestStatusNegotiation: browsers get the branded fleet observation, every
+// other client keeps the JSON contract the healthcheck and pulse rely on.
+func TestStatusNegotiation(t *testing.T) {
+	h, err := routes()
+	if err != nil {
+		t.Fatalf("routes: %v", err)
+	}
+
+	// No Accept: text/html — the JSON contract, byte-compatible.
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/status", nil))
+	if rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), `"service":"apex"`) {
+		t.Fatalf("JSON /status = %d %q", rec.Code, rec.Body.String())
+	}
+
+	// A browser gets the observation page: every fleet service is a row, and
+	// on a dev machine with no siblings running the sweep still renders —
+	// services simply read as down. Probes are 2s worst-case; the sweep runs
+	// concurrently so the whole render stays inside one timeout.
+	req := httptest.NewRequest(http.MethodGet, "/status", nil)
+	req.Header.Set("Accept", "text/html,application/xhtml+xml")
+	rec = httptest.NewRecorder()
+	h.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("HTML /status = %d", rec.Code)
+	}
+	body := rec.Body.String()
+	if !strings.Contains(body, "Fleet status") {
+		t.Fatal("observation page not rendered")
+	}
+	for _, svc := range []string{"content", "pulse", "backup", "sideload"} {
+		if !strings.Contains(body, svc) {
+			t.Errorf("observation page missing service %q", svc)
+		}
+	}
+	// apex is the prober itself — always up, so the summary is at least 1/N.
+	if !strings.Contains(body, "1/15 services up") && !strings.Contains(body, "15/15 services up") {
+		t.Errorf("summary line missing or wrong: %q", body)
+	}
+}

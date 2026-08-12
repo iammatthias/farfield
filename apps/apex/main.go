@@ -211,9 +211,14 @@ func routes() (http.Handler, error) {
 	// Shared farfield theme at the canonical path; docs layer style.css over it.
 	mux.Handle("GET /static/styles.css", theme.CSSHandler())
 
-	mux.HandleFunc("GET /status", func(w http.ResponseWriter, r *http.Request) {
-		web.WriteJSON(w, http.StatusOK, map[string]any{"service": "apex", "ok": true})
-	})
+	// /status is content-negotiated: a browser (Accept: text/html) gets the
+	// branded fleet observation page, everything else — the Docker
+	// healthcheck, pulse probes, curl — keeps the JSON contract.
+	sp, err := newStatusPage()
+	if err != nil {
+		return nil, err
+	}
+	mux.HandleFunc("GET /status", sp.handle)
 
 	// Crawlers fetch these per hostname. apex is the only farfield host with
 	// more than one page, so its sitemap enumerates the docs registry —

@@ -1,0 +1,140 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name="theme-color" content="#0e222d">
+<meta name="robots" content="noindex">
+<title>Fleet status — Farfield Systems</title>
+<link rel="icon" href="data:image/svg+xml,<svg%20xmlns='http://www.w3.org/2000/svg'%20viewBox='0%200%2064%2064'><rect%20width='64'%20height='64'%20rx='12'%20fill='%230e222d'/><circle%20cx='32'%20cy='32'%20r='13'%20fill='none'%20stroke='%23f3e5d1'%20stroke-width='2'%20opacity='.8'/><circle%20cx='32'%20cy='32'%20r='3.5'%20fill='%23e59f67'/></svg>">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=Inter:wght@400;500&family=Newsreader:opsz,wght@6..72,400&display=swap">
+<style>
+  /* Observation mode: a minimal field containing a measurement. The field is
+     Deep Space; the observations are the fleet; orange appears only when a
+     service actually needs attention. */
+  *,*::before,*::after{margin:0;padding:0;box-sizing:border-box}
+  :root{
+    --ff-space:#0e222d;
+    --ff-paper:#f3e5d1;
+    --ff-horizon:#e59f67;
+    --ff-mist:#9babb3;
+    --border:rgba(243,229,209,.14);
+  }
+  body{
+    min-height:100vh;
+    background:var(--ff-space);
+    color:var(--ff-paper);
+    font-family:"Inter",system-ui,sans-serif;
+    display:flex;
+    justify-content:center;
+    padding:clamp(3rem, 12vh, 8rem) clamp(1.25rem, 6vw, 4rem) 4rem;
+  }
+  main{width:100%;max-width:36rem;display:flex;flex-direction:column;gap:2.5rem}
+
+  header{display:flex;flex-direction:column;gap:.9rem;align-items:flex-start}
+  .motif{display:block}
+  h1{
+    font-family:"Newsreader",Georgia,serif;
+    font-weight:400;
+    font-size:clamp(2.2rem, 6vw, 3.2rem);
+    line-height:1.0;
+    letter-spacing:-.025em;
+  }
+  .readout{
+    font-family:"IBM Plex Mono",ui-monospace,monospace;
+    font-size:.72rem;
+    font-weight:500;
+    letter-spacing:.14em;
+    text-transform:uppercase;
+    color:var(--ff-mist);
+  }
+
+  ul{list-style:none;border-top:1px solid var(--border)}
+  li{
+    display:flex;
+    align-items:baseline;
+    gap:1rem;
+    padding:.7rem 0;
+    border-bottom:1px solid var(--border);
+  }
+  .svc{font-weight:500;font-size:.95rem}
+  .svc a{color:inherit;text-decoration:none;border-bottom:1px solid rgba(243,229,209,.25)}
+  .svc a:hover{border-color:rgba(243,229,209,.6)}
+  .svc a:focus-visible{outline:2px solid var(--ff-horizon);outline-offset:2px}
+  .track{
+    flex:1;
+    border-bottom:1px dotted rgba(243,229,209,.18);
+    transform:translateY(-.3em);
+  }
+  .ms{
+    font-family:"IBM Plex Mono",ui-monospace,monospace;
+    font-size:.75rem;
+    color:var(--ff-mist);
+    min-width:5ch;
+    text-align:right;
+  }
+  .state{
+    font-family:"IBM Plex Mono",ui-monospace,monospace;
+    font-size:.75rem;
+    font-weight:500;
+    letter-spacing:.08em;
+    min-width:6ch;
+    display:inline-flex;
+    align-items:center;
+    gap:.5em;
+  }
+  .state .dot{width:6px;height:6px;border-radius:50%}
+  .ok{color:var(--ff-mist)}
+  .ok .dot{background:var(--ff-mist)}
+  .down{color:var(--ff-horizon)}
+  .down .dot{background:var(--ff-horizon)}
+
+  footer{display:flex;justify-content:space-between;align-items:baseline;gap:1rem}
+  .home{
+    font-size:.9rem;
+    font-weight:500;
+    color:var(--ff-paper);
+    text-decoration:none;
+    border-bottom:1px solid rgba(243,229,209,.35);
+    padding-bottom:1px;
+  }
+  .home:hover{border-color:rgba(243,229,209,.7)}
+  .home:focus-visible{outline:2px solid var(--ff-horizon);outline-offset:3px}
+</style>
+</head>
+<body>
+<main>
+  <header>
+    <svg class="motif" width="28" height="28" viewBox="0 0 28 28" aria-hidden="true">
+      <circle cx="14" cy="14" r="11" fill="none" stroke="#f3e5d1" stroke-width="1" opacity=".5"/>
+      <circle cx="14" cy="14" r="2.5" fill="{{if eq .Up .Total}}#9babb3{{else}}#e59f67{{end}}"/>
+    </svg>
+    <h1>Fleet status</h1>
+    <p class="readout">{{.Up}}/{{.Total}} services up · probed {{.ProbedAt}}</p>
+  </header>
+
+  <ul>
+    {{range .Observations}}
+    <li>
+      <span class="svc">{{if .Public}}<a href="https://{{.Public}}/">{{.Name}}</a>{{else}}{{.Name}}{{end}}</span>
+      <span class="track" aria-hidden="true"></span>
+      {{if .OK}}
+      <span class="ms">{{if .LatencyMS}}{{.LatencyMS}}ms{{else}}—{{end}}</span>
+      <span class="state ok"><span class="dot"></span>ok</span>
+      {{else}}
+      <span class="ms">—</span>
+      <span class="state down"><span class="dot"></span>down</span>
+      {{end}}
+    </li>
+    {{end}}
+  </ul>
+
+  <footer>
+    <a class="home" href="/">&larr; farfield.systems</a>
+    <span class="readout">observation refreshes each visit</span>
+  </footer>
+</main>
+</body>
+</html>
