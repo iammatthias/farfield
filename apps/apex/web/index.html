@@ -62,10 +62,10 @@
      canvas, left-set type, one idea at a time. */
   .copy{
     position:fixed;
-    top:clamp(4rem, 20vh, 14rem);
+    top:clamp(4rem, 26vh, 19rem);
     left:clamp(1.5rem, 56vw, 62vw);
     right:clamp(1.25rem, 6vw, 6rem);
-    max-width:34ch;
+    max-width:40ch;
     display:flex;
     flex-direction:column;
     align-items:flex-start;
@@ -91,16 +91,17 @@
   .lede{
     font-family:var(--font-sans);
     font-weight:400;
-    font-size:clamp(1rem, 2vw, 1.2rem);
+    font-size:clamp(1rem, 1.4vw, 1.3rem);
     line-height:1.5;
     color:rgba(243,229,209,.85);
-    max-width:30ch;
+    max-width:36ch;
+    text-wrap:pretty;
   }
   .actions{
     display:flex;
     flex-wrap:wrap;
     align-items:center;
-    gap:1.25rem;
+    gap:1.5rem;
   }
   .button-primary{
     font-family:var(--font-sans);
@@ -118,13 +119,13 @@
   .button-primary:focus-visible{outline:2px solid var(--ff-horizon);outline-offset:2px}
   .status-link{
     font-family:var(--font-mono);
-    font-size:.78rem;
+    font-size:.85rem;
     font-weight:500;
     letter-spacing:.08em;
-    color:rgba(243,229,209,.9);
+    color:rgba(243,229,209,.92);
     text-decoration:none;
-    border-bottom:1px solid rgba(243,229,209,.4);
-    padding-bottom:1px;
+    border-bottom:1px solid rgba(243,229,209,.45);
+    padding-bottom:2px;
     text-shadow:0 1px 2px rgba(14,34,45,.55);
     transition:color 140ms ease-out,border-color 140ms ease-out;
   }

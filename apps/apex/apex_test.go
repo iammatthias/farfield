@@ -115,7 +115,7 @@ func TestStatusNegotiation(t *testing.T) {
 		t.Fatalf("HTML /status = %d", rec.Code)
 	}
 	body := rec.Body.String()
-	if !strings.Contains(body, "Fleet status") {
+	if !strings.Contains(body, "Farfield status") {
 		t.Fatal("observation page not rendered")
 	}
 	for _, svc := range []string{"content", "pulse", "backup", "sideload"} {

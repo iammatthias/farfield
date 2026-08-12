@@ -18,6 +18,6 @@
   <div class="endpoint"><span class="method">GET</span><span class="path">/traffic</span><div class="returns">Per-app daily hits, uniques, paths, and referrers.</div></div>
   <div class="endpoint"><span class="method">GET</span><span class="path">/status</span><div class="returns">Health check — <code>{"service":"pulse","ok":true,"targets":N}</code>.</div></div>
 
-  <h2>Relation to the fleet status page</h2>
+  <h2>Relation to the farfield status page</h2>
   <p><a href="https://farfield.systems/status">farfield.systems/status</a> is a live snapshot from inside the compose network — is every process answering right now. Pulse is the instrument with memory: it measures the public path, keeps history, and knows what happened last Tuesday. A broken tunnel shows only in pulse; a blip three days ago shows only in pulse.</p>
 {{end}}
