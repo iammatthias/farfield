@@ -77,6 +77,7 @@ func TestNoRawIPOrUAPersisted(t *testing.T) {
 	want := map[string]bool{
 		"id": true, "ts": true, "path": true, "method": true, "status": true,
 		"latency_ms": true, "vkey": true, "ref_host": true, "country": true,
+		"bot": true, // a classification — never the User-Agent itself
 	}
 	rows, err := db.Query(`SELECT name FROM pragma_table_info('requests')`)
 	if err != nil {
@@ -261,5 +262,46 @@ func TestVisitorKeyUsesResolvedClientIP(t *testing.T) {
 	// Different resolved addresses must land on different visitor keys.
 	if a, b := s.vkey(web.ClientIP(trusted), "UA"), s.vkey(web.ClientIP(spoofer), "UA"); a == b {
 		t.Error("a spoofed header collapsed two visitors onto one key")
+	}
+}
+
+// TestBotClassification: declared clients and missing UAs are bots; real
+// browser strings are not — and the row records the verdict.
+func TestBotClassification(t *testing.T) {
+	for ua, want := range map[string]bool{
+		"":            true,
+		"curl/8.4.0":  true,
+		"Googlebot/2.1 (+http://www.google.com/bot.html)": true,
+		"python-requests/2.31":                            true,
+		"Go-http-client/2.0":                              true,
+		"Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0 Safari/537.36": false,
+		"Mozilla/5.0 (iPhone; CPU iPhone OS 17_5 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.5 Mobile/15E148 Safari/604.1": false,
+	} {
+		if got := isBot(ua); got != want {
+			t.Errorf("isBot(%q) = %v, want %v", ua, got, want)
+		}
+	}
+
+	db, scPath := testDB(t)
+	rec := New(db, "testapp")
+	t.Cleanup(rec.Close)
+	sc := readSidecar(t, scPath)
+	h := rec.Wrap(http.HandlerFunc(
+		func(w http.ResponseWriter, r *http.Request) { w.Write([]byte("ok")) }))
+
+	bot := httptest.NewRequest("GET", "/scan", nil)
+	bot.Header.Set("User-Agent", "zgrab/0.x")
+	h.ServeHTTP(httptest.NewRecorder(), bot)
+	human := httptest.NewRequest("GET", "/page", nil)
+	human.Header.Set("User-Agent", "Mozilla/5.0 (Macintosh) AppleWebKit/537.36 Chrome/126.0 Safari/537.36")
+	h.ServeHTTP(httptest.NewRecorder(), human)
+	waitForRows(t, sc, 2)
+
+	var botFlag int
+	if err := sc.QueryRow(`SELECT bot FROM requests WHERE path = '/scan'`).Scan(&botFlag); err != nil || botFlag != 1 {
+		t.Fatalf("bot row flag = %d (err %v), want 1", botFlag, err)
+	}
+	if err := sc.QueryRow(`SELECT bot FROM requests WHERE path = '/page'`).Scan(&botFlag); err != nil || botFlag != 0 {
+		t.Fatalf("human row flag = %d (err %v), want 0", botFlag, err)
 	}
 }

@@ -99,6 +99,12 @@ func (pw *plateWriter) WriteHeader(code int) {
 		return
 	}
 	pw.wrote = true
+	// No 404 leaves the fleet cacheable: the mux's default not-found carries
+	// no headers at all, and an edge cache rule would happily hold it. Only
+	// fill the gap — a handler that set its own Cache-Control knows better.
+	if code == http.StatusNotFound && pw.Header().Get("Cache-Control") == "" {
+		pw.Header().Set("Cache-Control", "no-store")
+	}
 	if code == http.StatusNotFound && pw.wantsPlate() {
 		pw.replaced = true
 		h := pw.Header()

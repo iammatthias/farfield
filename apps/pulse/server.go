@@ -66,6 +66,7 @@ func run(host, port string) error {
 		},
 	}
 
+	seedTargets(db)
 	startChecker(db)
 	// PULSE_COLLECT_INTERVAL takes a Go duration; "0" disables the collector
 	// (the checker has no traffic to miss, so it always runs under serve).

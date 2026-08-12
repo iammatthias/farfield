@@ -54,7 +54,8 @@ import (
 // schema is the requests table the middleware self-creates on first use.
 // The INTEGER PRIMARY KEY is SQLite's rowid, which is itself the table's
 // b-tree key — the collector's `WHERE id > ? ORDER BY id` scan needs no
-// further index.
+// further index. bot is a classification, not the User-Agent itself — the
+// raw UA still exists only as vkey hash input, never stored.
 const schema = `
 CREATE TABLE IF NOT EXISTS requests (
 	id         INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -65,7 +66,8 @@ CREATE TABLE IF NOT EXISTS requests (
 	latency_ms INTEGER NOT NULL,
 	vkey       TEXT    NOT NULL,
 	ref_host   TEXT    NOT NULL DEFAULT '',
-	country    TEXT    NOT NULL DEFAULT ''
+	country    TEXT    NOT NULL DEFAULT '',
+	bot        INTEGER NOT NULL DEFAULT 0
 );`
 
 // retention is how long raw request rows are kept before the prune goroutine
@@ -139,6 +141,21 @@ func openSidecar(db *sql.DB) (*sql.DB, error) {
 	if _, err := tdb.Exec(schema); err != nil {
 		tdb.Close()
 		return nil, err
+	}
+	// Self-migration for sidecars created before the bot column existed —
+	// the same idempotent ensure-column discipline the apps use.
+	var n int
+	if err := tdb.QueryRow(`SELECT COUNT(*) FROM pragma_table_info('requests')
+		WHERE name = 'bot'`).Scan(&n); err != nil {
+		tdb.Close()
+		return nil, err
+	}
+	if n == 0 {
+		if _, err := tdb.Exec(`ALTER TABLE requests
+			ADD COLUMN bot INTEGER NOT NULL DEFAULT 0`); err != nil {
+			tdb.Close()
+			return nil, err
+		}
 	}
 	return tdb, nil
 }
@@ -216,6 +233,35 @@ type event struct {
 	vkey      string
 	refHost   string
 	country   string
+	bot       bool
+}
+
+// botMarkers are the User-Agent substrings (lowercased) that mark a request
+// as automated. Declared clients — crawlers, HTTP libraries, scanners — not
+// an attempt to unmask a browser-faking scraper; those surface through the
+// collector's not-found bucket instead. The Cloudflare edge already refuses
+// the most obvious of these, so what lands here is mostly direct and
+// tunnel-internal traffic.
+var botMarkers = []string{
+	"bot", "crawl", "spider", "slurp", "curl", "wget", "python", "httpx",
+	"go-http-client", "java/", "libwww", "httpclient", "okhttp", "scrapy",
+	"headless", "phantom", "scanner", "masscan", "zgrab", "nuclei", "nmap",
+	"monitor", "uptime", "probe", "feedfetcher", "facebookexternalhit",
+}
+
+// isBot classifies a User-Agent. An empty UA is a bot: every real browser
+// sends one.
+func isBot(ua string) bool {
+	if ua == "" {
+		return true
+	}
+	l := strings.ToLower(ua)
+	for _, m := range botMarkers {
+		if strings.Contains(l, m) {
+			return true
+		}
+	}
+	return false
 }
 
 // Recorder owns the sidecar database handle, the write queue, the day salt,
@@ -258,6 +304,7 @@ func (rec *Recorder) middleware(next http.Handler) http.Handler {
 			vkey:      rec.salt.vkey(web.ClientIP(r), r.UserAgent()),
 			refHost:   refHost(r.Referer()),
 			country:   r.Header.Get("CF-IPCountry"),
+			bot:       isBot(r.UserAgent()),
 		}
 		select {
 		case rec.ch <- ev:
@@ -291,11 +338,15 @@ func (rec *Recorder) writeLoop() {
 
 // write inserts one recorded event, counting a drop on failure.
 func (rec *Recorder) write(ev event) {
+	bot := 0
+	if ev.bot {
+		bot = 1
+	}
 	_, err := rec.db.Exec(`INSERT INTO requests
-		(ts, path, method, status, latency_ms, vkey, ref_host, country)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+		(ts, path, method, status, latency_ms, vkey, ref_host, country, bot)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		ev.ts, ev.path, ev.method, ev.status, ev.latencyMS,
-		ev.vkey, ev.refHost, ev.country)
+		ev.vkey, ev.refHost, ev.country, bot)
 	if err != nil {
 		rec.noteDrop()
 	}

@@ -1,0 +1,23 @@
+{{define "content"}}
+  <h1>pulse</h1>
+  <p class="meta"><code>https://pulse.farfield.systems</code></p>
+
+  <p>The fleet's observability service: uptime monitoring from the outside and traffic analytics from the inside, in one session-gated console. The only public surface is <code>GET /status</code>, which exposes nothing beyond a target count.</p>
+
+  <h2>Uptime</h2>
+  <p>A checker loop probes configured HTTP targets — the fleet's public URLs, through the Cloudflare tunnel, the same path a real visitor takes — each on its own cadence. Every probe outcome is recorded; the console shows 24h/7d/30d uptime percentages, latency sparklines, and an incident log.</p>
+  <p>Failure handling is two-stage so tunnel flakes do not page as outages: a failed probe is retried once and only the retry's outcome is recorded, and an incident opens only after consecutive recorded fails (recovery closes on the first ok, undebounced). Raw probe results are kept for 45 days; incidents are kept forever.</p>
+
+  <h2>Traffic</h2>
+  <p>Every other farfield app records one row per handled request into a telemetry sidecar database via <code>lib/pulse</code>. Privacy is by construction: no raw IP and no raw User-Agent are ever stored — a request is attributed to a visitor key derived from a salt that lives only in memory and rotates at UTC midnight, so visitors cannot be linked across days even with the database in hand.</p>
+  <p>Pulse's collector sweeps those sidecars every few minutes and folds them into daily aggregates: hits and exact uniques per day/app/path, and referrer counts. Raw rows age out after 14 days; the aggregates are the permanent record.</p>
+
+  <h2>Console</h2>
+  <div class="endpoint"><span class="method">GET</span><span class="path">/</span><div class="returns">Overview — every target's state, uptime windows, and recent incidents.</div></div>
+  <div class="endpoint"><span class="method">GET</span><span class="path">/targets</span><div class="returns">Target CRUD — URL, expected status, per-target probe interval.</div></div>
+  <div class="endpoint"><span class="method">GET</span><span class="path">/traffic</span><div class="returns">Per-app daily hits, uniques, paths, and referrers.</div></div>
+  <div class="endpoint"><span class="method">GET</span><span class="path">/status</span><div class="returns">Health check — <code>{"service":"pulse","ok":true,"targets":N}</code>.</div></div>
+
+  <h2>Relation to the fleet status page</h2>
+  <p><a href="https://farfield.systems/status">farfield.systems/status</a> is a live snapshot from inside the compose network — is every process answering right now. Pulse is the instrument with memory: it measures the public path, keeps history, and knows what happened last Tuesday. A broken tunnel shows only in pulse; a blip three days ago shows only in pulse.</p>
+{{end}}

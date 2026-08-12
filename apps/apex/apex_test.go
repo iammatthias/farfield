@@ -5,6 +5,8 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+
+	"github.com/iammatthias/farfield/lib/fleet"
 )
 
 func TestRoutes(t *testing.T) {
@@ -124,5 +126,20 @@ func TestStatusNegotiation(t *testing.T) {
 	// apex is the prober itself — always up, so the summary is at least 1/N.
 	if !strings.Contains(body, "1/15 services up") && !strings.Contains(body, "15/15 services up") {
 		t.Errorf("summary line missing or wrong: %q", body)
+	}
+}
+
+// TestDocsCoverFleet: every service in the fleet registry has a docs page.
+// This is what catches "the new app never got documented" — pulse and scrap
+// shipped months before anyone noticed the docs site had no page for them.
+func TestDocsCoverFleet(t *testing.T) {
+	docs := map[string]bool{}
+	for _, d := range docPages {
+		docs[d.Key] = true
+	}
+	for _, svc := range fleet.Services() {
+		if !docs[svc.Name] {
+			t.Errorf("fleet service %q has no docs page — add templates/docs/%s.html and a docPages entry", svc.Name, svc.Name)
+		}
 	}
 }

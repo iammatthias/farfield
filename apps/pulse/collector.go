@@ -100,7 +100,7 @@ func collectApp(db *sql.DB, app, path string) error {
 		cursor = 0
 	}
 
-	rows, err := src.Query(`SELECT id, ts, path, method, status, vkey, ref_host
+	rows, err := src.Query(`SELECT id, ts, path, method, status, vkey, ref_host, bot
 		FROM requests WHERE id > ? ORDER BY id`, cursor)
 	if err != nil {
 		return err
@@ -115,13 +115,26 @@ func collectApp(db *sql.DB, app, path string) error {
 	maxID := cursor
 	for rows.Next() {
 		var id int64
-		var status int
+		var status, bot int
 		var ts, reqPath, method, vkey, refHost string
-		if err := rows.Scan(&id, &ts, &reqPath, &method, &status, &vkey, &refHost); err != nil {
+		if err := rows.Scan(&id, &ts, &reqPath, &method, &status, &vkey, &refHost, &bot); err != nil {
 			return err
 		}
 		maxID = id
 		day := tsDay(ts)
+
+		// Cardinality control, and honest analytics. Declared bots collapse
+		// onto one path and never count as visitors or referrers — they are
+		// visible in the console as "(bot)" without minting a row per probe.
+		// Not-found paths collapse the same way: a scanner sweeping ten
+		// thousand guesses is one bucket, not ten thousand rows per day.
+		if bot != 0 {
+			hits[hitKey{day, "(bot)", method, statusBucket(status)}]++
+			continue
+		}
+		if status == 404 {
+			reqPath = "(not found)"
+		}
 		hk := hitKey{day, reqPath, method, statusBucket(status)}
 		hits[hk]++
 		if vkey != "" {

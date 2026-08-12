@@ -156,3 +156,30 @@ func TestNotFoundPlateServesArt(t *testing.T) {
 		t.Fatalf("ETag revalidation: status = %d, want 304", w.Code)
 	}
 }
+
+// TestNoCacheable404s: every 404 flavor leaves with Cache-Control: no-store —
+// the mux default (both the plate rewrite and the curl passthrough) and the
+// JSON WriteError — so an edge cache rule can never pin "not found" over a
+// thing that now exists.
+func TestNoCacheable404s(t *testing.T) {
+	h := NotFoundPlate(http.NewServeMux())
+
+	// Browser-shaped: the plate page.
+	if w := browserGet(t, h, "/nope"); w.Header().Get("Cache-Control") != "no-store" {
+		t.Fatalf("plate 404 Cache-Control = %q", w.Header().Get("Cache-Control"))
+	}
+	// curl-shaped: the plain passthrough.
+	r := httptest.NewRequest("GET", "/nope", nil)
+	r.Header.Set("Accept", "*/*")
+	w := httptest.NewRecorder()
+	h.ServeHTTP(w, r)
+	if w.Header().Get("Cache-Control") != "no-store" {
+		t.Fatalf("plain 404 Cache-Control = %q", w.Header().Get("Cache-Control"))
+	}
+	// JSON API errors.
+	w = httptest.NewRecorder()
+	WriteError(w, http.StatusNotFound, "no such thing")
+	if w.Header().Get("Cache-Control") != "no-store" {
+		t.Fatalf("WriteError Cache-Control = %q", w.Header().Get("Cache-Control"))
+	}
+}

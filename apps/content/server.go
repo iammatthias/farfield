@@ -540,6 +540,11 @@ func (s *Server) handleAPIEntries(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	limit, page := parsePaging(q.Get("limit"), q.Get("page"))
+	// ?bodies=0 is the slim list: everything but the markdown bodies, for
+	// index surfaces that only need title/excerpt/tags. The flag is part of
+	// the ETag input — a slim response must never satisfy a full request's
+	// revalidation, or a client would keep a bodyless copy believing it full.
+	slim := q.Get("bodies") == "0"
 
 	// List-level ETag from a cheap fingerprint, checked before the full list
 	// query — an unchanged client revalidates without a single body loading.
@@ -550,7 +555,7 @@ func (s *Server) handleAPIEntries(w http.ResponseWriter, r *http.Request) {
 		web.WriteError(w, http.StatusInternalServerError, "could not list entries")
 		return
 	}
-	if listETagDone(w, r, fmt.Sprintf("entries|%s|%d|%d|%d|%s", collection, int(status), limit, page, fp)) {
+	if listETagDone(w, r, fmt.Sprintf("entries|%s|%d|%d|%d|%v|%s", collection, int(status), limit, page, slim, fp)) {
 		return
 	}
 
@@ -565,6 +570,11 @@ func (s *Server) handleAPIEntries(w http.ResponseWriter, r *http.Request) {
 	}
 	if entries == nil {
 		entries = []Entry{}
+	}
+	if slim {
+		for i := range entries {
+			entries[i].Body = ""
+		}
 	}
 	web.WriteJSON(w, http.StatusOK, map[string]any{"entries": entries})
 }

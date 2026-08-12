@@ -9,9 +9,15 @@ import (
 // Inline-SVG chart builders — no JavaScript, no chart library. Every value
 // interpolated is numeric or passes through template/html escaping upstream,
 // and day strings are server-generated YYYY-MM-DD.
+//
+// Ink comes from the theme, not from hex literals: data draws in
+// currentColor (the page's --ink, so charts read in both light and dark) at
+// the observation weight, axes recede to a hairline, and only a failure
+// takes the alarm plate — field, observation, signal. CSS variables are not
+// valid in SVG presentation attributes, so the alarm fill rides a style="".
 
 // sparkline renders a target's recent latencies as a small polyline. Failed
-// checks are marked with accent-red ticks at their position. checks is
+// checks are marked with alarm-red ticks at their position. checks is
 // oldest-first; an empty slice yields an em-dash placeholder.
 func sparkline(checks []Check) template.HTML {
 	const w, h, pad = 120.0, 24.0, 2.0
@@ -32,13 +38,13 @@ func sparkline(checks []Check) template.HTML {
 		fmt.Fprintf(&pts, "%.1f,%.1f ", x, y)
 		if !c.OK {
 			fmt.Fprintf(&fails,
-				`<rect x="%.1f" y="0" width="2" height="%.0f" fill="#d93a00"/>`,
+				`<rect x="%.1f" y="0" width="2" height="%.0f" style="fill:var(--alarm)"/>`,
 				x-1, h)
 		}
 	}
 	return template.HTML(fmt.Sprintf(
 		`<svg class="spark" viewBox="0 0 %.0f %.0f" width="%.0f" height="%.0f" role="img" aria-label="latency, last %d checks, max %d ms">`+
-			`%s<polyline points="%s" fill="none" stroke="#0a0a0a" stroke-width="1.2"/></svg>`,
+			`%s<polyline points="%s" fill="none" stroke="currentColor" stroke-opacity="0.65" stroke-width="1.2"/></svg>`,
 		w, h, w, h, len(checks), maxLat, fails.String(), strings.TrimSpace(pts.String())))
 }
 
@@ -65,18 +71,19 @@ func barChart(days []DayCount, label string) template.HTML {
 			bh = 1 // zero days keep a dim 1px stub, so gaps read as gaps
 		}
 		fmt.Fprintf(&bars,
-			`<rect x="%.1f" y="%.1f" width="%.1f" height="%.1f" fill="#0a0a0a" fill-opacity="%s"><title>%s — %d %s</title></rect>`,
+			`<rect x="%.1f" y="%.1f" width="%.1f" height="%.1f" fill="currentColor" fill-opacity="%s"><title>%s — %d %s</title></rect>`,
 			x, h-pad-bh, barW, bh, barOpacity(d.N), d.Day, d.N, label)
 	}
 	return template.HTML(fmt.Sprintf(
-		`<svg class="bars" viewBox="0 0 %.0f %.0f" preserveAspectRatio="none" role="img" aria-label="%s per day">%s<line x1="0" y1="%.1f" x2="%.0f" y2="%.1f" stroke="#0a0a0a" stroke-width="1"/></svg>`,
+		`<svg class="bars" viewBox="0 0 %.0f %.0f" preserveAspectRatio="none" role="img" aria-label="%s per day">%s<line x1="0" y1="%.1f" x2="%.0f" y2="%.1f" stroke="currentColor" stroke-opacity="0.35" stroke-width="1"/></svg>`,
 		w, h, label, bars.String(), h-pad+1, w, h-pad+1))
 }
 
-// barOpacity dims the zero-day stubs so gaps read as gaps.
+// barOpacity dims the zero-day stubs so gaps read as gaps; full days carry
+// the observation weight, not solid ink.
 func barOpacity(n int) string {
 	if n == 0 {
-		return "0.12"
+		return "0.1"
 	}
-	return "1"
+	return "0.7"
 }

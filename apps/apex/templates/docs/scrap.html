@@ -1,0 +1,22 @@
+{{define "content"}}
+  <h1>scrap</h1>
+  <p class="meta"><code>https://scrap.farfield.systems</code></p>
+
+  <p>A pastebin: text and code snippets with syntax highlighting, optional expiry, and three visibilities — public, unlisted, and token-locked. A locked paste is shareable by URL but opens only with its access token, which can be rolled or removed at any time without changing the URL.</p>
+
+  <h2>Public surface</h2>
+  <div class="endpoint"><span class="method">GET</span><span class="path">/pastes</span><div class="returns">The public paste index.</div></div>
+  <div class="endpoint"><span class="method">GET</span><span class="path">/{id}</span><div class="returns">A paste, rendered with syntax highlighting. Unlisted pastes resolve here but are not indexed; locked pastes prompt for their token.</div></div>
+  <div class="endpoint"><span class="method">GET</span><span class="path">/{id}/raw</span><div class="returns">The paste body as plain text — curl-friendly.</div></div>
+  <div class="endpoint"><span class="method">GET</span><span class="path">/status</span><div class="returns">Health check.</div></div>
+
+  <h2>API</h2>
+  <p>Write operations take the env key or a minted <code>ffk_…</code> key (scope <em>write</em>, app <em>scrap</em>) as <code>X-API-Key</code> or a bearer token.</p>
+  <div class="endpoint"><span class="method">POST</span><span class="path">/api/pastes</span><div class="returns">Create a paste — body, title, language, visibility, expiry.</div></div>
+  <div class="endpoint"><span class="method">DELETE</span><span class="path">/api/pastes/{id}</span><div class="returns">Delete a paste.</div></div>
+  <div class="endpoint"><span class="method">POST</span><span class="path">/api/pastes/{id}/token/roll</span><div class="returns">Roll a locked paste's access token.</div></div>
+  <div class="endpoint"><span class="method">DELETE</span><span class="path">/api/pastes/{id}/token</span><div class="returns">Remove the lock entirely.</div></div>
+
+  <h2>Housekeeping</h2>
+  <p>Expired pastes are deleted (with their tokens) by an hourly sweep and again on demand; nothing lingers past its expiry. The admin console can also purge everything expired in one action.</p>
+{{end}}

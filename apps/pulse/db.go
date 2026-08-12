@@ -86,6 +86,11 @@ CREATE TABLE IF NOT EXISTS vkeys_seen (
 	path TEXT NOT NULL,
 	vkey TEXT NOT NULL,
 	PRIMARY KEY (day, app, path, vkey)
+);
+
+CREATE TABLE IF NOT EXISTS seeded_targets (
+	name      TEXT PRIMARY KEY,
+	seeded_at TEXT NOT NULL
 );`
 
 // openDB opens (or creates) the pulse database and brings its schema

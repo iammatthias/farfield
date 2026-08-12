@@ -2,9 +2,9 @@
   <h1>backup</h1>
   <p class="meta"><code>tailnet-only</code></p>
 
-  <p>An internal service that snapshots every app's SQLite database into Cloudflare R2 as content-addressed <code>tar.gz</code> files. There is no public API or HTML interface — the service is reachable only on the Tailscale tailnet for security.</p>
+  <p>An internal service that snapshots every app's SQLite database into Cloudflare R2 as content-addressed files. There is no public API or HTML interface — the service is reachable only on the Tailscale tailnet for security.</p>
 
-  <p>Backups are taken on a schedule and uploaded with a CIDv1 hash of the archive. Because the hash is content-addressed, identical databases produce identical backup identifiers, providing implicit deduplication and verification.</p>
+  <p>Backups are taken on a schedule (every six hours) and stored under the CIDv1 hash of the snapshot bytes. Because the hash is content-addressed, an unchanged database hashes to a snapshot already on record and uploads nothing — request telemetry lives outside the app databases precisely so quiet apps stay byte-identical between real changes. Snapshots age out on a retention ladder: everything for 48 hours, daily for 30 days, weekly for 90, and each app's newest forever.</p>
 
   <figure class="screenshot">
     <img src="assets/backup.png?v=20260520-loggedin" alt="Screenshot of the Farfield backup UI" width="1280" height="800" loading="lazy">

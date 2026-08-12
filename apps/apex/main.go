@@ -47,10 +47,12 @@ var docPages = []doc{
 	{"daily", "daily", "Daily", "Daily — Farfield Docs"},
 	{"bookmarks", "bookmarks", "Bookmarks", "Bookmarks — Farfield Docs"},
 	{"qr", "qr", "QR", "QR — Farfield Docs"},
+	{"scrap", "scrap", "Scrap", "Scrap — Farfield Docs"},
 	{"keys", "keys", "Keys", "Keys — Farfield Docs"},
 	{"sideload", "sideload", "Sideload", "Sideload — Farfield Docs"},
 	{"bard", "bard", "Bard", "Bard — Farfield Docs"},
 	{"dead-presidents", "dead-presidents", "Dead Presidents", "Dead Presidents — Farfield Docs"},
+	{"pulse", "pulse", "Pulse", "Pulse — Farfield Docs"},
 	{"backup", "backup", "Backup", "Backup — Farfield Docs"},
 	{"skills", "skills", "Skills", "Skills — Farfield Docs"},
 }

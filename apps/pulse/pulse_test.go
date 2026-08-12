@@ -340,7 +340,8 @@ func seedSourceDB(t *testing.T, dir, app string) *sql.DB {
 		id INTEGER PRIMARY KEY AUTOINCREMENT, ts TEXT NOT NULL,
 		path TEXT NOT NULL, method TEXT NOT NULL, status INTEGER NOT NULL,
 		latency_ms INTEGER NOT NULL, vkey TEXT NOT NULL,
-		ref_host TEXT NOT NULL DEFAULT '', country TEXT NOT NULL DEFAULT '')`); err != nil {
+		ref_host TEXT NOT NULL DEFAULT '', country TEXT NOT NULL DEFAULT '',
+		bot INTEGER NOT NULL DEFAULT 0)`); err != nil {
 		t.Fatalf("create requests: %v", err)
 	}
 	return src
@@ -602,4 +603,102 @@ func readBody(t *testing.T, resp *http.Response) string {
 		t.Fatal(err)
 	}
 	return string(b)
+}
+
+// TestSeedTargets pins the seeding contract: every public fleet service gets
+// a target once; an existing target covering the host is adopted rather than
+// duplicated; and a target the operator deletes stays deleted across
+// restarts — seeding is once-per-name, not idempotent-creation.
+func TestSeedTargets(t *testing.T) {
+	dir := t.TempDir()
+	db := newTestDB(t, dir, "pulse.sqlite")
+
+	// An operator-created target already covers the content host.
+	pre := &Target{Name: "content (manual)", URL: "https://content.farfield.systems/",
+		Method: "GET", ExpectedStatus: 200, IntervalS: 300, Enabled: true}
+	if err := insertTarget(db, pre); err != nil {
+		t.Fatal(err)
+	}
+
+	seedTargets(db)
+
+	// content was adopted, not duplicated.
+	if n := countRows(t, db,
+		`SELECT COUNT(*) FROM targets WHERE url LIKE '%content.farfield.systems%'`); n != 1 {
+		t.Fatalf("content targets = %d, want 1 (duplicated)", n)
+	}
+	// Public services got seeded; the tailnet-only backup did not.
+	if n := countRows(t, db,
+		`SELECT COUNT(*) FROM targets WHERE url LIKE '%pulse.farfield.systems%'`); n != 1 {
+		t.Fatalf("pulse target not seeded")
+	}
+	if n := countRows(t, db, `SELECT COUNT(*) FROM targets WHERE name = 'backup'`); n != 0 {
+		t.Fatal("tailnet-only backup must not get a public probe")
+	}
+
+	// The operator deletes a seeded target; a restart must not resurrect it.
+	var qrID int64
+	if err := db.QueryRow(`SELECT id FROM targets WHERE name = 'qr'`).Scan(&qrID); err != nil {
+		t.Fatalf("seeded qr target missing: %v", err)
+	}
+	if err := deleteTarget(db, qrID); err != nil {
+		t.Fatal(err)
+	}
+	seedTargets(db)
+	if n := countRows(t, db, `SELECT COUNT(*) FROM targets WHERE name = 'qr'`); n != 0 {
+		t.Fatal("restart resurrected a deleted target")
+	}
+}
+
+// TestCollectorBucketsBotsAndNotFound: bot rows collapse onto "(bot)" and
+// never count as visitors or referrers; non-bot 404s collapse onto
+// "(not found)"; ordinary traffic keeps its real path.
+func TestCollectorBucketsBotsAndNotFound(t *testing.T) {
+	dir := t.TempDir()
+	dbPath := filepath.Join(dir, "pulse.sqlite")
+	db := newTestDB(t, dir, "pulse.sqlite")
+	src := seedSourceDB(t, dir, "blog")
+
+	ts := time.Now().UTC().Format(time.RFC3339)
+	insert := func(path string, status, bot int, vkey, ref string) {
+		t.Helper()
+		if _, err := src.Exec(`INSERT INTO requests
+			(ts, path, method, status, latency_ms, vkey, ref_host, country, bot)
+			VALUES (?, ?, 'GET', ?, 5, ?, ?, '', ?)`,
+			ts, path, status, vkey, ref, bot); err != nil {
+			t.Fatal(err)
+		}
+	}
+	insert("/real-page", 200, 0, "v1", "example.org") // a visitor
+	insert("/wp-admin/setup.php", 404, 0, "v2", "")   // a scanner guess
+	insert("/phpmyadmin/index.php", 404, 0, "v2", "") // another guess
+	insert("/anything", 200, 1, "v3", "spam.example") // a declared bot
+
+	collectAll(db, dbPath)
+
+	if n := countRows(t, db,
+		`SELECT COALESCE(SUM(hits),0) FROM hits_daily WHERE path = '/real-page'`); n != 1 {
+		t.Fatalf("real page hits = %d, want 1", n)
+	}
+	if n := countRows(t, db,
+		`SELECT COALESCE(SUM(hits),0) FROM hits_daily WHERE path = '(not found)'`); n != 2 {
+		t.Fatalf("(not found) hits = %d, want 2", n)
+	}
+	if n := countRows(t, db, `SELECT COUNT(*) FROM hits_daily
+		WHERE path LIKE '/wp-admin%' OR path LIKE '/phpmyadmin%'`); n != 0 {
+		t.Fatal("scanner paths minted their own rows")
+	}
+	if n := countRows(t, db,
+		`SELECT COALESCE(SUM(hits),0) FROM hits_daily WHERE path = '(bot)'`); n != 1 {
+		t.Fatalf("(bot) hits = %d, want 1", n)
+	}
+	// The bot contributed no visitor and no referrer.
+	if n := countRows(t, db,
+		`SELECT COALESCE(SUM(uniques),0) FROM hits_daily WHERE path = '(bot)'`); n != 0 {
+		t.Fatal("bot counted as a unique visitor")
+	}
+	if n := countRows(t, db,
+		`SELECT COUNT(*) FROM referrers_daily WHERE referrer_host = 'spam.example'`); n != 0 {
+		t.Fatal("bot referrer recorded")
+	}
 }

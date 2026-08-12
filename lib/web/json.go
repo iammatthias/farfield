@@ -15,6 +15,10 @@ func WriteJSON(w http.ResponseWriter, status int, v any) {
 
 // WriteError writes a JSON error body with the given status.
 func WriteError(w http.ResponseWriter, status int, msg string) {
+	// Errors are diagnostic, never content: an edge cache rule that holds a
+	// 404 would keep answering "not found" for hours after the thing exists
+	// (observed live once a /blobs/* cache rule went in front of the fleet).
+	w.Header().Set("Cache-Control", "no-store")
 	WriteJSON(w, status, map[string]string{"error": msg})
 }
 

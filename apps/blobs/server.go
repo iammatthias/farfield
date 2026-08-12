@@ -561,6 +561,16 @@ func (s *Server) handleAPIGetMeta(w http.ResponseWriter, r *http.Request) {
 		web.WriteError(w, http.StatusBadRequest, "malformed cid")
 		return
 	}
+	// Meta is derived from the bytes at upload and never updated, so it is
+	// as content-addressed as the bytes: same caching contract. This is what
+	// lets the CDN edge answer repeat meta reads without riding the tunnel.
+	etag := `"` + cid + `"`
+	if web.ETagMatch(r, cid) {
+		w.Header().Set("ETag", etag)
+		w.Header().Set("Cache-Control", "public, max-age=31536000, immutable")
+		w.WriteHeader(http.StatusNotModified)
+		return
+	}
 	m, err := getMeta(s.db, cid)
 	if err != nil {
 		web.WriteError(w, http.StatusInternalServerError, "could not read metadata")
@@ -570,6 +580,8 @@ func (s *Server) handleAPIGetMeta(w http.ResponseWriter, r *http.Request) {
 		web.WriteError(w, http.StatusNotFound, "blob not found")
 		return
 	}
+	w.Header().Set("ETag", etag)
+	w.Header().Set("Cache-Control", "public, max-age=31536000, immutable")
 	web.WriteJSON(w, http.StatusOK, m)
 }
 

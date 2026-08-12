@@ -10,6 +10,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/iammatthias/farfield/lib/fleet"
 	"github.com/iammatthias/farfield/lib/store"
 	"github.com/iammatthias/farfield/lib/web"
 )
@@ -17,36 +18,11 @@ import (
 //go:embed templates/status.html
 var statusFS embed.FS
 
-// fleetService is one farfield service the status page observes. Internal is
-// the compose-network address its /status answers on — apex probes siblings
-// directly, container to container, so the page reports what is actually
-// running rather than what the tunnel happens to pass. Public is the host a
-// visitor can reach; empty means tailnet-only, so the row gets no link.
-type fleetService struct {
-	Name     string
-	Internal string
-	Public   string
-}
-
-// fleet is the probe registry, compose service names and ports. apex itself
-// is listed with no internal URL — if this handler is running, apex is up.
-var fleet = []fleetService{
-	{"apex", "", "farfield.systems"},
-	{"content", "http://content:8787/status", "content.farfield.systems"},
-	{"feed", "http://feed:8788/status", "feed.farfield.systems"},
-	{"blobs", "http://blobs:8789/status", "blobs.farfield.systems"},
-	{"backup", "http://backup:8791/status", ""},
-	{"daily", "http://daily:8792/status", "daily.farfield.systems"},
-	{"bookmarks", "http://bookmarks:8793/status", "bookmarks.farfield.systems"},
-	{"qr", "http://qr:8794/status", "qr.farfield.systems"},
-	{"bard", "http://bard:8795/status", "bard.farfield.systems"},
-	{"dead-presidents", "http://dead-presidents:8796/status", "dead-presidents.farfield.systems"},
-	{"library", "http://library:8797/status", "library.farfield.systems"},
-	{"pulse", "http://pulse:8798/status", "pulse.farfield.systems"},
-	{"scrap", "http://scrap:8799/status", "scrap.farfield.systems"},
-	{"sideload", "http://sideload:8800/status", "sideload.farfield.systems"},
-	{"keys", "http://keys:8801/status", "keys.farfield.systems"},
-}
+// The probe list comes from lib/fleet — the single source of truth for what
+// farfield is. apex probes each sibling's /status directly on the compose
+// network, container to container, so the page reports what is actually
+// running rather than what the tunnel happens to pass. apex itself is never
+// probed: if this handler is running, apex is up.
 
 // observation is one probed service, rendered as a row.
 type observation struct {
@@ -67,21 +43,22 @@ type fleetReport struct {
 // seconds, it never stalls the page.
 var probeClient = &http.Client{Timeout: 2 * time.Second}
 
-// probeFleet checks every service concurrently and returns rows in registry
-// order. A service is up iff its /status answers 200 inside the timeout.
+// probeFleet checks every service concurrently and returns rows sorted by
+// name. A service is up iff its /status answers 200 inside the timeout.
 func probeFleet() fleetReport {
-	obs := make([]observation, len(fleet))
+	services := fleet.Services()
+	obs := make([]observation, len(services))
 	var wg sync.WaitGroup
-	for i, svc := range fleet {
-		if svc.Internal == "" { // apex — the prober itself
+	for i, svc := range services {
+		if svc.Name == "apex" { // the prober itself
 			obs[i] = observation{Name: svc.Name, Public: svc.Public, OK: true}
 			continue
 		}
 		wg.Add(1)
-		go func(i int, svc fleetService) {
+		go func(i int, svc fleet.Service) {
 			defer wg.Done()
 			start := time.Now()
-			resp, err := probeClient.Get(svc.Internal)
+			resp, err := probeClient.Get(svc.InternalStatusURL())
 			o := observation{Name: svc.Name, Public: svc.Public,
 				LatencyMS: time.Since(start).Milliseconds()}
 			if err == nil {

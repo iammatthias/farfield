@@ -18,9 +18,12 @@
     }
     .post-meta .when { opacity: 0.55; }
     .post-meta .tag { opacity: 0.55; }
+    /* Posts are writing, not chrome — they take the editorial face. */
     .post-body {
       display: flex; flex-direction: column; gap: 0.6rem;
       word-break: break-word;
+      font-family: var(--font-serif);
+      font-size: 1.05rem; line-height: 1.6;
     }
     /* Markdown blocks: vertical rhythm comes from the flex gap. */
     .post-body p, .post-body ul, .post-body ol,

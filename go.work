@@ -19,6 +19,7 @@ use (
 	./lib/auth
 	./lib/backup
 	./lib/cid
+	./lib/fleet
 	./lib/keys
 	./lib/markdown
 	./lib/pulse
