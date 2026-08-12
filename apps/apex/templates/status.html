@@ -91,15 +91,19 @@
   .down{color:var(--ff-horizon)}
   .down .dot{background:var(--ff-horizon)}
 
-  footer{display:flex;justify-content:space-between;align-items:baseline;gap:1rem}
+  /* On narrow screens the readout drops to its own row instead of crowding
+     the link; the link never breaks after its arrow. */
+  footer{display:flex;flex-wrap:wrap;justify-content:space-between;align-items:baseline;gap:.6rem 1rem}
   .home{
     font-size:.9rem;
     font-weight:500;
+    white-space:nowrap;
     color:var(--ff-paper);
     text-decoration:none;
     border-bottom:1px solid rgba(243,229,209,.35);
     padding-bottom:1px;
   }
+  footer .readout{white-space:nowrap}
   .home:hover{border-color:rgba(243,229,209,.7)}
   .home:focus-visible{outline:2px solid var(--ff-horizon);outline-offset:3px}
 </style>
@@ -133,7 +137,7 @@
 
   <footer>
     <a class="home" href="/">&larr; farfield.systems</a>
-    <span class="readout">observation refreshes each visit</span>
+    <span class="readout">refreshes each visit</span>
   </footer>
 </main>
 </body>
