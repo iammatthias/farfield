@@ -45,3 +45,6 @@ PLAN.md
 
 # Personal Claude Code permission overrides — not team-wide.
 .claude/settings.local.json
+
+# Stray local library output — dev runs must use data/library.
+/library-data/
