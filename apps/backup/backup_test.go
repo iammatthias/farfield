@@ -4,6 +4,8 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+
+	"github.com/iammatthias/farfield/lib/store"
 )
 
 func TestHumanSize(t *testing.T) {
@@ -90,5 +92,35 @@ func TestVerifySnapshot(t *testing.T) {
 	}
 	if _, err := verifySnapshot(junk); err == nil {
 		t.Fatal("garbage file passed verification")
+	}
+}
+
+// TestSnapshotSkipsEmptyDatabases: a database with no tables records
+// nothing — an empty file is not a restore point.
+func TestSnapshotSkipsEmptyDatabases(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("BACKUP_DB_PATH", filepath.Join(dir, "backup.sqlite"))
+	reg, err := openDB(filepath.Join(dir, "backup.sqlite"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer reg.Close()
+
+	// A tables-free app database, the shape apex/bard keep for their sidecar.
+	empty, err := store.OpenDB(filepath.Join(dir, "apex.sqlite"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	empty.Close()
+
+	results := snapshotAll(reg)
+	if len(results) != 1 {
+		t.Fatalf("results = %d, want 1", len(results))
+	}
+	if r := results[0]; r.Err != "" || !r.Skipped {
+		t.Fatalf("empty db result = %+v, want skipped with no error", r)
+	}
+	if n, _ := countBackups(reg); n != 0 {
+		t.Fatalf("registry rows = %d, want 0", n)
 	}
 }
