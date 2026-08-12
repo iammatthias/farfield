@@ -10,6 +10,50 @@
                     </p>
                 </div>
 
+                <figure class="observation" aria-label="Ingress diagram: the Cloudflare edge reaches the fleet through a tunnel to one Caddy reverse proxy; backup is reachable only on the tailnet.">
+                  <svg viewBox="0 0 830 312" role="img">
+                    <g style="font-family:var(--font-mono);font-size:11px" fill="currentColor">
+                      <!-- the edge -->
+                      <circle cx="50" cy="150" r="4.5" fill="currentColor"/>
+                      <text x="50" y="176" text-anchor="middle" opacity="0.6">edge</text>
+                      <!-- the tunnel: a dashed trajectory -->
+                      <path d="M 58 148 C 130 112, 215 112, 286 146" fill="none" stroke="currentColor" stroke-width="1" stroke-dasharray="4 4" opacity="0.55"/>
+                      <text x="172" y="106" text-anchor="middle" opacity="0.6">cloudflare tunnel</text>
+                      <!-- caddy: signal in field -->
+                      <circle cx="300" cy="150" r="11" fill="none" stroke="var(--accent)" stroke-width="1.2" opacity="0.9"/>
+                      <circle cx="300" cy="150" r="3" fill="var(--accent)"/>
+                      <text x="300" y="182" text-anchor="middle" opacity="0.7">caddy :8080</text>
+                      <!-- the fan -->
+                      <g stroke="currentColor" stroke-width="0.75" opacity="0.22">
+                        <line x1="312" y1="146" x2="468" y2="54"/><line x1="312" y1="148" x2="468" y2="102"/><line x1="313" y1="150" x2="468" y2="150"/><line x1="312" y1="152" x2="468" y2="198"/><line x1="312" y1="154" x2="468" y2="246"/>
+                        <line x1="312" y1="146" x2="563" y2="54"/><line x1="312" y1="148" x2="563" y2="102"/><line x1="313" y1="150" x2="563" y2="150"/><line x1="312" y1="152" x2="563" y2="198"/><line x1="312" y1="154" x2="563" y2="246"/>
+                        <line x1="312" y1="146" x2="658" y2="54"/><line x1="312" y1="148" x2="658" y2="102"/><line x1="313" y1="150" x2="658" y2="150"/><line x1="312" y1="152" x2="658" y2="198"/>
+                      </g>
+                      <!-- the services -->
+                      <g opacity="0.85">
+                        <circle cx="472" cy="54" r="3.5"/><text x="482" y="58">content</text>
+                        <circle cx="472" cy="102" r="3.5"/><text x="482" y="106">feed</text>
+                        <circle cx="472" cy="150" r="3.5"/><text x="482" y="154">blobs</text>
+                        <circle cx="472" cy="198" r="3.5"/><text x="482" y="202">library</text>
+                        <circle cx="472" cy="246" r="3.5"/><text x="482" y="250">daily</text>
+                        <circle cx="567" cy="54" r="3.5"/><text x="577" y="58">bookmarks</text>
+                        <circle cx="567" cy="102" r="3.5"/><text x="577" y="106">qr</text>
+                        <circle cx="567" cy="150" r="3.5"/><text x="577" y="154">scrap</text>
+                        <circle cx="567" cy="198" r="3.5"/><text x="577" y="202">sideload</text>
+                        <circle cx="567" cy="246" r="3.5"/><text x="577" y="250">keys</text>
+                        <circle cx="662" cy="54" r="3.5"/><text x="672" y="58">pulse</text>
+                        <circle cx="662" cy="102" r="3.5"/><text x="672" y="106">bard</text>
+                        <circle cx="662" cy="150" r="3.5"/><text x="672" y="154">dead-presidents</text>
+                        <circle cx="662" cy="198" r="3.5"/><text x="672" y="202">apex</text>
+                      </g>
+                      <!-- backup: deliberately off the public path -->
+                      <circle cx="662" cy="288" r="3.5" fill="none" stroke="currentColor" opacity="0.7"/>
+                      <text x="672" y="292" opacity="0.6">backup · tailnet only</text>
+                    </g>
+                  </svg>
+                  <figcaption>Observation 01 · ingress — edge → tunnel → caddy → services</figcaption>
+                </figure>
+
                 <h2>Stack</h2>
                 <p>
                     The standard library plus exactly one dependency:
@@ -34,9 +78,11 @@
                         <em>is</em> the migration step.
                     </li>
                     <li>
-                        <strong>One aesthetic.</strong> The admin UIs share one
-                        warm-instrument look — paper ground, white panels, ink,
-                        one signal red — from a single shared stylesheet.
+                        <strong>One aesthetic.</strong> Every console draws
+                        from a single shared stylesheet — Paper and Deep Space
+                        grounds, Inter for the interface, one Horizon-orange
+                        accent used rarely. The brand guide calls it the far
+                        field; the app UIs are its precision half.
                     </li>
                 </ul>
 
