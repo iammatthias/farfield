@@ -7,6 +7,8 @@
 //
 //	backup                                  serve the HTTP admin UI (default)
 //	backup snapshot                         snapshot every app's database now
+//	backup prune                            dry-run the retention ladder
+//	backup prune --confirm                  drop snapshots past retention now
 //	backup restore <app> <cid>              dry-run a restore from snapshot <cid>
 //	backup restore <app> <cid> --confirm    perform the restore
 package main
@@ -45,6 +47,12 @@ func main() {
 			slog.Error("snapshot failed", "err", err)
 			os.Exit(1)
 		}
+	case "prune":
+		confirm := len(os.Args) > 2 && os.Args[2] == "--confirm"
+		if err := runPrune(confirm); err != nil {
+			slog.Error("prune failed", "err", err)
+			os.Exit(1)
+		}
 	case "restore":
 		if len(os.Args) < 4 {
 			fmt.Fprintln(os.Stderr, "usage: backup restore <app> <cid> [--confirm]")
@@ -57,7 +65,7 @@ func main() {
 		}
 	default:
 		fmt.Fprintln(os.Stderr,
-			"usage: backup [serve | health | snapshot | restore <app> <cid> [--confirm]]")
+			"usage: backup [serve | health | snapshot | prune [--confirm] | restore <app> <cid> [--confirm]]")
 		os.Exit(2)
 	}
 }

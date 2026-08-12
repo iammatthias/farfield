@@ -111,6 +111,13 @@ func (s *Server) runScheduledSnapshot() {
 			slog.Info("scheduled snapshot", "app", res.App, "cid", res.CID, "size", res.Size)
 		}
 	}
+	// Retention rides the same tick (and the same lock) as the snapshots it
+	// thins, so the registry is bounded by construction — no separate
+	// scheduler to configure or forget.
+	if removed, freed := pruneAll(s.db); removed > 0 {
+		slog.Info("pruned snapshots past retention",
+			"snapshots", removed, "freed", humanSize(freed))
+	}
 }
 
 func (s *Server) routes() http.Handler {

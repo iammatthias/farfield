@@ -34,6 +34,15 @@ func TestTargets(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(dir, "content.sqlite-wal"), []byte("x"), 0o644); err != nil {
 		t.Fatal(err)
 	}
+	// nor may the pulse/ telemetry sidecars — request logs are rolling
+	// telemetry, deliberately outside the app databases so snapshots stay
+	// content-stable; backing them up would put the churn right back.
+	if err := os.MkdirAll(filepath.Join(dir, "pulse"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "pulse", "qr.sqlite"), []byte("x"), 0o644); err != nil {
+		t.Fatal(err)
+	}
 	t.Setenv("BACKUP_DB_PATH", filepath.Join(dir, "backup.sqlite"))
 
 	names := map[string]bool{}

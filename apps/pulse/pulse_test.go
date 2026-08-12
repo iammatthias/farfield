@@ -7,6 +7,7 @@ import (
 	"net/http/cookiejar"
 	"net/http/httptest"
 	"net/url"
+	"os"
 	"path/filepath"
 	"strings"
 	"sync/atomic"
@@ -320,12 +321,16 @@ func TestProbeRetry(t *testing.T) {
 	}
 }
 
-// seedSourceDB creates a sibling app database with lib/pulse-shaped request
-// rows and returns it for appending more.
+// seedSourceDB creates an app's telemetry sidecar (pulse/<app>.sqlite, the
+// layout lib/pulse writes) with lib/pulse-shaped request rows and returns it
+// for appending more.
 func seedSourceDB(t *testing.T, dir, app string) *sql.DB {
 	t.Helper()
+	if err := os.MkdirAll(filepath.Join(dir, "pulse"), 0o755); err != nil {
+		t.Fatal(err)
+	}
 	src, err := sql.Open("sqlite",
-		"file:"+filepath.Join(dir, app+".sqlite")+
+		"file:"+filepath.Join(dir, "pulse", app+".sqlite")+
 			"?_pragma=busy_timeout(5000)&_pragma=journal_mode(WAL)")
 	if err != nil {
 		t.Fatalf("open source: %v", err)
@@ -404,12 +409,15 @@ func TestCollectorCursor(t *testing.T) {
 	}
 }
 
-// TestCollectorSkipsAppsWithoutRequests: a sibling db without the lib/pulse
-// table is skipped silently.
+// TestCollectorSkipsAppsWithoutRequests: a stray file in the sidecar
+// directory without the lib/pulse table is skipped silently.
 func TestCollectorSkipsAppsWithoutRequests(t *testing.T) {
 	dir := t.TempDir()
 	db := newTestDB(t, dir, "pulse.sqlite")
-	plain, err := sql.Open("sqlite", "file:"+filepath.Join(dir, "plain.sqlite"))
+	if err := os.MkdirAll(filepath.Join(dir, "pulse"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	plain, err := sql.Open("sqlite", "file:"+filepath.Join(dir, "pulse", "plain.sqlite"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -421,6 +429,82 @@ func TestCollectorSkipsAppsWithoutRequests(t *testing.T) {
 	collectAll(db, filepath.Join(dir, "pulse.sqlite"))
 	if n := countRows(t, db, `SELECT COUNT(*) FROM collector_cursor`); n != 0 {
 		t.Fatalf("cursor rows = %d, want 0", n)
+	}
+}
+
+// TestCollectorCursorRewind: a request log rebuilt from scratch (the one-time
+// migration off in-app tables, or a wiped sidecar) restarts ids at 1 while
+// the stored cursor is still high. The rewind guard must reset and collect
+// the new rows instead of hiding them behind the stale cursor forever.
+func TestCollectorCursorRewind(t *testing.T) {
+	dir := t.TempDir()
+	dbPath := filepath.Join(dir, "pulse.sqlite")
+	db := newTestDB(t, dir, "pulse.sqlite")
+	src := seedSourceDB(t, dir, "blog")
+
+	ts := time.Now().UTC().Format(time.RFC3339)
+	// The stored cursor says the collector has seen through id 100000 — the
+	// legacy table's ids. The rebuilt sidecar holds rows 1 and 2.
+	if _, err := db.Exec(`INSERT INTO collector_cursor
+		(app, last_event_id, last_run) VALUES ('blog', 100000, ?)`, ts); err != nil {
+		t.Fatal(err)
+	}
+	addRequest(t, src, ts, "/a", "v1", "")
+	addRequest(t, src, ts, "/b", "v2", "")
+
+	collectAll(db, dbPath)
+
+	if hits := countRows(t, db, `SELECT COALESCE(SUM(hits),0) FROM hits_daily`); hits != 2 {
+		t.Fatalf("hits after rewind = %d, want 2", hits)
+	}
+	var cursor int64
+	if err := db.QueryRow(`SELECT last_event_id FROM collector_cursor
+		WHERE app = 'blog'`).Scan(&cursor); err != nil || cursor != 2 {
+		t.Fatalf("cursor = %d (err %v), want 2", cursor, err)
+	}
+
+	// And the guard must not re-collect on the next pass.
+	collectAll(db, dbPath)
+	if hits := countRows(t, db, `SELECT COALESCE(SUM(hits),0) FROM hits_daily`); hits != 2 {
+		t.Fatalf("hits after second pass = %d, want 2 (double-counted)", hits)
+	}
+}
+
+// TestPruneChecks: probe results older than the retention window go; newer
+// ones and all incidents stay.
+func TestPruneChecks(t *testing.T) {
+	dir := t.TempDir()
+	db := newTestDB(t, dir, "pulse.sqlite")
+	target := &Target{Name: "t", URL: "http://x", Method: "GET",
+		ExpectedStatus: 200, IntervalS: 60, Enabled: true}
+	if err := insertTarget(db, target); err != nil {
+		t.Fatal(err)
+	}
+	old := time.Now().UTC().Add(-checksRetention - 24*time.Hour).Format(time.RFC3339)
+	fresh := time.Now().UTC().Format(time.RFC3339)
+	for _, ts := range []string{old, fresh} {
+		if _, err := db.Exec(`INSERT INTO checks
+			(target_id, ts, status_code, latency_ms, ok) VALUES (?, ?, 200, 5, 1)`,
+			target.ID, ts); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if _, err := db.Exec(`INSERT INTO incidents (target_id, opened_at, closed_at)
+		VALUES (?, ?, ?)`, target.ID, old, old); err != nil {
+		t.Fatal(err)
+	}
+
+	pruneChecks(db)
+
+	if n := countRows(t, db, `SELECT COUNT(*) FROM checks`); n != 1 {
+		t.Fatalf("checks after prune = %d, want 1", n)
+	}
+	var ts string
+	if err := db.QueryRow(`SELECT ts FROM checks`).Scan(&ts); err != nil || ts != fresh {
+		t.Fatalf("surviving check ts = %q, want the fresh one", ts)
+	}
+	if n := countRows(t, db, `SELECT COUNT(*) FROM incidents`); n != 1 {
+		t.Fatal("incidents must never be pruned")
 	}
 }
 

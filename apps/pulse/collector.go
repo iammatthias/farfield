@@ -24,28 +24,18 @@ func startCollector(db *sql.DB, dbPath string, interval time.Duration) {
 	}()
 }
 
-// collectAll discovers sibling app databases the farfield way: every
-// *.sqlite beside pulse's own database is an app named by its filename stem
-// (the same convention the backup app's snapshot targets use). Pulse's own
-// database is skipped; so is any database without a `requests` table —
-// that app simply has not adopted the lib/pulse middleware yet.
-// Pulse itself deliberately never wires that middleware: traffic to its own
-// gated console is noise, and its database is skipped here anyway.
+// collectAll discovers the telemetry sidecars lib/pulse writes: every
+// *.sqlite under the pulse/ directory beside pulse's own database is an app's
+// request log, named by its filename stem. App databases themselves are never
+// opened — telemetry lives only in the sidecars, which is what keeps the
+// backup app's snapshots of app data content-stable under traffic. A stray
+// file without a `requests` table is skipped silently. Pulse itself
+// deliberately never wires the lib/pulse middleware: traffic to its own gated
+// console is noise.
 func collectAll(db *sql.DB, dbPath string) {
-	own, err := filepath.Abs(dbPath)
-	if err != nil {
-		own = filepath.Clean(dbPath)
-	}
-	matches, _ := filepath.Glob(filepath.Join(filepath.Dir(dbPath), "*.sqlite"))
+	matches, _ := filepath.Glob(filepath.Join(filepath.Dir(dbPath), "pulse", "*.sqlite"))
 	sort.Strings(matches)
 	for _, p := range matches {
-		abs, err := filepath.Abs(p)
-		if err != nil {
-			abs = filepath.Clean(p)
-		}
-		if abs == own {
-			continue // pulse's own database
-		}
 		app := strings.TrimSuffix(filepath.Base(p), ".sqlite")
 		if err := collectApp(db, app, p); err != nil {
 			slog.Warn("collector: app sweep failed", "app", app, "err", err)
@@ -93,6 +83,21 @@ func collectApp(db *sql.DB, app, path string) error {
 		WHERE app = ?`, app).Scan(&cursor)
 	if err != nil && err != sql.ErrNoRows {
 		return err
+	}
+
+	// Rewind guard: ids are AUTOINCREMENT and deletes never lower MAX(id), so
+	// MAX(id) < cursor can only mean the log was rebuilt from scratch — the
+	// one-time migration off the legacy in-app requests tables, or an operator
+	// wiping telemetry. Every row present is then uncollected: reset and read
+	// them all rather than hiding new traffic behind the stale high cursor.
+	var maxNow sql.NullInt64
+	if err := src.QueryRow(`SELECT MAX(id) FROM requests`).Scan(&maxNow); err != nil {
+		return err
+	}
+	if maxNow.Int64 < cursor {
+		slog.Info("collector: request log rewound, resetting cursor",
+			"app", app, "cursor", cursor, "max_id", maxNow.Int64)
+		cursor = 0
 	}
 
 	rows, err := src.Query(`SELECT id, ts, path, method, status, vkey, ref_host

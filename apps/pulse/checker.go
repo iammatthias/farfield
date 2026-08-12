@@ -42,6 +42,8 @@ func failThreshold() int {
 // cadence. Targets are reloaded from the database on every dispatch cycle,
 // so CRUD in the console takes effect without a restart. Next-due times live
 // only in memory; a restart simply probes everything once, immediately.
+// A second goroutine prunes old checks rows once at startup and daily after —
+// the checker writes that table, so the checker bounds it.
 func startChecker(db *sql.DB) {
 	go func() {
 		client := &http.Client{Timeout: checkTimeout}
@@ -52,6 +54,29 @@ func startChecker(db *sql.DB) {
 			dispatchDue(db, client, nextDue, now, threshold)
 		}
 	}()
+	go func() {
+		pruneChecks(db)
+		for range time.Tick(24 * time.Hour) {
+			pruneChecks(db)
+		}
+	}()
+}
+
+// checksRetention is how long raw probe results are kept. The console's
+// longest uptime window is 30 days, so 45 keeps every displayed number fully
+// backed with margin. Without a bound the table grew ~17k rows a day forever
+// (it had passed a million rows and 100+ MB), and since every backup snapshot
+// carries the whole database, that growth was multiplied into R2 four times
+// a day. Incidents are kept forever — they are the small, curated history.
+const checksRetention = 45 * 24 * time.Hour
+
+// pruneChecks deletes checks older than the retention window. RFC 3339 UTC
+// timestamps compare lexically, so a string comparison is a time comparison.
+func pruneChecks(db *sql.DB) {
+	cutoff := time.Now().UTC().Add(-checksRetention).Format(time.RFC3339)
+	if _, err := db.Exec(`DELETE FROM checks WHERE ts < ?`, cutoff); err != nil {
+		slog.Warn("checker: checks prune failed", "err", err)
+	}
 }
 
 // dispatchDue probes (in their own goroutines) every enabled target whose

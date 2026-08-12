@@ -1,8 +1,16 @@
 // Package pulse provides a privacy-preserving traffic-recording middleware
 // for farfield apps. Each handled request becomes one row in a `requests`
-// table inside the app's own SQLite database; the pulse app's collector later
-// reads those rows (read-only, by cursor) and rolls them up into daily
-// aggregates.
+// table inside a telemetry sidecar database — `pulse/<app>.sqlite` beside the
+// app's own database, never in the app's database itself; the pulse app's
+// collector later reads those rows (read-only, by cursor) and rolls them up
+// into daily aggregates.
+//
+// The sidecar exists for the backup pipeline's sake. Request rows are rolling
+// two-week telemetry, yet when they lived in the app's database they dirtied
+// it on every hit, so every 6-hour snapshot of every app hashed to a new CID
+// and uploaded a full copy — the backup app's content-addressed dedup could
+// never fire. With telemetry off to the side, an app whose real data has not
+// changed snapshots to an identical CID and uploads nothing.
 //
 // Privacy by construction: no raw IP and no raw User-Agent are ever stored.
 // A request is attributed to a visitor key (vkey) — the first 8 bytes, hex,
@@ -28,10 +36,13 @@ import (
 	"crypto/sha256"
 	"database/sql"
 	"encoding/hex"
+	"errors"
 	"io"
 	"log/slog"
 	"net/http"
 	"net/url"
+	"os"
+	"path/filepath"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -66,20 +77,31 @@ const retention = 14 * 24 * time.Hour
 // new events are dropped — the request path never blocks on SQLite.
 const chanSize = 256
 
-// New creates a traffic Recorder for the named app: it self-creates the
-// requests table, then starts a single writer goroutine (so request handling
+// New creates a traffic Recorder for the named app: it opens the telemetry
+// sidecar database (`pulse/<name>.sqlite` beside the app's database, derived
+// from the handle itself via PRAGMA database_list), self-creates the requests
+// table there, then starts a single writer goroutine (so request handling
 // never blocks on SQLite) and a daily prune goroutine. Wrap a handler with the
 // returned recorder to record one row per request; call Close on shutdown to
-// stop the goroutines and flush the queue. If the table cannot be created it
-// logs and returns nil — a nil Recorder's Wrap is a pass-through.
+// stop the goroutines and flush the queue. If the sidecar cannot be opened it
+// logs and returns nil — a nil Recorder's Wrap is a pass-through; recording is
+// disabled rather than falling back to writing into the app's database, which
+// would silently re-dirty its backup snapshots.
+//
+// A legacy `requests` table from the versions that wrote into the app's own
+// database is dropped once the sidecar is ready — its rows are rolling
+// telemetry the collector has already aggregated, and leaving them would keep
+// a stale copy in every future snapshot.
 func New(db *sql.DB, app string) *Recorder {
-	if _, err := db.Exec(schema); err != nil {
-		slog.Error("pulse: recording disabled, could not create requests table",
+	tdb, err := openSidecar(db)
+	if err != nil {
+		slog.Error("pulse: recording disabled, could not open telemetry sidecar",
 			"app", app, "err", err)
 		return nil
 	}
+	dropLegacyTable(db, app)
 	rec := &Recorder{
-		db:   db,
+		db:   tdb,
 		app:  app,
 		ch:   make(chan event, chanSize),
 		salt: newSalter(time.Now),
@@ -89,6 +111,76 @@ func New(db *sql.DB, app string) *Recorder {
 	go rec.writeLoop()
 	go rec.pruneLoop()
 	return rec
+}
+
+// openSidecar locates the app's database file through the handle itself
+// (PRAGMA database_list, so no app has to pass its path twice), then opens
+// the sidecar at pulse/<same-filename> in the same directory, creating the
+// directory and the requests table as needed. One connection is enough: the
+// writer goroutine and the daily prune are the only users.
+func openSidecar(db *sql.DB) (*sql.DB, error) {
+	appPath, err := mainDBFile(db)
+	if err != nil {
+		return nil, err
+	}
+	dir := filepath.Join(filepath.Dir(appPath), "pulse")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		return nil, err
+	}
+	path := filepath.Join(dir, filepath.Base(appPath))
+	tdb, err := sql.Open("sqlite",
+		"file:"+path+"?_pragma=busy_timeout(5000)&_pragma=journal_mode(WAL)"+
+			"&_pragma=synchronous(NORMAL)")
+	if err != nil {
+		return nil, err
+	}
+	tdb.SetMaxOpenConns(1)
+	tdb.SetMaxIdleConns(1)
+	if _, err := tdb.Exec(schema); err != nil {
+		tdb.Close()
+		return nil, err
+	}
+	return tdb, nil
+}
+
+// mainDBFile returns the file backing the handle's `main` database. An
+// in-memory or otherwise fileless database is an error — there is nowhere to
+// put a sidecar next to it.
+func mainDBFile(db *sql.DB) (string, error) {
+	rows, err := db.Query(`PRAGMA database_list`)
+	if err != nil {
+		return "", err
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var seq int
+		var name, file string
+		if err := rows.Scan(&seq, &name, &file); err != nil {
+			return "", err
+		}
+		if name == "main" && file != "" {
+			return file, nil
+		}
+	}
+	if err := rows.Err(); err != nil {
+		return "", err
+	}
+	return "", errors.New("app database is not file-backed")
+}
+
+// dropLegacyTable removes the requests table that earlier versions created in
+// the app's own database. Only a table carrying lib/pulse's vkey column is
+// touched — a future app with its own domain `requests` table keeps it.
+func dropLegacyTable(db *sql.DB, app string) {
+	var n int
+	err := db.QueryRow(`SELECT COUNT(*) FROM pragma_table_info('requests')
+		WHERE name = 'vkey'`).Scan(&n)
+	if err != nil || n == 0 {
+		return
+	}
+	if _, err := db.Exec(`DROP TABLE requests`); err != nil {
+		slog.Warn("pulse: could not drop legacy requests table", "app", app, "err", err)
+	}
 }
 
 // Wrap returns next wrapped with request recording. A nil recorder returns next
@@ -102,14 +194,16 @@ func (rec *Recorder) Wrap(next http.Handler) http.Handler {
 }
 
 // Close stops the writer and prune goroutines, flushing whatever is already
-// queued, then returns. Safe on a nil recorder. Apps call it on shutdown, once
-// the HTTP server has stopped accepting requests, so no send races the drain.
+// queued, then closes the sidecar database. Safe on a nil recorder. Apps call
+// it on shutdown, once the HTTP server has stopped accepting requests, so no
+// send races the drain.
 func (rec *Recorder) Close() {
 	if rec == nil {
 		return
 	}
 	close(rec.quit)
 	rec.wg.Wait()
+	rec.db.Close()
 }
 
 // event is one recorded request, queued for the writer goroutine.
@@ -124,10 +218,11 @@ type event struct {
 	country   string
 }
 
-// Recorder owns the write queue, the day salt, and drop accounting. Its
-// goroutines run until Close, which stops them and flushes the queue.
+// Recorder owns the sidecar database handle, the write queue, the day salt,
+// and drop accounting. Its goroutines run until Close, which stops them,
+// flushes the queue, and closes the handle.
 type Recorder struct {
-	db   *sql.DB
+	db   *sql.DB // the telemetry sidecar, owned by the recorder — never the app's database
 	app  string
 	ch   chan event
 	salt *salter

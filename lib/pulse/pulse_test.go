@@ -13,16 +13,32 @@ import (
 	"github.com/iammatthias/farfield/lib/web"
 )
 
-func testDB(t *testing.T) *sql.DB {
+// testDB creates a file-backed app database in its own temp dir and returns
+// it along with the path where New will put the telemetry sidecar.
+func testDB(t *testing.T) (*sql.DB, string) {
 	t.Helper()
-	path := filepath.Join(t.TempDir(), "app.sqlite")
+	dir := t.TempDir()
+	path := filepath.Join(dir, "app.sqlite")
 	db, err := sql.Open("sqlite",
 		"file:"+path+"?_pragma=busy_timeout(5000)&_pragma=journal_mode(WAL)")
 	if err != nil {
 		t.Fatalf("open: %v", err)
 	}
 	t.Cleanup(func() { db.Close() })
-	return db
+	return db, filepath.Join(dir, "pulse", "app.sqlite")
+}
+
+// readSidecar opens a second handle on the sidecar New created, for
+// assertions — the recorder owns and closes its own.
+func readSidecar(t *testing.T, path string) *sql.DB {
+	t.Helper()
+	sc, err := sql.Open("sqlite",
+		"file:"+path+"?_pragma=busy_timeout(5000)&_pragma=journal_mode(WAL)")
+	if err != nil {
+		t.Fatalf("open sidecar: %v", err)
+	}
+	t.Cleanup(func() { sc.Close() })
+	return sc
 }
 
 // TestVKeyRotatesAcrossDays drives the salter's injectable clock across a UTC
@@ -54,7 +70,7 @@ func TestVKeyRotatesAcrossDays(t *testing.T) {
 // TestNoRawIPOrUAPersisted asserts the schema by columns: the requests table
 // must hold exactly the declared privacy-safe set — no IP, no user agent.
 func TestNoRawIPOrUAPersisted(t *testing.T) {
-	db := testDB(t)
+	db, _ := testDB(t)
 	if _, err := db.Exec(schema); err != nil {
 		t.Fatalf("schema: %v", err)
 	}
@@ -101,9 +117,10 @@ func waitForRows(t *testing.T, db *sql.DB, n int) {
 // TestMiddlewareRecordsRow drives a wrapped handler via httptest and checks
 // the recorded row — and that excluded paths record nothing.
 func TestMiddlewareRecordsRow(t *testing.T) {
-	db := testDB(t)
+	db, scPath := testDB(t)
 	rec := New(db, "testapp")
 	t.Cleanup(rec.Close)
+	sc := readSidecar(t, scPath)
 	h := rec.Wrap(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusTeapot)
 	}))
@@ -114,12 +131,12 @@ func TestMiddlewareRecordsRow(t *testing.T) {
 	r.Header.Set("CF-IPCountry", "US")
 	r.RemoteAddr = "203.0.113.9:51234"
 	h.ServeHTTP(httptest.NewRecorder(), r)
-	waitForRows(t, db, 1)
+	waitForRows(t, sc, 1)
 
 	var path, method, vkey, refHost, country string
 	var status int
 	var latency int64
-	err := db.QueryRow(`SELECT path, method, status, latency_ms, vkey,
+	err := sc.QueryRow(`SELECT path, method, status, latency_ms, vkey,
 		ref_host, country FROM requests`).
 		Scan(&path, &method, &status, &latency, &vkey, &refHost, &country)
 	if err != nil {
@@ -146,9 +163,9 @@ func TestMiddlewareRecordsRow(t *testing.T) {
 		h.ServeHTTP(httptest.NewRecorder(), httptest.NewRequest("GET", p, nil))
 	}
 	h.ServeHTTP(httptest.NewRecorder(), httptest.NewRequest("POST", "/other", nil))
-	waitForRows(t, db, 2)
+	waitForRows(t, sc, 2)
 	var n int
-	if err := db.QueryRow(`SELECT COUNT(*) FROM requests`).Scan(&n); err != nil {
+	if err := sc.QueryRow(`SELECT COUNT(*) FROM requests`).Scan(&n); err != nil {
 		t.Fatal(err)
 	}
 	if n != 2 {
@@ -156,17 +173,63 @@ func TestMiddlewareRecordsRow(t *testing.T) {
 	}
 }
 
+// TestSidecarIsolatesTelemetry pins the structural contract: traffic never
+// touches the app's own database (so backup snapshots of it stay
+// content-stable), a legacy in-app requests table is dropped, and the app's
+// own tables survive the migration.
+func TestSidecarIsolatesTelemetry(t *testing.T) {
+	db, scPath := testDB(t)
+	// An earlier lib/pulse wrote its table into the app database; an app also
+	// has domain tables of its own.
+	if _, err := db.Exec(schema); err != nil {
+		t.Fatalf("legacy schema: %v", err)
+	}
+	if _, err := db.Exec(`CREATE TABLE notes (id INTEGER PRIMARY KEY)`); err != nil {
+		t.Fatal(err)
+	}
+
+	rec := New(db, "testapp")
+	if rec == nil {
+		t.Fatal("New returned nil for a file-backed database")
+	}
+	t.Cleanup(rec.Close)
+
+	var n int
+	if err := db.QueryRow(`SELECT COUNT(*) FROM sqlite_master
+		WHERE type = 'table' AND name = 'requests'`).Scan(&n); err != nil {
+		t.Fatal(err)
+	}
+	if n != 0 {
+		t.Fatal("legacy requests table survived in the app database")
+	}
+	if err := db.QueryRow(`SELECT COUNT(*) FROM sqlite_master
+		WHERE type = 'table' AND name = 'notes'`).Scan(&n); err != nil || n != 1 {
+		t.Fatalf("app's own table lost in migration (n=%d, err=%v)", n, err)
+	}
+
+	// Traffic lands in the sidecar and only there.
+	h := rec.Wrap(http.HandlerFunc(
+		func(w http.ResponseWriter, r *http.Request) { w.Write([]byte("ok")) }))
+	h.ServeHTTP(httptest.NewRecorder(), httptest.NewRequest("GET", "/x", nil))
+	waitForRows(t, readSidecar(t, scPath), 1)
+	if err := db.QueryRow(`SELECT COUNT(*) FROM sqlite_master
+		WHERE type = 'table' AND name = 'requests'`).Scan(&n); err != nil || n != 0 {
+		t.Fatalf("traffic recreated requests in the app database (n=%d, err=%v)", n, err)
+	}
+}
+
 // TestStatusDefaultsTo200 covers handlers that never call WriteHeader.
 func TestStatusDefaultsTo200(t *testing.T) {
-	db := testDB(t)
+	db, scPath := testDB(t)
 	rec := New(db, "testapp")
 	t.Cleanup(rec.Close)
+	sc := readSidecar(t, scPath)
 	h := rec.Wrap(http.HandlerFunc(
 		func(w http.ResponseWriter, r *http.Request) { w.Write([]byte("ok")) }))
 	h.ServeHTTP(httptest.NewRecorder(), httptest.NewRequest("GET", "/", nil))
-	waitForRows(t, db, 1)
+	waitForRows(t, sc, 1)
 	var status int
-	if err := db.QueryRow(`SELECT status FROM requests`).Scan(&status); err != nil {
+	if err := sc.QueryRow(`SELECT status FROM requests`).Scan(&status); err != nil {
 		t.Fatal(err)
 	}
 	if status != 200 {
