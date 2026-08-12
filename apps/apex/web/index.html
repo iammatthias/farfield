@@ -45,7 +45,9 @@
     position:fixed;inset:0;
     width:100%;height:100%;
     object-fit:cover;
-    object-position:38% 78%;
+    /* The plate is mirrored: planet and figure live right, so the crop
+       biases right and the open sky on the left yields last. */
+    object-position:62% 78%;
   }
   @media (max-aspect-ratio: 9/10){
     body{overflow:auto}
@@ -58,12 +60,13 @@
     }
   }
 
-  /* Copy sits in the open sky, away from the focal planet. ~35% of the
-     canvas, left-set type, one idea at a time. */
+  /* Copy sits top-left, same as the os lander. The plate is mirrored so
+     the open starry sky carries the type and the planet, figure, and path
+     keep the right half to themselves. */
   .copy{
     position:fixed;
-    top:clamp(4rem, 26vh, 19rem);
-    left:clamp(1.5rem, 56vw, 62vw);
+    top:clamp(4rem, 22vh, 16rem);
+    left:clamp(1.5rem, 5vw, 4.5rem);
     right:clamp(1.25rem, 6vw, 6rem);
     max-width:40ch;
     display:flex;
@@ -87,15 +90,17 @@
     line-height:.96;
     letter-spacing:-.025em;
     text-wrap:balance;
+    text-shadow:0 1px 3px rgba(8,14,26,.5);
   }
   .lede{
     font-family:var(--font-sans);
     font-weight:400;
     font-size:clamp(1rem, 1.4vw, 1.3rem);
     line-height:1.5;
-    color:rgba(243,229,209,.85);
+    color:rgba(243,229,209,.88);
     max-width:36ch;
     text-wrap:pretty;
+    text-shadow:0 1px 2px rgba(8,14,26,.55);
   }
   .actions{
     display:flex;
