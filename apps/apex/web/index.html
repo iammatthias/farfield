@@ -3,9 +3,9 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
-<meta name="theme-color" content="#040810">
+<meta name="theme-color" content="#0d2e52">
 <title>Farfield Systems</title>
-<link rel="icon" href="data:image/svg+xml,<svg%20xmlns='http://www.w3.org/2000/svg'%20viewBox='0%200%2064%2064'><rect%20width='64'%20height='64'%20rx='14'%20fill='%231f1b16'/><text%20x='32'%20y='42'%20font-family='ui-monospace,Menlo,monospace'%20font-size='26'%20font-weight='600'%20text-anchor='middle'%20fill='%23fcfbf8'>ff</text></svg>">
+<link rel="icon" href="data:image/svg+xml,<svg%20xmlns='http://www.w3.org/2000/svg'%20viewBox='0%200%2064%2064'><rect%20width='64'%20height='64'%20rx='12'%20fill='%230e222d'/><circle%20cx='32'%20cy='32'%20r='13'%20fill='none'%20stroke='%23f3e5d1'%20stroke-width='2'%20opacity='.8'/><circle%20cx='32'%20cy='32'%20r='3.5'%20fill='%23e59f67'/></svg>">
 <meta name="description" content="A set of small, single-binary Go services — self-hosted backends for content and media, plus a few experiments that run entirely in the browser.">
 <link rel="canonical" href="https://farfield.systems/">
 <meta property="og:type" content="website">
@@ -13,161 +13,143 @@
 <meta property="og:url" content="https://farfield.systems/">
 <meta property="og:title" content="Farfield Systems">
 <meta property="og:description" content="A set of small, single-binary Go services — self-hosted backends for content and media, plus a few experiments that run entirely in the browser.">
-<meta name="twitter:card" content="summary">
+<meta property="og:image" content="https://farfield.systems/frontispiece.jpg">
+<meta property="og:image:width" content="1353">
+<meta property="og:image:height" content="1162">
+<meta name="twitter:card" content="summary_large_image">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=Inter:wght@400;500&family=Newsreader:opsz,wght@6..72,400;6..72,500&display=swap">
 <style>
+  /* Farfield brand: an immense field, a distant signal, one reason to keep
+     looking. The landscape carries the emotion; the type stays precise.
+     Tokens from the visual style guide — Deep Space, Paper, Horizon. */
   *,*::before,*::after{margin:0;padding:0;box-sizing:border-box}
-  html,body{height:100%;width:100%;background:#040810;overflow:hidden}
-  .scene{position:fixed;inset:0;contain:strict}
-  .scene svg{display:block;width:100%;height:100%}
-
-  .docs-link{
-    position:fixed;
-    left:50%;
-    bottom:calc(2rem + env(safe-area-inset-bottom));
-    transform:translateX(-50%);
-    z-index:2;
-    font-family:ui-monospace,"SF Mono",Menlo,Consolas,monospace;
-    font-size:.75rem;
-    font-weight:500;
-    letter-spacing:.14em;
-    text-transform:uppercase;
-    color:#e8eef8;
-    background:rgba(4,8,16,.55);
-    border:1px solid rgba(232,238,248,.55);
-    padding:.625rem 1.1rem;
-    text-decoration:none;
-    backdrop-filter:blur(4px);
-    -webkit-backdrop-filter:blur(4px);
-    transition:background .15s ease,color .15s ease,border-color .15s ease;
+  :root{
+    --ff-space:#0e222d;
+    --ff-paper:#f3e5d1;
+    --ff-horizon:#e59f67;
+    --ff-sky:#0d2e52; /* sampled from the plate's upper field */
+    --font-display:"Newsreader",Georgia,serif;
+    --font-sans:"Inter",system-ui,sans-serif;
+    --font-mono:"IBM Plex Mono",ui-monospace,monospace;
   }
-  .docs-link:hover,
-  .docs-link:focus-visible{
-    background:#e8eef8;
-    color:#040810;
-    border-color:#e8eef8;
-  }
-  .docs-link:focus-visible{outline:2px solid #e8eef8;outline-offset:2px}
+  html,body{height:100%;width:100%}
+  body{background:var(--ff-sky);overflow:hidden}
 
-  @media (prefers-reduced-motion:no-preference){
-    .halo{
-      animation:pulse 5s ease-in-out infinite;
-      transform-origin:center;transform-box:fill-box
+  /* The plate. Wide screens: full bleed, horizon kept low. Tall screens:
+     the artwork holds the bottom of the page at its own scale and the flat
+     field above extends its sky — the planet stays small. The point is
+     distance. */
+  .plate{
+    position:fixed;inset:0;
+    width:100%;height:100%;
+    object-fit:cover;
+    object-position:38% 78%;
+  }
+  @media (max-aspect-ratio: 9/10){
+    body{overflow:auto}
+    .plate{
+      top:auto;bottom:0;
+      height:auto;max-height:72vh;
+      object-fit:contain;object-position:bottom;
+      -webkit-mask-image:linear-gradient(to bottom,transparent 0,#000 12%);
+      mask-image:linear-gradient(to bottom,transparent 0,#000 12%);
     }
   }
-  @keyframes pulse{
-    0%,100%{opacity:.6;transform:scale(1)}
-    50%{opacity:1;transform:scale(1.22)}
+
+  /* Copy sits in the open sky, away from the focal planet. ~35% of the
+     canvas, left-set type, one idea at a time. */
+  .copy{
+    position:fixed;
+    top:clamp(4rem, 20vh, 14rem);
+    left:clamp(1.5rem, 56vw, 62vw);
+    right:clamp(1.25rem, 6vw, 6rem);
+    max-width:34ch;
+    display:flex;
+    flex-direction:column;
+    align-items:flex-start;
+    gap:1.4rem;
+    color:var(--ff-paper);
   }
+  @media (max-aspect-ratio: 9/10){
+    .copy{
+      position:static;
+      max-width:40ch;
+      padding:calc(env(safe-area-inset-top) + 3.5rem) 7vw 0;
+    }
+  }
+
+  .note{
+    font-family:var(--font-mono);
+    font-size:.72rem;
+    font-weight:500;
+    letter-spacing:.18em;
+    text-transform:uppercase;
+    color:#9babb3;
+  }
+  h1{
+    font-family:var(--font-display);
+    font-weight:400;
+    font-size:clamp(3rem, 8vw, 5.5rem);
+    line-height:.96;
+    letter-spacing:-.025em;
+    text-wrap:balance;
+  }
+  .lede{
+    font-family:var(--font-sans);
+    font-weight:400;
+    font-size:clamp(1rem, 2vw, 1.2rem);
+    line-height:1.5;
+    color:rgba(243,229,209,.85);
+    max-width:30ch;
+  }
+  .actions{
+    display:flex;
+    flex-wrap:wrap;
+    align-items:center;
+    gap:1.25rem;
+  }
+  .button-primary{
+    font-family:var(--font-sans);
+    font-weight:500;
+    font-size:.95rem;
+    color:var(--ff-space);
+    background:var(--ff-horizon);
+    border:1px solid var(--ff-horizon);
+    border-radius:4px;
+    padding:.6rem 1.2rem;
+    text-decoration:none;
+    transition:background 140ms ease-out,border-color 140ms ease-out;
+  }
+  .button-primary:hover{background:#eeb183;border-color:#eeb183}
+  .button-primary:focus-visible{outline:2px solid var(--ff-horizon);outline-offset:2px}
+  .status-link{
+    font-family:var(--font-mono);
+    font-size:.78rem;
+    font-weight:500;
+    letter-spacing:.08em;
+    color:rgba(243,229,209,.9);
+    text-decoration:none;
+    border-bottom:1px solid rgba(243,229,209,.4);
+    padding-bottom:1px;
+    text-shadow:0 1px 2px rgba(14,34,45,.55);
+    transition:color 140ms ease-out,border-color 140ms ease-out;
+  }
+  .status-link:hover{color:var(--ff-paper);border-color:rgba(243,229,209,.7)}
+  .status-link:focus-visible{outline:2px solid var(--ff-horizon);outline-offset:3px}
 </style>
 </head>
 <body>
-<div class="scene">
-  <svg viewBox="0 0 1600 900" preserveAspectRatio="xMidYMid slice"
-       xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Pale Blue Dot">
-    <defs>
-      <!-- Vertical sky: deep blue at top → dusty lavender at bottom -->
-      <linearGradient id="sky" x1="50%" y1="0%" x2="50%" y2="100%">
-        <stop offset="0%"   stop-color="#040810"/>
-        <stop offset="12%"  stop-color="#0a1322"/>
-        <stop offset="30%"  stop-color="#1c2a44"/>
-        <stop offset="50%"  stop-color="#3e4d6e"/>
-        <stop offset="70%"  stop-color="#7686a8"/>
-        <stop offset="88%"  stop-color="#a6afc8"/>
-        <stop offset="100%" stop-color="#bcc1d4"/>
-      </linearGradient>
-
-      <!-- Top-right corner deepening (real photo goes near-black there) -->
-      <radialGradient id="cornerTR" cx="92%" cy="-8%" r="70%">
-        <stop offset="0%"   stop-color="#000" stop-opacity=".82"/>
-        <stop offset="55%"  stop-color="#000" stop-opacity=".22"/>
-        <stop offset="100%" stop-color="#000" stop-opacity="0"/>
-      </radialGradient>
-
-      <!-- Faint teal whisper, upper-left -->
-      <radialGradient id="cornerTL" cx="0%" cy="14%" r="60%">
-        <stop offset="0%"   stop-color="#0c3242" stop-opacity=".35"/>
-        <stop offset="100%" stop-color="#0c3242" stop-opacity="0"/>
-      </radialGradient>
-
-      <!-- Dusty warm hint, lower-left -->
-      <radialGradient id="cornerBL" cx="18%" cy="100%" r="60%">
-        <stop offset="0%"   stop-color="#c198a8" stop-opacity=".16"/>
-        <stop offset="100%" stop-color="#c198a8" stop-opacity="0"/>
-      </radialGradient>
-
-      <!-- Main scattered-light beam, cross-section -->
-      <linearGradient id="beamMain" x1="0%" x2="100%" y1="0" y2="0">
-        <stop offset="0%"   stop-color="#c8d2e8" stop-opacity="0"/>
-        <stop offset="35%"  stop-color="#c8d2e8" stop-opacity=".28"/>
-        <stop offset="50%"  stop-color="#e8eef8" stop-opacity=".58"/>
-        <stop offset="65%"  stop-color="#c8d2e8" stop-opacity=".28"/>
-        <stop offset="100%" stop-color="#c8d2e8" stop-opacity="0"/>
-      </linearGradient>
-
-      <!-- Secondary, fainter beam -->
-      <linearGradient id="beamSide" x1="0%" x2="100%" y1="0" y2="0">
-        <stop offset="0%"   stop-color="#aab4ce" stop-opacity="0"/>
-        <stop offset="50%"  stop-color="#cad4ec" stop-opacity=".20"/>
-        <stop offset="100%" stop-color="#aab4ce" stop-opacity="0"/>
-      </linearGradient>
-
-      <!-- Lengthwise fade so beams don't hard-edge at top/bottom -->
-      <linearGradient id="lenFade" x1="0" y1="0" x2="0" y2="1">
-        <stop offset="0%"   stop-color="#fff" stop-opacity=".35"/>
-        <stop offset="35%"  stop-color="#fff" stop-opacity="1"/>
-        <stop offset="65%"  stop-color="#fff" stop-opacity="1"/>
-        <stop offset="100%" stop-color="#fff" stop-opacity=".4"/>
-      </linearGradient>
-      <mask id="lenMask">
-        <rect x="-600" y="-400" width="2800" height="1700" fill="url(#lenFade)"/>
-      </mask>
-
-      <!-- Earth — halo + core -->
-      <radialGradient id="halo" cx="50%" cy="50%" r="50%">
-        <stop offset="0%"   stop-color="#f4f8fc" stop-opacity=".9"/>
-        <stop offset="35%"  stop-color="#c8d4ec" stop-opacity=".4"/>
-        <stop offset="100%" stop-color="#c8d4ec" stop-opacity="0"/>
-      </radialGradient>
-      <radialGradient id="core" cx="40%" cy="40%" r="60%">
-        <stop offset="0%"   stop-color="#ffffff"/>
-        <stop offset="55%"  stop-color="#dae2f0"/>
-        <stop offset="100%" stop-color="#a8b8d4"/>
-      </radialGradient>
-
-      <!-- Film grain -->
-      <filter id="grain" x="0" y="0" width="100%" height="100%">
-        <feTurbulence type="fractalNoise" baseFrequency=".85" numOctaves="2" seed="4" stitchTiles="stitch"/>
-        <feColorMatrix values="0 0 0 0 .9   0 0 0 0 .9   0 0 0 0 .96   0 0 0 .07 0"/>
-      </filter>
-    </defs>
-
-    <!-- 1. Sky base -->
-    <rect width="1600" height="900" fill="url(#sky)"/>
-
-    <!-- 2. Corner color washes -->
-    <rect width="1600" height="900" fill="url(#cornerTR)"/>
-    <rect width="1600" height="900" fill="url(#cornerTL)"/>
-    <rect width="1600" height="900" fill="url(#cornerBL)"/>
-
-    <!-- 3. Scattered-light beams (rotated subtly; pivot = screen center) -->
-    <g transform="rotate(-4 800 450)" mask="url(#lenMask)">
-      <!-- Faint secondary beam, left of center -->
-      <rect x="380" y="-300" width="220" height="1600" fill="url(#beamSide)"/>
-      <!-- Main bright beam — passes through screen center -->
-      <rect x="650" y="-300" width="300" height="1600" fill="url(#beamMain)"/>
-    </g>
-
-    <!-- 4. Earth — the Pale Blue Dot, dead center (800, 450) -->
-    <g transform="translate(800 450)">
-      <circle class="halo" r="14" fill="url(#halo)"/>
-      <circle r="2.4" fill="url(#core)"/>
-    </g>
-
-    <!-- 5. Film grain over everything -->
-    <rect width="1600" height="900" filter="url(#grain)" opacity=".4"/>
-  </svg>
-</div>
-
-<a class="docs-link" href="/docs/" aria-label="Read the Farfield Systems documentation">Docs &rarr;</a>
+<img class="plate" src="/frontispiece.webp" alt="A halftone-print landscape at dusk: a lone figure stands at the top of a winding hilltop path, watching an enormous planet rise over distant mountains beneath a deep-blue starry sky." fetchpriority="high">
+<main class="copy">
+  <p class="note">Distance made legible</p>
+  <h1>Farfield Systems</h1>
+  <p class="lede">Small, single-binary services — self-hosted backends for content, media, and a few experiments.</p>
+  <nav class="actions" aria-label="Primary">
+    <a class="button-primary" href="/docs/">Documentation&nbsp;&rarr;</a>
+    <a class="status-link" href="/status">status</a>
+  </nav>
+</main>
 </body>
 </html>

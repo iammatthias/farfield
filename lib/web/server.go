@@ -15,11 +15,13 @@ import (
 // Serve runs h on host:port with sane timeouts and a graceful shutdown on
 // SIGINT/SIGTERM. ReadHeaderTimeout bounds slow-header clients (slowloris);
 // there is deliberately no Read/WriteTimeout because farfield apps stream
-// uploads and downloads of up to 100 MiB.
+// uploads and downloads of up to 100 MiB. Every handler is wrapped in
+// NotFoundPlate, so the whole fleet answers a browser's missing page with
+// the same printed plate and no app has to remember to.
 func Serve(host, port string, h http.Handler) error {
 	srv := &http.Server{
 		Addr:              net.JoinHostPort(host, port),
-		Handler:           h,
+		Handler:           NotFoundPlate(h),
 		ReadHeaderTimeout: 10 * time.Second,
 		IdleTimeout:       2 * time.Minute,
 	}
