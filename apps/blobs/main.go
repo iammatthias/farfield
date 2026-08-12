@@ -10,6 +10,8 @@
 //	blobs import-sidecars          copy R2 <cid>.json sidecars into SQLite
 //	blobs prune-sidecars           dry-run: report sidecars to delete from R2
 //	blobs prune-sidecars --confirm delete the <cid>.json sidecars from R2
+//	blobs reconcile                dry-run: report store objects nothing references
+//	blobs reconcile --confirm      delete the orphaned objects
 package main
 
 import (
@@ -52,9 +54,15 @@ func main() {
 			slog.Error("prune-sidecars failed", "err", err)
 			os.Exit(1)
 		}
+	case "reconcile":
+		confirm := len(os.Args) > 2 && os.Args[2] == "--confirm"
+		if err := runReconcile(confirm); err != nil {
+			slog.Error("reconcile failed", "err", err)
+			os.Exit(1)
+		}
 	default:
 		fmt.Fprintln(os.Stderr,
-			"usage: blobs [serve | health | import-sidecars | prune-sidecars [--confirm]]")
+			"usage: blobs [serve | health | import-sidecars | prune-sidecars [--confirm] | reconcile [--confirm]]")
 		os.Exit(2)
 	}
 }

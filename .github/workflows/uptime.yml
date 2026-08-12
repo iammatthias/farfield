@@ -1,0 +1,39 @@
+# The external watcher. Pulse monitors the fleet from inside the homelab and
+# the status page probes it from inside the compose network — but if the
+# tunnel, DNS, or the box itself dies, nothing off-site notices. GitHub's
+# runners are that off-site: every half hour they ask the two observability
+# surfaces whether the fleet is reachable from the public internet. A failed
+# run emails the repo owner — no third-party uptime account required.
+#
+# The Cloudflare edge in front of *.farfield.systems refuses bot-shaped
+# User-Agents, so the checks send a browser-shaped one.
+name: Uptime
+
+on:
+  schedule:
+    - cron: "*/30 * * * *"
+  workflow_dispatch:
+
+jobs:
+  canary:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Probe the fleet from outside
+        run: |
+          UA="Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0 Safari/537.36 farfield-canary"
+          fail=0
+          for url in \
+            "https://farfield.systems/status" \
+            "https://pulse.farfield.systems/status" \
+            "https://content.farfield.systems/status" \
+            "https://blobs.farfield.systems/status"; do
+            body=$(curl -sS --max-time 20 -A "$UA" "$url" || true)
+            if echo "$body" | grep -q '"ok":true'; then
+              echo "ok    $url"
+            else
+              echo "DOWN  $url — got: ${body:-no response}"
+              fail=1
+            fi
+          done
+          exit $fail

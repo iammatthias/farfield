@@ -1,0 +1,358 @@
+package main
+
+import (
+	"bytes"
+	"crypto/hmac"
+	"crypto/sha256"
+	"encoding/hex"
+	"encoding/xml"
+	"fmt"
+	"io"
+	"net/http"
+	"net/url"
+	"os"
+	"strconv"
+	"strings"
+	"time"
+)
+
+// R2Config configures the Cloudflare R2 (S3-compatible) byte store.
+type R2Config struct {
+	AccountID       string
+	AccessKeyID     string
+	SecretAccessKey string
+	Bucket          string
+}
+
+// R2 is a ByteStore backed by Cloudflare R2 over the S3 API. Requests are
+// signed with AWS Signature V4 — hand-rolled, no S3 SDK dependency.
+type R2 struct {
+	cfg    R2Config
+	host   string
+	client *http.Client
+	// stream serves GetStream bodies. client's 60s Timeout covers the whole
+	// response body — fatal for a viewer scrubbing through a long video — so
+	// streams bound only the wait for headers and let the body take as long
+	// as the reader needs.
+	stream *http.Client
+}
+
+// NewR2 builds an R2 byte store. It does not contact R2.
+func NewR2(cfg R2Config) (*R2, error) {
+	for name, v := range map[string]string{
+		"R2_ACCOUNT_ID": cfg.AccountID, "R2_ACCESS_KEY_ID": cfg.AccessKeyID,
+		"R2_SECRET_ACCESS_KEY": cfg.SecretAccessKey, "R2_BUCKET": cfg.Bucket,
+	} {
+		if v == "" {
+			return nil, fmt.Errorf("R2 config: %s is required", name)
+		}
+	}
+	streamTr := http.DefaultTransport.(*http.Transport).Clone()
+	streamTr.ResponseHeaderTimeout = 30 * time.Second
+	return &R2{
+		cfg:    cfg,
+		host:   cfg.AccountID + ".r2.cloudflarestorage.com",
+		client: &http.Client{Timeout: 60 * time.Second},
+		stream: &http.Client{Transport: streamTr},
+	}, nil
+}
+
+func (r *R2) objectURL(key string) string {
+	return "https://" + r.host + "/" + r.cfg.Bucket + "/" + key
+}
+
+func (r *R2) Put(key string, data []byte, contentType string) error {
+	req, err := http.NewRequest(http.MethodPut, r.objectURL(key), bytes.NewReader(data))
+	if err != nil {
+		return err
+	}
+	if contentType != "" {
+		req.Header.Set("Content-Type", contentType) // sent unsigned — allowed
+	}
+	r.sign(req, data)
+	resp, err := r.client.Do(req)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(resp.Body)
+		return fmt.Errorf("R2 put %s: HTTP %d: %s", key, resp.StatusCode, body)
+	}
+	return nil
+}
+
+// PutFile streams the file at path to R2 without buffering it. SigV4 signs
+// the payload hash, so the file is read twice: one pass to hash, one as the
+// request body — both sequential disk reads, never a whole-file buffer.
+func (r *R2) PutFile(key, path, contentType string) error {
+	f, err := os.Open(path)
+	if err != nil {
+		return err
+	}
+	defer f.Close()
+	h := sha256.New()
+	size, err := io.Copy(h, f)
+	if err != nil {
+		return err
+	}
+	if _, err := f.Seek(0, io.SeekStart); err != nil {
+		return err
+	}
+
+	req, err := http.NewRequest(http.MethodPut, r.objectURL(key), f)
+	if err != nil {
+		return err
+	}
+	req.ContentLength = size
+	if contentType != "" {
+		req.Header.Set("Content-Type", contentType) // sent unsigned — allowed
+	}
+	r.signWithHash(req, hex.EncodeToString(h.Sum(nil)))
+	resp, err := r.client.Do(req)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(resp.Body)
+		return fmt.Errorf("R2 put %s: HTTP %d: %s", key, resp.StatusCode, body)
+	}
+	return nil
+}
+
+func (r *R2) Get(key string) ([]byte, error) {
+	req, err := http.NewRequest(http.MethodGet, r.objectURL(key), nil)
+	if err != nil {
+		return nil, err
+	}
+	r.sign(req, nil)
+	resp, err := r.client.Do(req)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode == http.StatusNotFound {
+		return nil, nil
+	}
+	body, _ := io.ReadAll(resp.Body)
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("R2 get %s: HTTP %d: %s", key, resp.StatusCode, body)
+	}
+	return body, nil
+}
+
+// GetStream returns the object's body as a stream. GET requests sign an
+// empty payload, so streaming the response is compatible with SigV4. When
+// the object's size is known (it always is, short of a proxy mangling the
+// response) the stream is a seekable rangeReader, so the byte handler can
+// answer Range requests with 206s — video seeking over R2.
+func (r *R2) GetStream(key string) (io.ReadCloser, int64, error) {
+	body, size, err := r.getRange(key, 0)
+	if err != nil || body == nil {
+		return nil, 0, err
+	}
+	if size < 0 {
+		return body, size, nil // unknown length — plain stream, no seeking
+	}
+	rr := &rangeReader{
+		size: size,
+		body: body,
+		fetch: func(off int64) (io.ReadCloser, error) {
+			b, _, err := r.getRange(key, off)
+			if err == nil && b == nil {
+				err = fmt.Errorf("R2 get %s: object vanished mid-read", key)
+			}
+			return b, err
+		},
+	}
+	return rr, size, nil
+}
+
+// getRange GETs the object starting at byte offset off, returning the body
+// and the response's Content-Length ((nil, 0, nil) when absent). The Range
+// header is not in the SigV4 signed set, so adding it does not disturb the
+// signature; should a middlebox strip it, the ignored prefix is discarded to
+// keep the caller's offset honest.
+func (r *R2) getRange(key string, off int64) (io.ReadCloser, int64, error) {
+	req, err := http.NewRequest(http.MethodGet, r.objectURL(key), nil)
+	if err != nil {
+		return nil, 0, err
+	}
+	if off > 0 {
+		req.Header.Set("Range", "bytes="+strconv.FormatInt(off, 10)+"-")
+	}
+	r.sign(req, nil)
+	resp, err := r.stream.Do(req)
+	if err != nil {
+		return nil, 0, err
+	}
+	switch resp.StatusCode {
+	case http.StatusNotFound:
+		resp.Body.Close()
+		return nil, 0, nil
+	case http.StatusPartialContent:
+		return resp.Body, resp.ContentLength, nil
+	case http.StatusOK:
+		if off > 0 {
+			if _, err := io.CopyN(io.Discard, resp.Body, off); err != nil {
+				resp.Body.Close()
+				return nil, 0, err
+			}
+		}
+		return resp.Body, resp.ContentLength, nil
+	default:
+		body, _ := io.ReadAll(resp.Body)
+		resp.Body.Close()
+		return nil, 0, fmt.Errorf("R2 get %s: HTTP %d: %s", key, resp.StatusCode, body)
+	}
+}
+
+func (r *R2) Delete(key string) error {
+	req, err := http.NewRequest(http.MethodDelete, r.objectURL(key), nil)
+	if err != nil {
+		return err
+	}
+	r.sign(req, nil)
+	resp, err := r.client.Do(req)
+	if err != nil {
+		return err
+	}
+	resp.Body.Close()
+	// R2 returns 204 on delete, 404 if already gone — both are fine.
+	if resp.StatusCode != http.StatusNoContent && resp.StatusCode != http.StatusNotFound {
+		return fmt.Errorf("R2 delete %s: HTTP %d", key, resp.StatusCode)
+	}
+	return nil
+}
+
+// List returns every object in the bucket, following ListObjectsV2 pagination.
+func (r *R2) List() ([]ObjectInfo, error) {
+	var out []ObjectInfo
+	token := ""
+	for {
+		page, next, err := r.listPage(token)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, page...)
+		if next == "" {
+			break
+		}
+		token = next
+	}
+	return out, nil
+}
+
+func (r *R2) listPage(continuationToken string) ([]ObjectInfo, string, error) {
+	// SigV4 needs the query string in canonical (key-sorted) order:
+	// continuation-token sorts before list-type.
+	query := "list-type=2"
+	if continuationToken != "" {
+		query = "continuation-token=" + url.QueryEscape(continuationToken) + "&" + query
+	}
+	req, err := http.NewRequest(http.MethodGet,
+		"https://"+r.host+"/"+r.cfg.Bucket+"?"+query, nil)
+	if err != nil {
+		return nil, "", err
+	}
+	r.sign(req, nil)
+	resp, err := r.client.Do(req)
+	if err != nil {
+		return nil, "", err
+	}
+	defer resp.Body.Close()
+	body, _ := io.ReadAll(resp.Body)
+	if resp.StatusCode != http.StatusOK {
+		return nil, "", fmt.Errorf("R2 list: HTTP %d: %s", resp.StatusCode, body)
+	}
+	var result struct {
+		Contents []struct {
+			Key          string `xml:"Key"`
+			Size         int64  `xml:"Size"`
+			LastModified string `xml:"LastModified"`
+		} `xml:"Contents"`
+		IsTruncated           bool   `xml:"IsTruncated"`
+		NextContinuationToken string `xml:"NextContinuationToken"`
+	}
+	if err := xml.Unmarshal(body, &result); err != nil {
+		return nil, "", fmt.Errorf("R2 list: parsing XML: %w", err)
+	}
+	page := make([]ObjectInfo, 0, len(result.Contents))
+	for _, c := range result.Contents {
+		lm, _ := time.Parse(time.RFC3339, c.LastModified)
+		page = append(page, ObjectInfo{Key: c.Key, Size: c.Size, LastModified: lm})
+	}
+	if result.IsTruncated {
+		return page, result.NextContinuationToken, nil
+	}
+	return page, "", nil
+}
+
+// ── AWS Signature V4 ────────────────────────────────────────────────────────
+
+// sign adds an AWS SigV4 Authorization header for the S3 service. payload is
+// nil for bodyless requests (GET/HEAD/DELETE).
+func (r *R2) sign(req *http.Request, payload []byte) {
+	r.signWithHash(req, hex.EncodeToString(sha256sum(payload)))
+}
+
+// signWithHash signs with a precomputed hex SHA-256 payload hash — SigV4
+// needs only the hash, so callers can stream bodies they never buffer.
+func (r *R2) signWithHash(req *http.Request, payloadHash string) {
+	now := time.Now().UTC()
+	amzDate := now.Format("20060102T150405Z")
+	dateStamp := now.Format("20060102")
+
+	req.Header.Set("X-Amz-Date", amzDate)
+	req.Header.Set("X-Amz-Content-Sha256", payloadHash)
+
+	const signedHeaders = "host;x-amz-content-sha256;x-amz-date"
+	canonicalHeaders := "host:" + req.URL.Host + "\n" +
+		"x-amz-content-sha256:" + payloadHash + "\n" +
+		"x-amz-date:" + amzDate + "\n"
+
+	canonicalRequest := strings.Join([]string{
+		req.Method,
+		req.URL.EscapedPath(),
+		req.URL.RawQuery, // built in canonical (sorted, encoded) form
+		canonicalHeaders,
+		signedHeaders,
+		payloadHash,
+	}, "\n")
+
+	scope := dateStamp + "/auto/s3/aws4_request"
+	stringToSign := strings.Join([]string{
+		"AWS4-HMAC-SHA256",
+		amzDate,
+		scope,
+		hex.EncodeToString(sha256sum([]byte(canonicalRequest))),
+	}, "\n")
+
+	key := signingKey(r.cfg.SecretAccessKey, dateStamp, "auto", "s3")
+	signature := hex.EncodeToString(hmacSHA256(key, []byte(stringToSign)))
+
+	req.Header.Set("Authorization", "AWS4-HMAC-SHA256 "+
+		"Credential="+r.cfg.AccessKeyID+"/"+scope+", "+
+		"SignedHeaders="+signedHeaders+", "+
+		"Signature="+signature)
+}
+
+// signingKey derives the SigV4 signing key by the documented HMAC chain.
+func signingKey(secret, dateStamp, region, service string) []byte {
+	kDate := hmacSHA256([]byte("AWS4"+secret), []byte(dateStamp))
+	kRegion := hmacSHA256(kDate, []byte(region))
+	kService := hmacSHA256(kRegion, []byte(service))
+	return hmacSHA256(kService, []byte("aws4_request"))
+}
+
+func hmacSHA256(key, data []byte) []byte {
+	h := hmac.New(sha256.New, key)
+	h.Write(data)
+	return h.Sum(nil)
+}
+
+func sha256sum(data []byte) []byte {
+	h := sha256.Sum256(data)
+	return h[:]
+}

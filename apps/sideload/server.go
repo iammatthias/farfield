@@ -56,7 +56,7 @@ func run(host, port string) error {
 		slog.Warn("could not prune sessions", "err", err)
 	}
 
-	blobs, err := newBlobStore(store.Env("SIDELOAD_DIR", "sideload-blobs"))
+	blobs, err := openBlobStore()
 	if err != nil {
 		return err
 	}

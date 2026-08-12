@@ -83,7 +83,7 @@ func testServer(t *testing.T) *Server {
 		t.Fatalf("openDB: %v", err)
 	}
 	t.Cleanup(func() { db.Close() })
-	blobs, err := newBlobStore(filepath.Join(dir, "blobs"))
+	blobs, err := newBlobStore(filepath.Join(dir, "blobs"), nil)
 	if err != nil {
 		t.Fatalf("newBlobStore: %v", err)
 	}

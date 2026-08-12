@@ -9,6 +9,7 @@
 //	backup snapshot                         snapshot every app's database now
 //	backup prune                            dry-run the retention ladder
 //	backup prune --confirm                  drop snapshots past retention now
+//	backup verify [app]                     pull newest snapshot(s), prove they open clean
 //	backup restore <app> <cid>              dry-run a restore from snapshot <cid>
 //	backup restore <app> <cid> --confirm    perform the restore
 package main
@@ -53,6 +54,15 @@ func main() {
 			slog.Error("prune failed", "err", err)
 			os.Exit(1)
 		}
+	case "verify":
+		app := ""
+		if len(os.Args) > 2 {
+			app = os.Args[2]
+		}
+		if err := runVerify(app); err != nil {
+			slog.Error("verify failed", "err", err)
+			os.Exit(1)
+		}
 	case "restore":
 		if len(os.Args) < 4 {
 			fmt.Fprintln(os.Stderr, "usage: backup restore <app> <cid> [--confirm]")
@@ -65,7 +75,7 @@ func main() {
 		}
 	default:
 		fmt.Fprintln(os.Stderr,
-			"usage: backup [serve | health | snapshot | prune [--confirm] | restore <app> <cid> [--confirm]]")
+			"usage: backup [serve | health | snapshot | prune [--confirm] | verify [app] | restore <app> <cid> [--confirm]]")
 		os.Exit(2)
 	}
 }

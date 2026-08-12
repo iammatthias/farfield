@@ -67,3 +67,28 @@ func TestTargets(t *testing.T) {
 		t.Errorf("targets() picked up unexpected files: %v", names)
 	}
 }
+
+// TestVerifySnapshot: a healthy SQLite file passes with its table count; a
+// garbage file and an empty schema both fail.
+func TestVerifySnapshot(t *testing.T) {
+	dir := t.TempDir()
+
+	good := filepath.Join(dir, "good.sqlite")
+	db, err := openDB(good)
+	if err != nil {
+		t.Fatal(err)
+	}
+	db.Close()
+	tables, err := verifySnapshot(good)
+	if err != nil || tables == 0 {
+		t.Fatalf("healthy snapshot: tables=%d err=%v", tables, err)
+	}
+
+	junk := filepath.Join(dir, "junk.sqlite")
+	if err := os.WriteFile(junk, []byte("this is not a database"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := verifySnapshot(junk); err == nil {
+		t.Fatal("garbage file passed verification")
+	}
+}

@@ -41,8 +41,13 @@ func main() {
 	case "health":
 		// Probes /status — backs the Docker healthcheck (distroless: no curl).
 		os.Exit(web.Health(store.Env("SIDELOAD_PORT", "8800")))
+	case "sync-store":
+		if err := runSyncStore(); err != nil {
+			slog.Error("sync-store failed", "err", err)
+			os.Exit(1)
+		}
 	default:
-		fmt.Fprintln(os.Stderr, "usage: sideload [serve | health]")
+		fmt.Fprintln(os.Stderr, "usage: sideload [serve | health | sync-store]")
 		os.Exit(2)
 	}
 }

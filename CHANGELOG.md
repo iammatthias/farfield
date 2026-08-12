@@ -6,6 +6,12 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+### Added
+- Sideload's builds survive the disk: with `SIDELOAD_BACKEND=r2` the shared bucket is the durable truth and the blob directory becomes a write-through cache — an upload is not acknowledged until R2 holds it, a cache miss refetches once, and ranged OTA serving still reads local files. `sideload sync-store` uploads anything local the bucket lacks (the one-time migration, and the repair after any R2 outage).
+- `blobs reconcile [--confirm]` closes the byte-store's open loop: it lists the store and subtracts every CID something still references — blobs media and thumbnails, library books/covers/thumbs, backup snapshots, sideload builds and screenshots — and reports (or deletes) the orphans. It refuses to run if any sibling database is unreadable, and never touches objects younger than an hour, since every writer stores bytes before committing its row.
+- `backup verify [app]` is the restore drill minus the restore: it pulls the newest snapshot of each app from R2, runs `PRAGMA integrity_check` across every page, and requires a non-empty schema. A backup that has never been read back is a hope, not a backup.
+- An external uptime canary: a scheduled GitHub Actions workflow probes the fleet's public /status surfaces every half hour from outside the homelab, so a dead tunnel or box finally has a watcher that doesn't live behind it.
+
 ### Changed
 - The fleet has a single source of truth: `lib/fleet` holds every service's name, internal port, and public host. The apex status page probes it, pulse seeds uptime targets from it (additively — a target the operator deletes stays deleted), and drift tests fail CI when docker-compose.yml or devfleet.sh disagree with it. An apex test requires a docs page per service, which is how pulse and scrap finally got theirs.
 - Delivery is edge-friendly: `/blobs/{cid}/meta` is `immutable` like the bytes (meta is derived from content, once), `/api/entries?bodies=0` serves the slim list for index surfaces, and every 404 and JSON error across the fleet carries `Cache-Control: no-store` — a zone cache rule was observed pinning "not found" at the edge for hours over blobs that had since arrived.

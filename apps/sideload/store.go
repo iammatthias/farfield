@@ -12,20 +12,39 @@ import (
 	"github.com/iammatthias/farfield/lib/cid"
 )
 
-// blobStore is the on-disk content-addressed store. Builds live at
-// <dir>/<cid>.ipa and screenshots at <dir>/<cid>.<ext>, so identical bytes
-// share one file and integrity is verifiable by re-hashing. The extension is
-// per-call, so one directory holds both kinds without collision (a CID is
-// unique to its content).
-type blobStore struct {
-	dir string
+// objectStore is the durable remote half of the blob store — the subset of
+// the R2 client the store needs. An interface so tests can fake it.
+type objectStore interface {
+	PutFile(key, path, contentType string) error
+	Put(key string, data []byte, contentType string) error
+	GetStream(key string) (io.ReadCloser, int64, error)
+	Delete(key string) error
+	List() ([]ObjectInfo, error)
 }
 
-func newBlobStore(dir string) (*blobStore, error) {
+// blobStore is the content-addressed store for builds (<cid>.ipa) and
+// screenshots (<cid>.<ext>): identical bytes share one key and integrity is
+// verifiable by re-hashing. The extension is per-call, so one namespace
+// holds both kinds without collision (a CID is unique to its content).
+//
+// With remote unset (dev), the directory is the whole store. With remote set
+// (SIDELOAD_BACKEND=r2), R2 is the durable truth — an .ipa is the one kind
+// of farfield content bytes that previously lived on a single disk — and the
+// directory becomes a write-through cache: writes land locally and upload
+// before being acknowledged, reads come from the cache and refill it from R2
+// on a miss. parseIPA and ranged OTA serving always see a local file either
+// way, and losing the cache directory costs one re-download per build, not
+// the builds.
+type blobStore struct {
+	dir    string
+	remote objectStore // nil = local-only
+}
+
+func newBlobStore(dir string, remote objectStore) (*blobStore, error) {
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		return nil, err
 	}
-	s := &blobStore{dir: dir}
+	s := &blobStore{dir: dir, remote: remote}
 	s.pruneTemp()
 	return s, nil
 }
@@ -104,6 +123,14 @@ func (s *blobStore) spool(r io.Reader, maxBytes int64, ext string) (fullCID stri
 		_ = os.Remove(tmpName) // dedupe: identical bytes already stored
 		return fullCID, size, nil
 	}
+	// Durability before acknowledgement: the upload is not accepted until the
+	// remote holds it. A failed push fails the whole spool rather than
+	// leaving a local-only build that a dead disk would erase.
+	if s.remote != nil {
+		if err := s.remote.PutFile(fullCID+ext, tmpName, "application/octet-stream"); err != nil {
+			return "", 0, fmt.Errorf("store remote copy: %w", err)
+		}
+	}
 	if err := os.Rename(tmpName, final); err != nil {
 		return "", 0, err
 	}
@@ -118,6 +145,11 @@ func (s *blobStore) putBytes(data []byte, ext string) (string, error) {
 	if _, err := os.Stat(final); err == nil {
 		return fullCID, nil // already stored
 	}
+	if s.remote != nil {
+		if err := s.remote.Put(fullCID+ext, data, "application/octet-stream"); err != nil {
+			return "", fmt.Errorf("store remote copy: %w", err)
+		}
+	}
 	if err := os.WriteFile(final, data, 0o644); err != nil {
 		return "", err
 	}
@@ -125,9 +157,17 @@ func (s *blobStore) putBytes(data []byte, ext string) (string, error) {
 }
 
 // open returns a readable handle to a stored blob plus its size, for ranged
-// serving via http.ServeContent.
+// serving via http.ServeContent. A cache miss with a remote configured
+// refills the cache first — one whole-object download, after which every
+// range request is a local read again.
 func (s *blobStore) open(fullCID, ext string) (*os.File, int64, error) {
 	f, err := os.Open(s.path(fullCID, ext))
+	if os.IsNotExist(err) && s.remote != nil {
+		if err := s.refill(fullCID, ext); err != nil {
+			return nil, 0, err
+		}
+		f, err = os.Open(s.path(fullCID, ext))
+	}
 	if err != nil {
 		return nil, 0, err
 	}
@@ -139,11 +179,83 @@ func (s *blobStore) open(fullCID, ext string) (*os.File, int64, error) {
 	return f, info.Size(), nil
 }
 
-// remove deletes a stored blob. A missing file is not an error.
+// refill downloads a remote object into the cache, via a temp file and a
+// rename so a crashed download never leaves a truncated blob under a real
+// content address.
+func (s *blobStore) refill(fullCID, ext string) error {
+	body, _, err := s.remote.GetStream(fullCID + ext)
+	if err != nil {
+		return err
+	}
+	if body == nil {
+		return os.ErrNotExist
+	}
+	defer body.Close()
+	tmp, err := os.CreateTemp(s.dir, ".upload-*")
+	if err != nil {
+		return err
+	}
+	tmpName := tmp.Name()
+	_, err = io.Copy(tmp, body)
+	if closeErr := tmp.Close(); err == nil {
+		err = closeErr
+	}
+	if err != nil {
+		_ = os.Remove(tmpName)
+		return err
+	}
+	return os.Rename(tmpName, s.path(fullCID, ext))
+}
+
+// remove deletes a stored blob from the cache and the remote. A missing file
+// is not an error.
 func (s *blobStore) remove(fullCID, ext string) error {
 	err := os.Remove(s.path(fullCID, ext))
 	if os.IsNotExist(err) {
-		return nil
+		err = nil
+	}
+	if s.remote != nil {
+		if rerr := s.remote.Delete(fullCID + ext); rerr != nil && err == nil {
+			err = rerr
+		}
 	}
 	return err
+}
+
+// syncRemote uploads every locally-stored blob the remote lacks — the
+// one-time migration for a store that predates the R2 backend, and a repair
+// for any window when the remote was unreachable. Idempotent.
+func (s *blobStore) syncRemote() (uploaded, present int, err error) {
+	if s.remote == nil {
+		return 0, 0, fmt.Errorf("no remote configured (SIDELOAD_BACKEND != r2)")
+	}
+	objects, err := s.remote.List()
+	if err != nil {
+		return 0, 0, err
+	}
+	have := make(map[string]bool, len(objects))
+	for _, o := range objects {
+		have[o.Key] = true
+	}
+
+	entries, err := os.ReadDir(s.dir)
+	if err != nil {
+		return 0, 0, err
+	}
+	for _, e := range entries {
+		if e.IsDir() || strings.HasPrefix(e.Name(), ".") {
+			continue
+		}
+		if have[e.Name()] {
+			present++
+			continue
+		}
+		path := filepath.Join(s.dir, e.Name())
+		if err := s.remote.PutFile(e.Name(), path, "application/octet-stream"); err != nil {
+			return uploaded, present, fmt.Errorf("upload %s: %w", e.Name(), err)
+		}
+		slog.Info("uploaded", "key", e.Name())
+		uploaded++
+	}
+	return uploaded, present, nil
 }
