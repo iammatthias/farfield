@@ -173,12 +173,13 @@ func renderDocs() (map[string]page, error) {
 // cacheStatic wraps the embedded file server with Cache-Control. Embedded
 // files have a zero ModTime, so without this no validator is ever sent and
 // every visit refetches. Versioned assets (the screenshots under /docs/assets
-// and the ?v= stylesheet) cache forever — a content change changes the URL —
-// and everything else revalidates hourly.
+// and the ?v= stylesheet and script) cache forever — a content change changes
+// the URL — and everything else revalidates hourly.
 func cacheStatic(files http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		versioned := r.URL.Path == "/docs/style.css" || r.URL.Path == "/docs/docs.js"
 		if strings.HasPrefix(r.URL.Path, "/docs/assets/") ||
-			(r.URL.Path == "/docs/style.css" && r.URL.Query().Has("v")) {
+			(versioned && r.URL.Query().Has("v")) {
 			w.Header().Set("Cache-Control", "public, max-age=31536000, immutable")
 		} else {
 			w.Header().Set("Cache-Control", "public, max-age=3600")

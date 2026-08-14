@@ -155,10 +155,16 @@ html, body { overflow-x: hidden; }
    - dashed = a trajectory (tunnel, async); dotted = private (tailnet)
    - plumbing lines: .75 width at ~.25 opacity, routed so they NEVER
      cross a label — buses and stubs, not fans through text
-   On narrow screens the figure scrolls sideways at full size rather than
-   shrinking its labels below legibility — the same rule wide tables follow. */
-.observation { margin: 2.2rem 0 0; overflow-x: auto; -webkit-overflow-scrolling: touch; }
-.observation svg { display: block; width: 100%; height: auto; min-width: 38rem; }
+   Motion follows the brand's two speeds. Atmospheric: dashes drift along
+   trajectories, the subject's ring breathes; dotted private lines hold
+   still — motion means traffic, and the tailnet doesn't advertise.
+   Interface: the full-view dialog opens in 160ms. Reduced motion stills
+   the plate entirely.
+   The figure always fits its column; legibility at small sizes comes from
+   the full-view toggle (docs.js), which opens the plate at reading scale
+   in a pannable dialog rather than scrolling inline. */
+.observation { margin: 2.2rem 0 0; }
+.observation svg { display: block; width: 100%; height: auto; }
 .observation figcaption {
   font-family: var(--font-mono);
   font-size: 0.7rem;
@@ -167,6 +173,121 @@ html, body { overflow-x: hidden; }
   text-transform: uppercase;
   opacity: 0.55;
   margin-top: 0.9rem;
+}
+
+/* The toggle rides its own line above the plate, right-aligned, so it can
+   never sit over a label at any width. Injected by docs.js. */
+.obs-expand {
+  display: block;
+  margin: 0 0 0.5rem auto;
+  font-family: var(--font-mono);
+  font-size: 0.66rem;
+  font-weight: 500;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--ink);
+  opacity: 0.55;
+  background: var(--panel);
+  border: 1px solid var(--hairline);
+  border-radius: var(--r-s);
+  padding: 0.32rem 0.6rem;
+  cursor: pointer;
+  transition: opacity 0.12s ease-out, border-color 0.12s ease-out;
+}
+.obs-expand:hover { opacity: 1; border-color: var(--line-strong); }
+.obs-expand:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+
+/* Atmospheric motion (brand §motion: 8–40s, reward attention, never glow).
+   Selectors are structural — the dash pattern IS the trajectory — so the
+   modal clone animates too without extra classes. */
+@keyframes obs-drift { to { stroke-dashoffset: -32; } }
+.observation svg [stroke-dasharray="4 4"],
+.obs-pan svg [stroke-dasharray="4 4"] {
+  animation: obs-drift 14s linear infinite;
+}
+@keyframes obs-breathe { 0%, 100% { opacity: 0.9; } 50% { opacity: 0.5; } }
+.observation svg circle[stroke="var(--accent)"],
+.obs-pan svg circle[stroke="var(--accent)"] {
+  animation: obs-breathe 6s ease-in-out infinite;
+}
+
+/* ── Full view: the plate at reading scale, pannable ── */
+.obs-dialog {
+  margin: auto; /* the theme's global reset removes the UA centering */
+  padding: 0;
+  border: 1px solid var(--hairline);
+  border-radius: var(--r-m);
+  background: var(--panel);
+  color: var(--ink);
+  box-shadow: var(--shadow-m);
+  width: min(94vw, 72rem);
+  max-height: 90vh;
+}
+.obs-dialog::backdrop { background: rgba(10, 16, 24, 0.5); }
+.obs-dialog[open] { animation: obs-dialog-in 0.16s ease-out; }
+@keyframes obs-dialog-in {
+  from { opacity: 0; transform: scale(0.985); }
+}
+.obs-dialog-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  padding: 0.7rem 1.25rem;
+  border-bottom: 1px solid var(--hairline);
+}
+.obs-dialog-title {
+  font-family: var(--font-mono);
+  font-size: 0.7rem;
+  font-weight: 500;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  opacity: 0.55;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.obs-close {
+  font-family: var(--font-mono);
+  font-size: 0.66rem;
+  font-weight: 500;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--ink);
+  opacity: 0.55;
+  background: none;
+  border: 1px solid var(--hairline);
+  border-radius: var(--r-s);
+  padding: 0.32rem 0.6rem;
+  cursor: pointer;
+  transition: opacity 0.12s ease-out, border-color 0.12s ease-out;
+}
+.obs-close:hover { opacity: 1; border-color: var(--line-strong); }
+.obs-close:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.obs-pan {
+  overflow: auto;
+  -webkit-overflow-scrolling: touch;
+  max-height: calc(90vh - 3.4rem);
+  padding: 1.25rem 1.25rem 1.5rem;
+  cursor: grab;
+}
+.obs-pan.dragging { cursor: grabbing; user-select: none; }
+.obs-pan svg { display: block; height: auto; }
+@media (max-width: 640px) {
+  .obs-dialog {
+    width: 100vw;
+    max-width: 100vw;
+    height: 100dvh;
+    max-height: 100dvh;
+    border: 0;
+    border-radius: 0;
+  }
+  .obs-pan { max-height: calc(100dvh - 3.4rem); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .observation svg *, .obs-pan svg * { animation: none !important; }
+  .obs-dialog[open] { animation: none; }
 }
 
 /* ── App cards (overview) ── */
