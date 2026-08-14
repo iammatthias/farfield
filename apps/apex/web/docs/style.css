@@ -147,9 +147,18 @@ html, body { overflow-x: hidden; }
   max-width: 40rem;
 }
 
-/* ── Observation figures: inline SVG diagrams in the §21 language ── */
-.observation { margin: 2.2rem 0 0; }
-.observation svg { display: block; width: 100%; height: auto; }
+/* ── Observation figures: inline SVG diagrams in the §21 language ──
+   The idiom, so every figure reads as one instrument:
+   - mono 11px labels; names at .85, annotations at .6
+   - filled dot r=3.5 = a thing; hollow dot = a thing set apart
+   - the signal-in-field node (accent ring + core) = the subject
+   - dashed = a trajectory (tunnel, async); dotted = private (tailnet)
+   - plumbing lines: .75 width at ~.25 opacity, routed so they NEVER
+     cross a label — buses and stubs, not fans through text
+   On narrow screens the figure scrolls sideways at full size rather than
+   shrinking its labels below legibility — the same rule wide tables follow. */
+.observation { margin: 2.2rem 0 0; overflow-x: auto; -webkit-overflow-scrolling: touch; }
+.observation svg { display: block; width: 100%; height: auto; min-width: 38rem; }
 .observation figcaption {
   font-family: var(--font-mono);
   font-size: 0.7rem;

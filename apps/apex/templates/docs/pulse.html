@@ -4,6 +4,29 @@
 
   <p>The fleet's observability service: uptime monitoring from the outside and traffic analytics from the inside, in one session-gated console. The only public surface is <code>GET /status</code>, which exposes nothing beyond a target count.</p>
 
+  <figure class="observation" aria-label="Pulse's two halves: the checker probes the fleet's public URLs from outside through the tunnel and records checks and incidents; the collector sweeps each app's telemetry sidecar and folds it into daily aggregates.">
+    <svg viewBox="0 0 700 210" role="img">
+      <g style="font-family:var(--font-mono);font-size:11px" fill="currentColor">
+        <circle cx="80" cy="105" r="11" fill="none" stroke="var(--accent)" stroke-width="1.2" opacity="0.9"/>
+                      <circle cx="80" cy="105" r="3" fill="var(--accent)"/>
+                      <text x="80" y="135" text-anchor="middle" opacity="0.7">pulse</text>
+        <!-- upper instrument: uptime, measured on the public path -->
+        <path d="M 92 99 C 170 60, 260 52, 348 56" fill="none" stroke="currentColor" stroke-width="1" stroke-dasharray="4 4" opacity="0.55"/>
+        <text x="218" y="44" text-anchor="middle" opacity="0.6">probes, out the public edge</text>
+        <circle cx="360" cy="58" r="3.5" fill="currentColor" opacity="0.85"/>
+        <text x="372" y="62" opacity="0.85">the fleet &middot; every public /status</text>
+        <text x="372" y="80" opacity="0.6">&rarr; checks &middot; 45 d &middot; incidents forever</text>
+        <!-- lower instrument: traffic, swept from inside -->
+        <path d="M 92 111 C 170 150, 260 158, 348 154" fill="none" stroke="currentColor" stroke-width="1" stroke-dasharray="1.5 4" opacity="0.55"/>
+        <text x="218" y="178" text-anchor="middle" opacity="0.6">collector sweep, every 5 m</text>
+        <circle cx="360" cy="152" r="3.5" fill="currentColor" opacity="0.85"/>
+        <text x="372" y="156" opacity="0.85">telemetry sidecars &middot; data/pulse/*.sqlite</text>
+        <text x="372" y="174" opacity="0.6">&rarr; daily hits &middot; exact uniques &middot; no bots</text>
+      </g>
+    </svg>
+    <figcaption>Observation 01 &middot; two instruments &mdash; uptime from outside, traffic from inside</figcaption>
+  </figure>
+
   <h2>Uptime</h2>
   <p>A checker loop probes configured HTTP targets — the fleet's public URLs, through the Cloudflare tunnel, the same path a real visitor takes — each on its own cadence. Every probe outcome is recorded; the console shows 24h/7d/30d uptime percentages, latency sparklines, and an incident log.</p>
   <p>Failure handling is two-stage so tunnel flakes do not page as outages: a failed probe is retried once and only the retry's outcome is recorded, and an incident opens only after consecutive recorded fails (recovery closes on the first ok, undebounced). Raw probe results are kept for 45 days; incidents are kept forever.</p>

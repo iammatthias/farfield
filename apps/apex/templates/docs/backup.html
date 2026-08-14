@@ -11,6 +11,40 @@
     <figcaption>Backup dashboard in the logged-in state on the private/internal route.</figcaption>
   </figure>
 
+  <figure class="observation" aria-label="Retention ladder timeline: every snapshot is kept for 48 hours, one per day to 30 days, one per week to 90 days, and each app's newest forever.">
+    <svg viewBox="0 0 640 170" role="img">
+      <g style="font-family:var(--font-mono);font-size:11px" fill="currentColor">
+        <!-- the axis is a horizon -->
+        <line x1="46" y1="90" x2="600" y2="90" stroke="currentColor" stroke-width="0.75" opacity="0.35"/>
+        <g stroke="currentColor" stroke-width="0.75" opacity="0.35">
+          <line x1="190" y1="82" x2="190" y2="98"/>
+          <line x1="332" y1="82" x2="332" y2="98"/>
+          <line x1="474" y1="82" x2="474" y2="98"/>
+        </g>
+        <!-- now: the signal -->
+        <circle cx="46" cy="90" r="4" fill="var(--accent)"/>
+        <text x="46" y="66" text-anchor="middle" opacity="0.7">now</text>
+        <!-- snapshots, thinning with age -->
+        <g opacity="0.75"><circle cx="66" cy="90" r="2.5"/><circle cx="75" cy="90" r="2.5"/><circle cx="84" cy="90" r="2.5"/><circle cx="93" cy="90" r="2.5"/><circle cx="102" cy="90" r="2.5"/><circle cx="111" cy="90" r="2.5"/><circle cx="120" cy="90" r="2.5"/><circle cx="129" cy="90" r="2.5"/><circle cx="138" cy="90" r="2.5"/><circle cx="147" cy="90" r="2.5"/><circle cx="156" cy="90" r="2.5"/><circle cx="165" cy="90" r="2.5"/><circle cx="174" cy="90" r="2.5"/><circle cx="183" cy="90" r="2.5"/></g>
+        <g opacity="0.6"><circle cx="200" cy="90" r="2.5"/><circle cx="218" cy="90" r="2.5"/><circle cx="236" cy="90" r="2.5"/><circle cx="254" cy="90" r="2.5"/><circle cx="272" cy="90" r="2.5"/><circle cx="290" cy="90" r="2.5"/><circle cx="308" cy="90" r="2.5"/><circle cx="326" cy="90" r="2.5"/></g>
+        <g opacity="0.5"><circle cx="342" cy="90" r="2.5"/><circle cx="378" cy="90" r="2.5"/><circle cx="414" cy="90" r="2.5"/><circle cx="450" cy="90" r="2.5"/></g>
+        <circle cx="540" cy="90" r="3.5" fill="none" stroke="currentColor" opacity="0.7"/>
+        <!-- zone labels -->
+        <g opacity="0.6">
+          <text x="118" y="122" text-anchor="middle">every one</text>
+          <text x="118" y="138" text-anchor="middle">&le; 48 h</text>
+          <text x="261" y="122" text-anchor="middle">one per day</text>
+          <text x="261" y="138" text-anchor="middle">&le; 30 d</text>
+          <text x="403" y="122" text-anchor="middle">one per week</text>
+          <text x="403" y="138" text-anchor="middle">&le; 90 d</text>
+          <text x="540" y="122" text-anchor="middle">newest</text>
+          <text x="540" y="138" text-anchor="middle">forever</text>
+        </g>
+      </g>
+    </svg>
+    <figcaption>Observation 01 &middot; the retention ladder &mdash; dense where restore points matter</figcaption>
+  </figure>
+
   <h2>Admin surface</h2>
   <p>Backup is deliberately not a public API service. It exposes a small authenticated HTML surface on the private route only.</p>
   <div class="endpoint"><span class="method">GET</span><span class="path">/</span><div class="returns">Authenticated backup dashboard.</div></div>

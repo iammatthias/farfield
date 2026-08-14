@@ -9,6 +9,35 @@
     <figcaption>Blobs admin library in the logged-in state. Media bytes are public by CID; the index list and mutations require auth.</figcaption>
   </figure>
 
+  <figure class="observation" aria-label="Upload pipeline: bytes are hashed to a CID, then stored in R2, described by one metadata row, and given a derived thumbnail. Identical bytes hash identically, so nothing is stored twice.">
+    <svg viewBox="0 0 700 200" role="img">
+      <g style="font-family:var(--font-mono);font-size:11px" fill="currentColor">
+        <circle cx="46" cy="100" r="4.5" fill="currentColor"/>
+        <text x="46" y="126" text-anchor="middle" opacity="0.6">bytes</text>
+        <line x1="54" y1="100" x2="216" y2="100" stroke="currentColor" stroke-width="0.75" opacity="0.25"/>
+        <text x="135" y="90" text-anchor="middle" opacity="0.6">spool + hash</text>
+        <circle cx="230" cy="100" r="11" fill="none" stroke="var(--accent)" stroke-width="1.2" opacity="0.9"/>
+                      <circle cx="230" cy="100" r="3" fill="var(--accent)"/>
+                      <text x="230" y="130" text-anchor="middle" opacity="0.7">sha-256 &rarr; cid</text>
+        <!-- one trunk, one spine, three outcomes -->
+        <g stroke="currentColor" stroke-width="0.75" opacity="0.25" fill="none">
+          <line x1="243" y1="100" x2="420" y2="100"/>
+          <line x1="420" y1="48" x2="420" y2="152"/>
+          <line x1="420" y1="48" x2="434" y2="48"/>
+          <line x1="420" y1="100" x2="434" y2="100"/>
+          <line x1="420" y1="152" x2="434" y2="152"/>
+        </g>
+        <g opacity="0.85">
+          <circle cx="438" cy="48" r="3.5"/><text x="450" y="52">object in R2, keyed by cid</text>
+          <circle cx="438" cy="100" r="3.5"/><text x="450" y="104">one meta row &middot; mime, size, blurhash</text>
+          <circle cx="438" cy="152" r="3.5"/><text x="450" y="156">thumbnail &middot; its own cid, back to R2</text>
+        </g>
+        <text x="230" y="168" text-anchor="middle" opacity="0.6">same bytes &rarr; same cid &rarr; stored once</text>
+      </g>
+    </svg>
+    <figcaption>Observation 01 &middot; a blob is its hash</figcaption>
+  </figure>
+
   <h2>Authentication</h2>
   <p>Blob <strong>bytes</strong> (<code>/blobs/{cid}</code>) and per-CID <code>meta</code> stay <strong>public</strong> — they are embedded as <code>&lt;img&gt;</code> on public pages and loaded by browsers that cannot send a header, and a CID is needed to reach them. The enumerating index <code>GET /blobs</code> requires a bearer token — send the read key as <code>Authorization: Bearer &lt;token&gt;</code> or <code>X-API-Key</code>; the write key is also accepted. <code>/status</code> stays public.</p>
 

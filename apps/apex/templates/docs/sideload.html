@@ -9,6 +9,35 @@
     <figcaption>A build's install page: identity and profile-expiry banner, the one-tap install button, and a QR for desktop→phone handoff.</figcaption>
   </figure>
 
+  <figure class="observation" aria-label="OTA install flow: an iPhone opens a one-tap capability link, sideload serves the manifest and then the IPA with range requests; the bytes live in R2 with a local cache.">
+    <svg viewBox="0 0 700 200" role="img">
+      <g style="font-family:var(--font-mono);font-size:11px" fill="currentColor">
+        <circle cx="52" cy="80" r="4.5" fill="currentColor"/>
+        <text x="52" y="106" text-anchor="middle" opacity="0.6">iphone</text>
+        <path d="M 60 78 C 120 52, 180 52, 236 76" fill="none" stroke="currentColor" stroke-width="1" stroke-dasharray="4 4" opacity="0.55"/>
+        <text x="148" y="42" text-anchor="middle" opacity="0.6">one-tap link &middot; /i/&#123;token&#125;</text>
+        <circle cx="250" cy="80" r="11" fill="none" stroke="var(--accent)" stroke-width="1.2" opacity="0.9"/>
+                      <circle cx="250" cy="80" r="3" fill="var(--accent)"/>
+                      <text x="250" y="110" text-anchor="middle" opacity="0.7">sideload</text>
+        <g stroke="currentColor" stroke-width="0.75" opacity="0.25" fill="none">
+          <line x1="263" y1="80" x2="430" y2="80"/>
+          <line x1="430" y1="54" x2="430" y2="106"/>
+          <line x1="430" y1="54" x2="444" y2="54"/>
+          <line x1="430" y1="106" x2="444" y2="106"/>
+        </g>
+        <g opacity="0.85">
+          <circle cx="448" cy="54" r="3.5"/><text x="460" y="58">manifest.plist &middot; what to install</text>
+          <circle cx="448" cy="106" r="3.5"/><text x="460" y="110">the .ipa &middot; ranged, resumable</text>
+        </g>
+        <!-- the bytes live below, durable -->
+        <line x1="250" y1="93" x2="250" y2="150" stroke="currentColor" stroke-width="0.75" stroke-dasharray="1.5 4" opacity="0.45"/>
+        <circle cx="250" cy="158" r="3.5" fill="none" stroke="currentColor" opacity="0.7"/>
+        <text x="264" y="162" opacity="0.6">bytes in R2 &middot; local cache, refilled on miss</text>
+      </g>
+    </svg>
+    <figcaption>Observation 01 &middot; a build installs from a link &mdash; the disk is just a cache</figcaption>
+  </figure>
+
   <h2>How it works</h2>
   <p>iOS fetches the manifest, the <code>.ipa</code>, and the prompt icons from its own install daemon — not Safari — so those requests carry no cookie. The install payload therefore lives under high-entropy <strong>capability tokens</strong> at <code>/i/{token}/…</code>, reachable without a session, while the index and uploads stay session-gated. The same token mechanism backs public single-use share links at <code>/s/{token}</code> that self-revoke after one install.</p>
 
