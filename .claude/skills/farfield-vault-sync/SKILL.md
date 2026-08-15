@@ -60,6 +60,16 @@ the environment without printing it — the `farfield-deploy` skill (local, not
 committed) has the host and path. The client sends a browser-shaped
 User-Agent, because the Cloudflare edge rejects bot agents.
 
+`sync-vault` takes a directory, not an entry: there is no per-entry scoping, so
+a real run pushes EVERY pending local change at once. The vault routinely holds
+half-finished rewrites of already-published entries, and a bare run publishes
+them — read the dry-run's push list and confirm you mean all of it. To correct
+one entry, skip the sync and `PUT /api/entries/{slug}` directly (full-entry
+replace, so send every field). Editing one side only is also safe and
+self-healing: change just the remote and the next sync pulls it into the vault;
+change just the vault and the next sync pushes it. Change both to the same text
+and the default `--prefer newer` resolves it as a content-neutral pull.
+
 ## Media rules (history that bites)
 
 - Bodies reference media as `blob://<cid>`; galleries as `![](series://<slug>)`.
