@@ -269,12 +269,12 @@ func TestVisitorKeyUsesResolvedClientIP(t *testing.T) {
 // browser strings are not — and the row records the verdict.
 func TestBotClassification(t *testing.T) {
 	for ua, want := range map[string]bool{
-		"":            true,
-		"curl/8.4.0":  true,
+		"":           true,
+		"curl/8.4.0": true,
 		"Googlebot/2.1 (+http://www.google.com/bot.html)": true,
 		"python-requests/2.31":                            true,
 		"Go-http-client/2.0":                              true,
-		"Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0 Safari/537.36": false,
+		"Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0 Safari/537.36":                       false,
 		"Mozilla/5.0 (iPhone; CPU iPhone OS 17_5 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.5 Mobile/15E148 Safari/604.1": false,
 	} {
 		if got := isBot(ua); got != want {
