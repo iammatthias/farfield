@@ -5,7 +5,7 @@
 # The BuildKit cache mounts keep the module download and build caches across
 # builds, so a deploy recompiles only what changed instead of cold-building
 # modernc.org/sqlite eleven times.
-FROM golang:1.25-bookworm AS build
+FROM golang:1.27-bookworm AS build
 ARG APP
 WORKDIR /src
 COPY . .

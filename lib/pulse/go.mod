@@ -1,6 +1,6 @@
 module github.com/iammatthias/farfield/lib/pulse
 
-go 1.25.0
+go 1.27.0
 
 // The library itself is standard-library only; modernc.org/sqlite is pulled
 // in by the tests alone (the importing app registers the driver, like

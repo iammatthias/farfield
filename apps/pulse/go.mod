@@ -1,6 +1,6 @@
 module github.com/iammatthias/farfield/apps/pulse
 
-go 1.25.0
+go 1.27.0
 
 require (
 	github.com/iammatthias/farfield/lib/fleet v0.0.0

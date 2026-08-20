@@ -1,6 +1,6 @@
 module github.com/iammatthias/farfield/lib/theme
 
-go 1.25.0
+go 1.27.0
 
 require github.com/iammatthias/farfield/lib/cid v0.0.0
 
