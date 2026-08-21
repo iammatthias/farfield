@@ -202,7 +202,7 @@ func (s *Server) handleIndex(w http.ResponseWriter, r *http.Request) {
 	older := ""
 	if len(posts) > pageSize {
 		posts = posts[:pageSize]
-		older = posts[len(posts)-1].CreatedAt
+		older = makeCursor(&posts[len(posts)-1])
 	}
 	views := make([]postView, 0, len(posts))
 	for _, p := range posts {

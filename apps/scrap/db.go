@@ -260,16 +260,31 @@ func incrementViews(db *sql.DB, id string) error {
 	return err
 }
 
-// deletePaste removes a paste and its tokens.
+// deletePaste removes a paste and its tokens, in one transaction.
+//
+// Deleting the tokens first and the paste second, each on its own, failed in
+// the wrong direction: an error between the two statements — disk, context
+// kill, anything — committed the token removal and left the paste standing
+// WITHOUT its gate. The view handler re-reads HasToken as an EXISTS, so a
+// paste that was token-protected became readable by anyone holding the link.
+// A partial delete should never widen access.
 func deletePaste(db *sql.DB, id string) (bool, error) {
-	if _, err := db.Exec(`DELETE FROM tokens WHERE paste_id = ?`, id); err != nil {
+	tx, err := db.Begin()
+	if err != nil {
 		return false, err
 	}
-	res, err := db.Exec(`DELETE FROM pastes WHERE id = ?`, id)
+	defer tx.Rollback() // no-op after a successful commit
+	if _, err := tx.Exec(`DELETE FROM tokens WHERE paste_id = ?`, id); err != nil {
+		return false, err
+	}
+	res, err := tx.Exec(`DELETE FROM pastes WHERE id = ?`, id)
 	if err != nil {
 		return false, err
 	}
 	n, _ := res.RowsAffected()
+	if err := tx.Commit(); err != nil {
+		return false, err
+	}
 	return n > 0, nil
 }
 
@@ -277,17 +292,29 @@ func deletePaste(db *sql.DB, id string) (bool, error) {
 // tokens. RFC 3339 UTC strings compare lexically, so <= is a time comparison.
 func deleteExpiredPastes(db *sql.DB) (int64, error) {
 	now := store.NowRFC3339()
-	if _, err := db.Exec(`DELETE FROM tokens WHERE paste_id IN
+	// One transaction, same reasoning as deletePaste: a failure between the
+	// two statements would strip the gates off pastes that then remain
+	// readable. The sweep runs hourly and unattended, so a transient error
+	// here is exactly the case nobody would notice.
+	tx, err := db.Begin()
+	if err != nil {
+		return 0, err
+	}
+	defer tx.Rollback()
+	if _, err := tx.Exec(`DELETE FROM tokens WHERE paste_id IN
 		(SELECT id FROM pastes WHERE expires_at != '' AND expires_at <= ?)`,
 		now); err != nil {
 		return 0, err
 	}
-	res, err := db.Exec(
+	res, err := tx.Exec(
 		`DELETE FROM pastes WHERE expires_at != '' AND expires_at <= ?`, now)
 	if err != nil {
 		return 0, err
 	}
 	n, _ := res.RowsAffected()
+	if err := tx.Commit(); err != nil {
+		return 0, err
+	}
 	return n, nil
 }
 

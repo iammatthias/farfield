@@ -493,22 +493,21 @@ func (s *Server) handleAPIUpdate(w http.ResponseWriter, r *http.Request) {
 		web.WriteError(w, http.StatusNotFound, "code not found")
 		return
 	}
-	var c Code
+	// Decode ON TOP of the existing record, so a field the caller omitted keeps
+	// its stored value. Decoding into a zero Code and patching a few fields
+	// back by hand covered mode, ec and target and silently missed label,
+	// public, enabled and adminNotes — those have no distinguishable "absent"
+	// value once decoded, so `{"target":"…"}` unpublished the code, disabled
+	// it, and erased its label and notes, while the comment here claimed the
+	// opposite. Seeding from the existing record makes the guarantee real for
+	// every field, including ones added later.
+	c := *existing
 	if err := json.NewDecoder(r.Body).Decode(&c); err != nil {
 		web.WriteError(w, http.StatusBadRequest, "invalid JSON")
 		return
 	}
-	// Fields not posted fall back to the existing record so partial updates
-	// don't wipe metadata.
-	if c.Mode == "" {
-		c.Mode = existing.Mode
-	}
-	if c.EC == "" {
-		c.EC = existing.EC
-	}
-	if strings.TrimSpace(c.Target) == "" {
-		c.Target = existing.Target
-	}
+	// Server-owned fields are never taken from the body.
+	c.ID = existing.ID
 	c.CreatedAt = existing.CreatedAt
 	if msg := validateCode(&c); msg != "" {
 		web.WriteError(w, http.StatusBadRequest, msg)

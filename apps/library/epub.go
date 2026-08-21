@@ -143,6 +143,18 @@ func findCover(pkg opfPackage) (href, mime string) {
 	return "", ""
 }
 
+// maxZipEntry caps how much of a single zip entry epub parsing will decompress.
+//
+// The entries read here are metadata — container.xml, the OPF package
+// document, a cover image — and none is legitimately large. Without a cap,
+// io.ReadAll expanded whatever the archive claimed: a compression bomb is a
+// few kilobytes on disk and gigabytes decompressed, so a single upload could
+// take the container to its memory limit and kill every in-flight request
+// with it. Uploads are key-gated, so this is a robustness bound rather than a
+// public attack surface — but an .epub is a file from the internet either way,
+// and the bound costs nothing.
+const maxZipEntry = 32 << 20 // 32 MiB
+
 // readZip reads one entry, by exact name, from a zip archive.
 func readZip(zr *zip.Reader, name string) ([]byte, error) {
 	for _, f := range zr.File {
@@ -152,7 +164,16 @@ func readZip(zr *zip.Reader, name string) ([]byte, error) {
 				return nil, err
 			}
 			defer rc.Close()
-			return io.ReadAll(rc)
+			// Read one byte past the cap so hitting it exactly is
+			// distinguishable from a file that merely ends there.
+			b, err := io.ReadAll(io.LimitReader(rc, maxZipEntry+1))
+			if err != nil {
+				return nil, err
+			}
+			if len(b) > maxZipEntry {
+				return nil, fmt.Errorf("zip entry %q exceeds %d bytes decompressed", name, maxZipEntry)
+			}
+			return b, nil
 		}
 	}
 	return nil, fmt.Errorf("zip entry %q not found", name)

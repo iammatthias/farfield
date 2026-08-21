@@ -4,6 +4,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"errors"
+	"strings"
 
 	"github.com/iammatthias/farfield/lib/cid"
 	"github.com/iammatthias/farfield/lib/store"
@@ -161,11 +162,26 @@ func scanPost(row scanner) (*Post, error) {
 func listPosts(db *sql.DB, limit int, before string) ([]Post, error) {
 	query := `SELECT ` + postCols + ` FROM posts`
 	args := []any{}
-	if before != "" {
+	// The cursor is (created_at, slug), not created_at alone.
+	//
+	// Timestamps are second-granular, so two posts published in the same second
+	// share one. With a bare `created_at < ?` cursor, a page boundary landing
+	// between such a pair skipped the older sibling permanently: it is not on
+	// the page you just read, and the next page starts strictly below its
+	// timestamp. The post existed and was reachable by slug, but no amount of
+	// paging would ever show it. Adding slug as a tiebreaker — and ordering by
+	// it — makes the cursor total, which is what keyset pagination requires.
+	at, slug := splitCursor(before)
+	switch {
+	case at != "" && slug != "":
+		query += ` WHERE (created_at < ? OR (created_at = ? AND slug < ?))`
+		args = append(args, at, at, slug)
+	case at != "":
+		// A bare timestamp — an old link or client. Same behaviour as before.
 		query += ` WHERE created_at < ?`
-		args = append(args, before)
+		args = append(args, at)
 	}
-	query += ` ORDER BY created_at DESC`
+	query += ` ORDER BY created_at DESC, slug DESC`
 	if limit > 0 {
 		query += ` LIMIT ?`
 		args = append(args, limit)
@@ -276,4 +292,24 @@ func importPost(db execer, p *Post) error {
 		   created_at=excluded.created_at, updated_at=excluded.updated_at`,
 		p.Slug, p.CID, p.Body, encodeTags(p.Tags), p.CreatedAt, p.UpdatedAt)
 	return err
+}
+
+// cursorSep joins the two halves of a page cursor. It cannot appear in an
+// RFC 3339 timestamp, and slugs are [a-z0-9-], so a split on the first
+// occurrence is unambiguous.
+const cursorSep = "|"
+
+// splitCursor parses a page cursor into its timestamp and slug halves. A bare
+// timestamp — an old bookmark, or a client written against the previous
+// single-key API — yields an empty slug and the old behaviour.
+func splitCursor(c string) (at, slug string) {
+	if i := strings.Index(c, cursorSep); i >= 0 {
+		return c[:i], c[i+len(cursorSep):]
+	}
+	return c, ""
+}
+
+// makeCursor builds the cursor a client should send to get the next page.
+func makeCursor(p *Post) string {
+	return p.CreatedAt + cursorSep + p.Slug
 }
