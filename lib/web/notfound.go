@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	"github.com/iammatthias/farfield/lib/cid"
+	"github.com/iammatthias/farfield/lib/theme"
 )
 
 // The fleet 404 is a print: "Plate 404 — not in the catalogue", set on a
@@ -152,7 +153,13 @@ func (pw *plateWriter) Unwrap() http.ResponseWriter { return pw.ResponseWriter }
 // artwork holds the bottom at its own scale and a flat field extends its sky,
 // so the scene stays distant instead of crop-zoomed. One %s: the versioned
 // artwork URL.
-const plate404HTML = `<!DOCTYPE html>
+//
+// The vendored faces are spliced in from lib/theme rather than linked from a
+// font CDN: this page is served by every app in the fleet, so a CDN link here
+// leaked a visitor IP on every 404 anywhere and broke the self-hosting rule
+// the rest of the fleet keeps. A var, not a const, because the faces are
+// computed at init.
+var plate404HTML = `<!DOCTYPE html>
 <html lang="en">
 <head>
 <meta charset="UTF-8">
@@ -160,10 +167,8 @@ const plate404HTML = `<!DOCTYPE html>
 <meta name="theme-color" content="#213854">
 <meta name="robots" content="noindex">
 <title>404 — not in the catalogue</title>
-<link rel="preconnect" href="https://fonts.googleapis.com">
-<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@500&family=Inter:wght@400;500&family=Newsreader:opsz,wght@6..72,400&display=swap">
 <style>
+` + theme.Fonts + `
   *,*::before,*::after{margin:0;padding:0;box-sizing:border-box}
   :root{
     --ff-space:#0e222d;

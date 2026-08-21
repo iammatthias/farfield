@@ -242,3 +242,64 @@ var (
 	_ io.ReaderFrom = (*gzipWriter)(nil)
 	_ http.Flusher  = (*gzipWriter)(nil)
 )
+
+// SecureHeaders sets the response headers every app in the fleet should send
+// and, before this, none of them did.
+//
+// The audit found no security headers on any response fleet-wide, which is a
+// gap rather than an oversight in any one app: these services are reachable
+// from the public internet through the Cloudflare tunnel, and several of them
+// serve author-supplied content (markdown bodies, uploaded blobs, paste
+// bodies) on origins that share a cookie domain with every admin UI.
+//
+// The set is deliberately conservative, because a wrong header here breaks
+// fifteen apps at once:
+//
+//   - nosniff, so a mislabelled response is never sniffed into active HTML.
+//   - SAMEORIGIN framing, so an admin console cannot be put in someone
+//     else's iframe and clickjacked. Not DENY: the fleet frames its own
+//     pages (the blobs viewer, sideload's install flow).
+//   - A referrer policy that keeps paths off other origins. Capability URLs
+//     live in paths here (sideload's /i/{token}), so a full referrer is a
+//     credential leak.
+//   - An opt-out of the legacy interest-cohort API.
+//
+// No Content-Security-Policy: the apps use inline styles and inline scripts
+// widely enough that a policy strict enough to be worth having would have to
+// be written per app, and a permissive one would only look like protection.
+// That belongs in a separate pass with per-app nonces.
+func SecureHeaders(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		h := w.Header()
+		h.Set("X-Content-Type-Options", "nosniff")
+		h.Set("X-Frame-Options", "SAMEORIGIN")
+		h.Set("Referrer-Policy", "strict-origin-when-cross-origin")
+		h.Set("Permissions-Policy", "interest-cohort=()")
+		next.ServeHTTP(w, r)
+	})
+}
+
+// MaxBody caps how much of a request body a handler will read.
+//
+// Write endpoints across the fleet decoded bodies straight from r.Body, so
+// any authenticated — and on a few routes, unauthenticated — caller could
+// make a service allocate without limit. http.MaxBytesReader answers with a
+// 413 and stops reading, so the cost is bounded before the handler sees it.
+//
+// Applied to unsafe methods only: a GET has no body worth capping, and
+// wrapping one would add work to the read path that carries the traffic.
+func MaxBody(next http.Handler, limit int64) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.Method {
+		case http.MethodPost, http.MethodPut, http.MethodPatch, http.MethodDelete:
+			r.Body = http.MaxBytesReader(w, r.Body, limit)
+		}
+		next.ServeHTTP(w, r)
+	})
+}
+
+// DefaultMaxBody is the fleet's standard request-body ceiling. Generous for
+// a form or a JSON document, far below what an uncapped decoder would accept.
+// Apps that genuinely stream large uploads (blobs, library, sideload) set
+// their own limits on those routes and must not be wrapped at this size.
+const DefaultMaxBody = 2 << 20 // 2 MiB

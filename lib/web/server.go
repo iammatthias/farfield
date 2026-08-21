@@ -16,12 +16,17 @@ import (
 // SIGINT/SIGTERM. ReadHeaderTimeout bounds slow-header clients (slowloris);
 // there is deliberately no Read/WriteTimeout because farfield apps stream
 // uploads and downloads of up to 100 MiB. Every handler is wrapped in
-// NotFoundPlate, so the whole fleet answers a browser's missing page with
-// the same printed plate and no app has to remember to.
+// NotFoundPlate and SecureHeaders, so the whole fleet answers a browser.s
+// missing page with the same printed plate and sends the same baseline
+// security headers, without any app having to remember to.
+//
+// Deliberately NOT wrapped here: MaxBody. blobs, library and sideload stream
+// uploads of up to 100 MiB, so a fleet-wide body cap would break exactly the
+// apps that need one most; those set their own per-route limits.
 func Serve(host, port string, h http.Handler) error {
 	srv := &http.Server{
 		Addr:              net.JoinHostPort(host, port),
-		Handler:           NotFoundPlate(h),
+		Handler:           SecureHeaders(NotFoundPlate(h)),
 		ReadHeaderTimeout: 10 * time.Second,
 		IdleTimeout:       2 * time.Minute,
 	}

@@ -2,6 +2,7 @@ package web
 
 import (
 	"database/sql"
+	"fmt"
 	"log/slog"
 	"net/http"
 	"net/url"
@@ -293,6 +294,10 @@ func APIKeyFrom(r *http.Request) string {
 // Failed attempts are rate-limited per client IP — see loginLimiter. A correct
 // password is never throttled, so replaying a valid login stays free.
 func (a *Auth) HandleLogin(w http.ResponseWriter, r *http.Request) {
+	// A login form is a password and nothing else. Unbounded, ParseForm would
+	// read whatever an anonymous caller sent into memory before the throttle
+	// below ever looked at it.
+	r.Body = http.MaxBytesReader(w, r.Body, 64<<10)
 	ip := ClientIP(r)
 	limiter := a.loginLimiter()
 	if limiter.Blocked(ip) {
@@ -331,7 +336,24 @@ func (a *Auth) HandleLogin(w http.ResponseWriter, r *http.Request) {
 // HandleLogout deletes the session and clears the cookie. Fleet sessions
 // are stateless, so their logout is the cookie clear itself — scoped to the
 // same domain the login set, or the browser would keep the fleet cookie.
+//
+// Logging out is a state change, so it needs a POST and the same origin check
+// RequireSession applies to every other write. As a GET it was logout-CSRF:
+// any page anywhere could embed <img src="https://content.farfield.systems/
+// logout"> and end the reader.s fleet session — every app at once, since the
+// cookie is shared. A GET now renders a confirmation form instead of acting,
+// which also keeps a stale bookmark working rather than dead-ending.
 func (a *Auth) HandleLogout(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		w.Header().Set("Content-Type", "text/html; charset=utf-8")
+		w.Header().Set("Cache-Control", "no-store")
+		fmt.Fprint(w, logoutConfirmHTML)
+		return
+	}
+	if !allowedOrigin(r) {
+		http.Error(w, "cross-origin logout refused", http.StatusForbidden)
+		return
+	}
 	if token, ok := auth.Session(r); ok {
 		_ = store.DeleteSession(a.DB, token)
 	}
@@ -340,3 +362,26 @@ func (a *Auth) HandleLogout(w http.ResponseWriter, r *http.Request) {
 	http.SetCookie(w, c)
 	http.Redirect(w, r, "/login", http.StatusSeeOther)
 }
+
+// logoutConfirmHTML is deliberately self-contained: it is served by every app,
+// including ones whose templates are not loaded on this path.
+const logoutConfirmHTML = `<!DOCTYPE html>
+<html lang="en"><head><meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="robots" content="noindex">
+<title>Log out</title>
+<style>
+  body{background:#f3e5d1;color:#0e222d;font-family:system-ui,sans-serif;
+    display:grid;place-items:center;min-height:100vh;margin:0;padding:1.5rem}
+   (prefers-color-scheme:dark){body{background:#0e222d;color:#f3e5d1}}
+  form{display:grid;gap:1rem;text-align:center}
+  h1{font-size:1.25rem;font-weight:600;margin:0}
+  button{font:inherit;padding:.6rem 1.4rem;border:1px solid currentColor;
+    background:transparent;color:inherit;cursor:pointer;border-radius:3px}
+  a{color:inherit;font-size:.875rem}
+</style></head>
+<body><form method="post" action="/logout">
+  <h1>Log out of farfield?</h1>
+  <button type="submit">Log out</button>
+  <a href="/">Stay signed in</a>
+</form></body></html>`
