@@ -85,7 +85,7 @@ func main() {
 			w.Header().Set("Cache-Control", "no-cache")
 			w.Write(stamped)
 		}
-		mux.HandleFunc("GET /{", serveShell)
+		mux.HandleFunc("GET /{$}", serveShell)
 		mux.HandleFunc("GET /index.html", serveShell)
 	}
 	mux.Handle("/", cacheControl(http.FileServerFS(site)))
