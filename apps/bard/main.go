@@ -50,6 +50,19 @@ func main() {
 	// per hostname, and these are more specific than the "/" catch-all.
 	mux.HandleFunc("GET /robots.txt", web.RobotsHandler("/sitemap.xml"))
 	mux.HandleFunc("GET /sitemap.xml", web.SitemapHandler("/"))
+	// index.html is a static shell with no template pass, so the shared
+	// asset version is substituted once here. Ahead of the file server, which
+	// would otherwise serve the unstamped bytes.
+	if shell, err := fs.ReadFile(site, "index.html"); err == nil {
+		stamped := theme.StampAssets(shell)
+		serveShell := func(w http.ResponseWriter, r *http.Request) {
+			w.Header().Set("Content-Type", "text/html; charset=utf-8")
+			w.Header().Set("Cache-Control", "no-cache")
+			w.Write(stamped)
+		}
+		mux.HandleFunc("GET /{", serveShell)
+		mux.HandleFunc("GET /index.html", serveShell)
+	}
 	mux.Handle("/", cacheControl(http.FileServerFS(site)))
 
 	// Bard is otherwise database-free; this SQLite file exists purely so the

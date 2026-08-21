@@ -83,13 +83,32 @@ func WriteDB(path string, src io.Reader) error {
 	if err := os.Chmod(tmpName, 0o644); err != nil {
 		return err
 	}
+	// Clear the old -wal/-shm BEFORE the swap, never after. Between a rename
+	// and a later unlink, the directory holds a brand-new database sitting
+	// beside the previous database's write-ahead log — mixed provenance,
+	// which SQLite treats as a corruption hazard: anything that opens the
+	// file in that window can recover foreign WAL frames onto the restored
+	// bytes. Removing them first means the window never exists. (The old
+	// database is still whole here; a failure between this and the rename
+	// leaves it recoverable, whereas a checkpointed WAL is not needed to
+	// read a database that was cleanly closed, which the runbook requires.)
+	for _, suffix := range []string{"-wal", "-shm"} {
+		if err := os.Remove(path + suffix); err != nil && !os.IsNotExist(err) {
+			return err
+		}
+	}
 	if err := os.Rename(tmpName, path); err != nil {
 		return err
 	}
-	for _, suffix := range []string{"-wal", "-shm"} {
-		_ = os.Remove(path + suffix)
+	// fsync the directory too. The earlier tmp.Sync commits the file's
+	// contents; only this commits the rename itself, which is what the
+	// promise above actually depends on.
+	d, err := os.Open(dir)
+	if err != nil {
+		return err
 	}
-	return nil
+	defer d.Close()
+	return d.Sync()
 }
 
 var client = &http.Client{Timeout: 5 * time.Minute}
@@ -181,4 +200,45 @@ func Delete(blobsURL, apiKey, cid string) error {
 		return fmt.Errorf("blobs DELETE /backups/%s: HTTP %d: %s", cid, resp.StatusCode, body)
 	}
 	return nil
+}
+
+// CopyFile duplicates src to dst, replacing dst if present, and fsyncs the
+// result. Used for the mandatory local copy taken before a restore
+// overwrites a live database: it must survive both a crash and an
+// unreachable network, so it copies bytes on the same filesystem rather than
+// pushing them anywhere.
+func CopyFile(src, dst string) error {
+	in, err := os.Open(src)
+	if err != nil {
+		return err
+	}
+	defer in.Close()
+
+	tmp, err := os.CreateTemp(filepath.Dir(dst), filepath.Base(dst)+".tmp-*")
+	if err != nil {
+		return err
+	}
+	tmpName := tmp.Name()
+	defer os.Remove(tmpName) // no-op once the rename succeeds
+
+	if _, err := io.Copy(tmp, in); err != nil {
+		tmp.Close()
+		return err
+	}
+	if err := tmp.Sync(); err != nil {
+		tmp.Close()
+		return err
+	}
+	if err := tmp.Close(); err != nil {
+		return err
+	}
+	if err := os.Rename(tmpName, dst); err != nil {
+		return err
+	}
+	d, err := os.Open(filepath.Dir(dst))
+	if err != nil {
+		return err
+	}
+	defer d.Close()
+	return d.Sync()
 }

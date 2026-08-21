@@ -540,6 +540,11 @@ func (s *Server) handleAPIGetBytes(w http.ResponseWriter, r *http.Request) {
 	defer body.Close()
 
 	w.Header().Set("Content-Type", mime)
+	// Uploaded bytes are attacker-chosen content on a host that shares a
+	// cookie domain with every admin UI. nosniff stops a mislabelled upload
+	// being sniffed into active HTML; upload is auth-gated, so this is the
+	// belt to that brace, not the only control.
+	w.Header().Set("X-Content-Type-Options", "nosniff")
 	w.Header().Set("ETag", etag)
 	// Content-addressed: the bytes for a CID never change.
 	w.Header().Set("Cache-Control", "public, max-age=31536000, immutable")

@@ -133,3 +133,34 @@ func TestEditableHardWrapsKeepSoftBreaks(t *testing.T) {
 		t.Errorf("hard-wrap renderer must keep the newline as <br>:\n%s", got)
 	}
 }
+
+// TestEditableSuppressesDangerousURLs pins the two renderers to one answer.
+// The read path has always neutered javascript: hrefs via goldmark; the
+// editable path hand-builds anchors and used to keep the scheme, so the admin
+// editor rendered a live href the published page would have blanked.
+func TestEditableSuppressesDangerousURLs(t *testing.T) {
+	r := &Renderer{}
+	for _, src := range []string{
+		"[click](javascript:alert(1))",
+		"[click](JaVaScRiPt:alert(1))",
+		"![x](javascript:alert(1))",
+		"[click](vbscript:msgbox)",
+	} {
+		got := string(r.RenderEditable(context.Background(), src))
+		low := strings.ToLower(got)
+		if strings.Contains(low, "javascript:") || strings.Contains(low, "vbscript:") {
+			t.Errorf("RenderEditable(%q) kept a dangerous scheme: %s", src, got)
+		}
+	}
+}
+
+// TestEditableKeepsOrdinaryLinks guards against over-filtering.
+func TestEditableKeepsOrdinaryLinks(t *testing.T) {
+	r := &Renderer{}
+	got := string(r.RenderEditable(context.Background(), "[a](https://example.com/x?y=1) and [b](/rel) and [c](mailto:a@b.co)"))
+	for _, want := range []string{"https://example.com/x?y=1", "/rel", "mailto:a@b.co"} {
+		if !strings.Contains(got, want) {
+			t.Errorf("dropped a safe URL %q from: %s", want, got)
+		}
+	}
+}

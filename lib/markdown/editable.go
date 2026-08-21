@@ -8,6 +8,7 @@ import (
 
 	"github.com/yuin/goldmark/ast"
 	east "github.com/yuin/goldmark/extension/ast"
+	ghtml "github.com/yuin/goldmark/renderer/html"
 	"github.com/yuin/goldmark/text"
 )
 
@@ -240,17 +241,17 @@ func (r *Renderer) editInline(b *strings.Builder, src []byte, n ast.Node, embeds
 		}
 		b.WriteString("</code>")
 	case *ast.Link:
-		b.WriteString(`<a href="` + template.HTMLEscapeString(string(t.Destination)) + `">`)
+		b.WriteString(`<a href="` + safeURL(t.Destination) + `">`)
 		r.editInlines(b, src, n, embeds)
 		b.WriteString("</a>")
 	case *ast.AutoLink:
 		url := string(t.URL(src))
-		b.WriteString(`<a href="` + template.HTMLEscapeString(url) + `">` +
+		b.WriteString(`<a href="` + safeURL([]byte(url)) + `">` +
 			template.HTMLEscapeString(string(t.Label(src))) + "</a>")
 	case *ast.Image:
 		// Blob images became placeholders in the pre-pass; this is an
 		// external image.
-		b.WriteString(`<img src="` + template.HTMLEscapeString(string(t.Destination)) +
+		b.WriteString(`<img src="` + safeURL(t.Destination) +
 			`" alt="` + template.HTMLEscapeString(nodeText(src, n)) + `">`)
 	case *east.Strikethrough:
 		b.WriteString("<del>")
@@ -290,4 +291,19 @@ func nodeText(src []byte, n ast.Node) string {
 		return ast.WalkContinue, nil
 	})
 	return b.String()
+}
+
+// safeURL escapes a destination and blanks it if the scheme is dangerous.
+//
+// The read path renders through goldmark, which suppresses javascript: and
+// friends on every link and image. RenderEditable hand-builds its anchors so
+// it can round-trip a document, and in doing so escaped the value but kept
+// the scheme — meaning the admin editor rendered a live javascript: href that
+// the published page would have neutered. Same input, two answers; this makes
+// it one, using goldmark's own predicate rather than a second opinion.
+func safeURL(dest []byte) string {
+	if ghtml.IsDangerousURL(dest) {
+		return ""
+	}
+	return template.HTMLEscapeString(string(dest))
 }

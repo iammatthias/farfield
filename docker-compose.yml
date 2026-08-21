@@ -67,6 +67,8 @@ services:
       - "${FARFIELD_BIND_IP:-127.0.0.1}:${BLOBS_PORT:-8789}:8789"
     environment:
       - HOST=0.0.0.0
+      - SESSION_EPOCH=${SESSION_EPOCH:-}
+      - FARFIELD_TRUSTED_PROXIES=${FARFIELD_TRUSTED_PROXIES:-}
       - BLOBS_PORT=8789
       - BLOBS_DB_PATH=/data/blobs.sqlite
       - BLOBS_BACKEND=${BLOBS_BACKEND:-r2}
@@ -74,7 +76,7 @@ services:
       # Uploads stage here before hashing, so large media never has to fit in
       # memory. On the mounted volume, not the container's writable layer.
       - BLOBS_SPOOL_DIR=/data/blob-spool
-      - PASSWORD=${PASSWORD:-changeme}
+      - PASSWORD=${PASSWORD:?set PASSWORD in .env — refusing to start with a default}
       - SESSION_SECRET=${SESSION_SECRET:-}
       - SESSION_COOKIE_DOMAIN=${SESSION_COOKIE_DOMAIN:-}
       - BLOBS_API_KEY=${BLOBS_API_KEY:-}
@@ -105,11 +107,13 @@ services:
       - "${FARFIELD_BIND_IP:-127.0.0.1}:${LIBRARY_PORT:-8797}:8797"
     environment:
       - HOST=0.0.0.0
+      - SESSION_EPOCH=${SESSION_EPOCH:-}
+      - FARFIELD_TRUSTED_PROXIES=${FARFIELD_TRUSTED_PROXIES:-}
       - LIBRARY_PORT=8797
       - LIBRARY_DB_PATH=/data/library.sqlite
       - LIBRARY_BACKEND=${LIBRARY_BACKEND:-r2}
       - LIBRARY_DIR=/data/library
-      - PASSWORD=${PASSWORD:-changeme}
+      - PASSWORD=${PASSWORD:?set PASSWORD in .env — refusing to start with a default}
       - SESSION_SECRET=${SESSION_SECRET:-}
       - SESSION_COOKIE_DOMAIN=${SESSION_COOKIE_DOMAIN:-}
       - LIBRARY_API_KEY=${LIBRARY_API_KEY:-}
@@ -138,9 +142,11 @@ services:
       - "${FARFIELD_BIND_IP:-127.0.0.1}:${CONTENT_PORT:-8787}:8787"
     environment:
       - HOST=0.0.0.0
+      - SESSION_EPOCH=${SESSION_EPOCH:-}
+      - FARFIELD_TRUSTED_PROXIES=${FARFIELD_TRUSTED_PROXIES:-}
       - CONTENT_PORT=8787
       - CONTENT_DB_PATH=/data/content.sqlite
-      - PASSWORD=${PASSWORD:-changeme}
+      - PASSWORD=${PASSWORD:?set PASSWORD in .env — refusing to start with a default}
       - SESSION_SECRET=${SESSION_SECRET:-}
       - SESSION_COOKIE_DOMAIN=${SESSION_COOKIE_DOMAIN:-}
       - CONTENT_API_KEY=${CONTENT_API_KEY:-}
@@ -171,9 +177,11 @@ services:
       - "${FARFIELD_BIND_IP:-127.0.0.1}:${FEED_PORT:-8788}:8788"
     environment:
       - HOST=0.0.0.0
+      - SESSION_EPOCH=${SESSION_EPOCH:-}
+      - FARFIELD_TRUSTED_PROXIES=${FARFIELD_TRUSTED_PROXIES:-}
       - FEED_PORT=8788
       - FEED_DB_PATH=/data/feed.sqlite
-      - PASSWORD=${PASSWORD:-changeme}
+      - PASSWORD=${PASSWORD:?set PASSWORD in .env — refusing to start with a default}
       - SESSION_SECRET=${SESSION_SECRET:-}
       - SESSION_COOKIE_DOMAIN=${SESSION_COOKIE_DOMAIN:-}
       - FEED_API_KEY=${FEED_API_KEY:-}
@@ -199,6 +207,8 @@ services:
       - "${FARFIELD_BIND_IP:-127.0.0.1}:${APEX_PORT:-8790}:8790"
     environment:
       - HOST=0.0.0.0
+      - SESSION_EPOCH=${SESSION_EPOCH:-}
+      - FARFIELD_TRUSTED_PROXIES=${FARFIELD_TRUSTED_PROXIES:-}
       - APEX_PORT=8790
       - APEX_DB_PATH=/data/apex.sqlite
     volumes:
@@ -214,6 +224,8 @@ services:
       - "${FARFIELD_BIND_IP:-127.0.0.1}:${BARD_PORT:-8795}:8795"
     environment:
       - HOST=0.0.0.0
+      - SESSION_EPOCH=${SESSION_EPOCH:-}
+      - FARFIELD_TRUSTED_PROXIES=${FARFIELD_TRUSTED_PROXIES:-}
       - BARD_PORT=8795
       - BARD_DB_PATH=/data/bard.sqlite
     volumes:
@@ -229,6 +241,8 @@ services:
       - "${FARFIELD_BIND_IP:-127.0.0.1}:${DEAD_PRESIDENTS_PORT:-8796}:8796"
     environment:
       - HOST=0.0.0.0
+      - SESSION_EPOCH=${SESSION_EPOCH:-}
+      - FARFIELD_TRUSTED_PROXIES=${FARFIELD_TRUSTED_PROXIES:-}
       - DEAD_PRESIDENTS_PORT=8796
       - DEAD_PRESIDENTS_DB_PATH=/data/dead-presidents.sqlite
     volumes:
@@ -244,9 +258,11 @@ services:
       - "${FARFIELD_BIND_IP:-127.0.0.1}:${PULSE_PORT:-8798}:8798"
     environment:
       - HOST=0.0.0.0
+      - SESSION_EPOCH=${SESSION_EPOCH:-}
+      - FARFIELD_TRUSTED_PROXIES=${FARFIELD_TRUSTED_PROXIES:-}
       - PULSE_PORT=8798
       - PULSE_DB_PATH=/data/pulse.sqlite
-      - PASSWORD=${PASSWORD:-changeme}
+      - PASSWORD=${PASSWORD:?set PASSWORD in .env — refusing to start with a default}
       - SESSION_SECRET=${SESSION_SECRET:-}
       - SESSION_COOKIE_DOMAIN=${SESSION_COOKIE_DOMAIN:-}
       - COOKIE_SECURE=true
@@ -263,6 +279,8 @@ services:
       - "${FARFIELD_BIND_IP:-127.0.0.1}:${DAILY_PORT:-8792}:8792"
     environment:
       - HOST=0.0.0.0
+      - SESSION_EPOCH=${SESSION_EPOCH:-}
+      - FARFIELD_TRUSTED_PROXIES=${FARFIELD_TRUSTED_PROXIES:-}
       - DAILY_PORT=8792
       - DAILY_DB_PATH=/data/daily.sqlite
       - NASA_API_KEY=${NASA_API_KEY:-DEMO_KEY}
@@ -279,9 +297,11 @@ services:
       - "${FARFIELD_BIND_IP:-127.0.0.1}:${BOOKMARKS_PORT:-8793}:8793"
     environment:
       - HOST=0.0.0.0
+      - SESSION_EPOCH=${SESSION_EPOCH:-}
+      - FARFIELD_TRUSTED_PROXIES=${FARFIELD_TRUSTED_PROXIES:-}
       - BOOKMARKS_PORT=8793
       - BOOKMARKS_DB_PATH=/data/bookmarks.sqlite
-      - PASSWORD=${PASSWORD:-changeme}
+      - PASSWORD=${PASSWORD:?set PASSWORD in .env — refusing to start with a default}
       - SESSION_SECRET=${SESSION_SECRET:-}
       - SESSION_COOKIE_DOMAIN=${SESSION_COOKIE_DOMAIN:-}
       - BOOKMARKS_API_KEY=${BOOKMARKS_API_KEY:-}
@@ -301,13 +321,15 @@ services:
       - "${FARFIELD_BIND_IP:-127.0.0.1}:${QR_PORT:-8794}:8794"
     environment:
       - HOST=0.0.0.0
+      - SESSION_EPOCH=${SESSION_EPOCH:-}
+      - FARFIELD_TRUSTED_PROXIES=${FARFIELD_TRUSTED_PROXIES:-}
       - QR_PORT=8794
       - QR_DB_PATH=/data/qr.sqlite
       - QR_API_KEY=${QR_API_KEY:-}
       - QR_READ_KEY=${QR_READ_KEY:-}
       - KEYS_DB_PATH=/data/keys.sqlite
       - QR_PUBLIC_URL=${QR_PUBLIC_URL:-https://qr.farfield.systems}
-      - PASSWORD=${PASSWORD:-changeme}
+      - PASSWORD=${PASSWORD:?set PASSWORD in .env — refusing to start with a default}
       - SESSION_SECRET=${SESSION_SECRET:-}
       - SESSION_COOKIE_DOMAIN=${SESSION_COOKIE_DOMAIN:-}
       - COOKIE_SECURE=true
@@ -324,12 +346,14 @@ services:
       - "${FARFIELD_BIND_IP:-127.0.0.1}:${SCRAP_PORT:-8799}:8799"
     environment:
       - HOST=0.0.0.0
+      - SESSION_EPOCH=${SESSION_EPOCH:-}
+      - FARFIELD_TRUSTED_PROXIES=${FARFIELD_TRUSTED_PROXIES:-}
       - SCRAP_PORT=8799
       - SCRAP_DB_PATH=/data/scrap.sqlite
       - SCRAP_API_KEY=${SCRAP_API_KEY:-}
       - KEYS_DB_PATH=/data/keys.sqlite
       - SCRAP_PUBLIC_URL=${SCRAP_PUBLIC_URL:-https://scrap.farfield.systems}
-      - PASSWORD=${PASSWORD:-changeme}
+      - PASSWORD=${PASSWORD:?set PASSWORD in .env — refusing to start with a default}
       - SESSION_SECRET=${SESSION_SECRET:-}
       - SESSION_COOKIE_DOMAIN=${SESSION_COOKIE_DOMAIN:-}
       - COOKIE_SECURE=true
@@ -346,6 +370,8 @@ services:
       - "${FARFIELD_BIND_IP:-127.0.0.1}:${SIDELOAD_PORT:-8800}:8800"
     environment:
       - HOST=0.0.0.0
+      - SESSION_EPOCH=${SESSION_EPOCH:-}
+      - FARFIELD_TRUSTED_PROXIES=${FARFIELD_TRUSTED_PROXIES:-}
       - SIDELOAD_PORT=8800
       - SIDELOAD_DB_PATH=/data/sideload.sqlite
       - SIDELOAD_DIR=/data/sideload-blobs
@@ -358,7 +384,7 @@ services:
       - KEYS_DB_PATH=/data/keys.sqlite
       - SIDELOAD_OWNER_UDID=${SIDELOAD_OWNER_UDID:-}
       - SIDELOAD_PUBLIC_URL=${SIDELOAD_PUBLIC_URL:-https://sideload.farfield.systems}
-      - PASSWORD=${PASSWORD:-changeme}
+      - PASSWORD=${PASSWORD:?set PASSWORD in .env — refusing to start with a default}
       - SESSION_SECRET=${SESSION_SECRET:-}
       - SESSION_COOKIE_DOMAIN=${SESSION_COOKIE_DOMAIN:-}
       - COOKIE_SECURE=true
@@ -375,9 +401,11 @@ services:
       - "${FARFIELD_BIND_IP:-127.0.0.1}:${KEYS_PORT:-8801}:8801"
     environment:
       - HOST=0.0.0.0
+      - SESSION_EPOCH=${SESSION_EPOCH:-}
+      - FARFIELD_TRUSTED_PROXIES=${FARFIELD_TRUSTED_PROXIES:-}
       - KEYS_PORT=8801
       - KEYS_DB_PATH=/data/keys.sqlite
-      - PASSWORD=${PASSWORD:-changeme}
+      - PASSWORD=${PASSWORD:?set PASSWORD in .env — refusing to start with a default}
       - SESSION_SECRET=${SESSION_SECRET:-}
       - SESSION_COOKIE_DOMAIN=${SESSION_COOKIE_DOMAIN:-}
       - COOKIE_SECURE=true
@@ -397,13 +425,15 @@ services:
       - "${FARFIELD_BIND_IP:-127.0.0.1}:${BACKUP_PORT:-8791}:8791"
     environment:
       - HOST=0.0.0.0
+      - SESSION_EPOCH=${SESSION_EPOCH:-}
+      - FARFIELD_TRUSTED_PROXIES=${FARFIELD_TRUSTED_PROXIES:-}
       - BACKUP_PORT=8791
       - BACKUP_DB_PATH=/data/backup.sqlite
       - BACKUP_INTERVAL=${BACKUP_INTERVAL:-6h}
       - CONTENT_DB_PATH=/data/content.sqlite
       - FEED_DB_PATH=/data/feed.sqlite
       - BLOBS_DB_PATH=/data/blobs.sqlite
-      - PASSWORD=${PASSWORD:-changeme}
+      - PASSWORD=${PASSWORD:?set PASSWORD in .env — refusing to start with a default}
       - SESSION_SECRET=${SESSION_SECRET:-}
       - SESSION_COOKIE_DOMAIN=${SESSION_COOKIE_DOMAIN:-}
       - BLOBS_URL=http://blobs:8789

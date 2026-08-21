@@ -12,6 +12,7 @@ import (
 
 	"github.com/iammatthias/farfield/lib/fleet"
 	"github.com/iammatthias/farfield/lib/store"
+	"github.com/iammatthias/farfield/lib/theme"
 	"github.com/iammatthias/farfield/lib/web"
 )
 
@@ -95,7 +96,14 @@ type statusPage struct {
 const statusCacheTTL = 15 * time.Second
 
 func newStatusPage() (*statusPage, error) {
-	tmpl, err := template.ParseFS(statusFS, "templates/status.html")
+	// Stamp the shared asset version into the source once, before parsing —
+	// cheaper than rewriting every rendered response, and it keeps the
+	// template itself free of a value only the binary knows.
+	raw, err := statusFS.ReadFile("templates/status.html")
+	if err != nil {
+		return nil, err
+	}
+	tmpl, err := template.New("status.html").Parse(string(theme.StampAssets(raw)))
 	if err != nil {
 		return nil, err
 	}

@@ -67,3 +67,58 @@ func assetHandler(contentType, body, filename string) http.HandlerFunc {
 		w.Write([]byte(body))
 	}
 }
+
+// Fonts is just the @font-face rules from the stylesheet — the three vendored
+// latin-subset faces as data URIs, no layout or colour.
+//
+// It exists because a page can want the fleet's typography without the fleet's
+// component styles. Apex's landing and status pages are hand-styled from the
+// brand guide, so linking the whole theme would be wrong; before this they
+// reached for Google's CDN instead, which leaked a visitor IP on every request
+// to farfield.systems and quietly broke the "self-hosted, no font CDN"
+// guarantee the rest of the fleet keeps.
+var Fonts = extractFontFaces(CSS)
+
+// FontsHandler serves Fonts with the same immutable caching as the stylesheet.
+func FontsHandler() http.HandlerFunc {
+	return assetHandler("text/css; charset=utf-8", Fonts, "fonts.css")
+}
+
+// extractFontFaces pulls every @font-face{...} block out of a stylesheet.
+// The blocks contain no nested braces, so brace counting is unnecessary.
+func extractFontFaces(css string) string {
+	var b strings.Builder
+	for rest := css; ; {
+		i := strings.Index(rest, "@font-face")
+		if i < 0 {
+			break
+		}
+		rest = rest[i:]
+		open := strings.Index(rest, "{")
+		close := strings.Index(rest, "}")
+		if open < 0 || close < open {
+			break
+		}
+		b.WriteString(rest[:close+1])
+		b.WriteByte('\n')
+		rest = rest[close+1:]
+	}
+	return b.String()
+}
+
+// assetVersionToken is the placeholder a static HTML shell carries where a
+// template would write {{.AssetVer}}.
+const assetVersionToken = "__THEME_VERSION__"
+
+// StampAssets substitutes the real asset version into a static HTML shell.
+//
+// Apps that render through lib/web's shared layout get cache-busting for free.
+// The handful that ship a pre-built index.html — apex's landing page, bard,
+// dead-presidents — have no template pass, so they had hand-written version
+// strings that never tracked the theme. Since the theme is served
+// `immutable, max-age=31536000`, a stale hand-written string meant a fleet-wide
+// theme change could not reach a warm cache for a year. Call this once at
+// startup on any embedded shell that links a shared asset.
+func StampAssets(html []byte) []byte {
+	return bytes.ReplaceAll(html, []byte(assetVersionToken), []byte(Version))
+}

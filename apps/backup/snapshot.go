@@ -215,12 +215,29 @@ func runRestore(app, cid string, confirm bool) error {
 
 	slog.Warn("restoring — stop the target service before running this", "app", app)
 
-	// Safety net: snapshot the current database before overwriting it.
+	// Safety net: preserve the current database before overwriting it.
+	//
+	// The local copy comes first and is mandatory. The remote snapshot below
+	// needs the network, so it fails exactly when blobs is unreachable or the
+	// disk is full — conditions that correlate with why someone is restoring
+	// in the first place. Warning and overwriting anyway meant the net was
+	// reliably absent in the one situation it existed for, with no surviving
+	// copy anywhere. A rename on the same filesystem needs neither network
+	// nor free space, so it is the copy that must not be skipped.
 	if _, err := os.Stat(target.DBPath); err == nil {
+		local := target.DBPath + ".pre-restore"
+		if err := backup.CopyFile(target.DBPath, local); err != nil {
+			return fmt.Errorf("refusing to restore: could not preserve the current database at %s: %w", local, err)
+		}
+		slog.Info("previous database preserved locally", "path", local)
+
+		// The remote snapshot is the nicer artifact — content-addressed and
+		// off-box — but it is now belt to the local braces, so its failure is
+		// survivable and does not abort the restore.
 		if scid, _, _, e := snapshotOne(db, *target, blobsURL, apiKey); e == nil {
 			slog.Info("current state is safe", "cid", scid)
 		} else {
-			slog.Warn("could not take a pre-restore safety snapshot", "err", e)
+			slog.Warn("remote pre-restore snapshot failed; the local copy stands", "err", e)
 		}
 	}
 

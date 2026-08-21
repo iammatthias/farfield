@@ -702,3 +702,59 @@ func TestCollectorBucketsBotsAndNotFound(t *testing.T) {
 		t.Fatal("bot referrer recorded")
 	}
 }
+
+// TestSeedDoesNotAdoptApexFromASibling pins the bug that made this an exact
+// host comparison. Apex's public host is the bare domain, which is a suffix
+// of every sibling host, so a substring test let any one sibling target mark
+// the fleet's own front door as covered — permanently, since the name still
+// entered the ledger.
+func TestSeedDoesNotAdoptApexFromASibling(t *testing.T) {
+	db := newTestDB(t, t.TempDir(), "pulse.sqlite")
+
+	// One sibling target exists. Nothing covers apex.
+	sibling := &Target{Name: "content", URL: "https://content.farfield.systems/status",
+		Method: "GET", ExpectedStatus: 200, IntervalS: 300, Enabled: true}
+	if err := insertTarget(db, sibling); err != nil {
+		t.Fatal(err)
+	}
+
+	seedTargets(db)
+
+	targets, err := listTargets(db)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var apex *Target
+	for i := range targets {
+		if targets[i].Name == "apex" {
+			apex = &targets[i]
+			break
+		}
+	}
+	if apex == nil {
+		t.Fatal("apex was never seeded — a sibling's URL was mistaken for coverage of the front door")
+	}
+	if !strings.Contains(apex.URL, "farfield.systems/status") {
+		t.Errorf("apex target URL = %q, want the apex /status URL", apex.URL)
+	}
+}
+
+// TestSameHostRejectsLookalikes covers the comparison directly.
+func TestSameHostRejectsLookalikes(t *testing.T) {
+	for _, tc := range []struct {
+		url, host string
+		want      bool
+	}{
+		{"https://farfield.systems/status", "farfield.systems", true},
+		{"https://FarField.Systems/status", "farfield.systems", true},
+		{"https://content.farfield.systems/status", "farfield.systems", false},
+		{"https://notcontent.farfield.systems/", "content.farfield.systems", false},
+		{"https://farfield.systems.example.com/", "farfield.systems", false},
+		{"https://uptime.example.io/?host=farfield.systems", "farfield.systems", false},
+		{"://bad", "farfield.systems", false},
+	} {
+		if got := sameHost(tc.url, tc.host); got != tc.want {
+			t.Errorf("sameHost(%q, %q) = %v, want %v", tc.url, tc.host, got, tc.want)
+		}
+	}
+}

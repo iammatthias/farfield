@@ -2,6 +2,7 @@ package recipe
 
 import (
 	"html/template"
+	"net/url"
 	"strconv"
 	"strings"
 )
@@ -235,10 +236,34 @@ func (rr *Renderer) footer(b *strings.Builder, rec *Recipe) {
 		label = rec.SourceURL
 	}
 	b.WriteString(`<p class="ff-recipe-source">Source: `)
-	if rec.SourceURL != "" {
+	if safeHref(rec.SourceURL) {
 		b.WriteString(`<a href="` + esc(rec.SourceURL) + `" rel="noopener">` + esc(label) + `</a>`)
 	} else {
 		b.WriteString(esc(label))
 	}
 	b.WriteString(`</p>`)
+}
+
+// safeHref reports whether raw is a URL worth turning into an anchor.
+//
+// Escaping the value stops an attribute breakout but not a scheme: a
+// sourceURL of "javascript:…" rendered as a live href on a public page. Every
+// other link in a body goes through goldmark, which suppresses dangerous
+// schemes; this field is hand-built YAML and bypassed that. Anything not
+// plainly http(s) or mailto falls back to plain text.
+func safeHref(raw string) bool {
+	if raw == "" {
+		return false
+	}
+	u, err := url.Parse(raw)
+	if err != nil {
+		return false
+	}
+	switch strings.ToLower(u.Scheme) {
+	case "http", "https", "mailto":
+		return true
+	default:
+		// A scheme-relative or relative URL carries no scheme to abuse.
+		return u.Scheme == "" && !strings.HasPrefix(raw, "//")
+	}
 }

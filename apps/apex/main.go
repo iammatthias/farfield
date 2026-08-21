@@ -206,6 +206,7 @@ func routes() (http.Handler, error) {
 	if err != nil {
 		return nil, err
 	}
+	landingBody = theme.StampAssets(landingBody)
 	landing := page{body: landingBody, etag: cid.Of(landingBody)[:16]}
 
 	files := cacheStatic(http.FileServerFS(site))
@@ -213,6 +214,11 @@ func routes() (http.Handler, error) {
 
 	// Shared farfield theme at the canonical path; docs layer style.css over it.
 	mux.Handle("GET /static/styles.css", theme.CSSHandler())
+	// The landing and status pages are hand-styled from the brand guide, so
+	// they want the fleet.s faces without the fleet.s component styles. Before
+	// this they linked Google.s CDN, which leaked a visitor IP on every hit to
+	// farfield.systems and broke the no-font-CDN guarantee.
+	mux.Handle("GET /static/fonts.css", theme.FontsHandler())
 
 	// /status is content-negotiated: a browser (Accept: text/html) gets the
 	// branded fleet observation page, everything else — the Docker

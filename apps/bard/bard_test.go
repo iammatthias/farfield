@@ -6,6 +6,8 @@ import (
 	"regexp"
 	"strings"
 	"testing"
+
+	"github.com/iammatthias/farfield/lib/theme"
 )
 
 func readAsset(t *testing.T, parts ...string) string {
@@ -75,10 +77,21 @@ func TestUsesSharedFarfieldTheme(t *testing.T) {
 func TestAssetsAreVersionedConsistently(t *testing.T) {
 	v := assetVersion(t)
 	index := readAsset(t, "index.html")
-	for _, want := range []string{"./app.js?v=" + v, "/static/styles.css?v=" + v} {
-		if !strings.Contains(index, want) {
-			t.Fatalf("index.html should load %q", want)
-		}
+	if !strings.Contains(index, "./app.js?v="+v) {
+		t.Fatalf("index.html should load %q", "./app.js?v="+v)
+	}
+	// The SHARED stylesheet is on a different clock: lib/theme versions it by
+	// content hash, and serves it immutable for a year. Pinning it to this
+	// app.s hand-bumped string meant a fleet-wide theme change could not reach
+	// a warm cache until someone remembered an unrelated JS bump.
+	if !strings.Contains(index, "/static/styles.css?v=__THEME_VERSION__") {
+		t.Fatal("index.html must defer the stylesheet version to lib/theme (__THEME_VERSION__)")
+	}
+	if strings.Contains(index, "/static/styles.css?v="+v) {
+		t.Fatal("stylesheet pinned to the app.s asset version — a theme change cannot bust the cache")
+	}
+	if stamped := string(theme.StampAssets([]byte(index))); !strings.Contains(stamped, "/static/styles.css?v="+theme.Version) {
+		t.Fatal("StampAssets did not substitute the real theme version")
 	}
 	if !strings.Contains(readAsset(t, "app.js"), "./worker.js?v=${ASSET_VERSION}") {
 		t.Fatal("app.js should load worker.js at the shared ASSET_VERSION")

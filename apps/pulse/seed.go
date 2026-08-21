@@ -3,11 +3,30 @@ package main
 import (
 	"database/sql"
 	"log/slog"
+	"net/url"
 	"strings"
 
 	"github.com/iammatthias/farfield/lib/fleet"
 	"github.com/iammatthias/farfield/lib/store"
 )
+
+// sameHost reports whether rawURL points at host. It compares parsed
+// hostnames, never substrings.
+//
+// A substring test looks adequate until you notice apex: its public host is
+// the bare domain farfield.systems, which is a suffix of every sibling
+// (content.farfield.systems, feed.farfield.systems, …). Under Contains, any
+// one sibling target marked the fleet's own front door as already covered —
+// and because the name still went into the ledger below, the gap never
+// healed on a restart. That is precisely the drift this function exists to
+// prevent, so the comparison has to be exact.
+func sameHost(rawURL, host string) bool {
+	u, err := url.Parse(rawURL)
+	if err != nil {
+		return false
+	}
+	return strings.EqualFold(u.Hostname(), host)
+}
 
 // seedTargets creates an uptime target for every public fleet service pulse
 // has never seen, probing its /status through the tunnel — the path a real
@@ -58,7 +77,7 @@ func seedTargets(db *sql.DB) {
 
 		covered := false
 		for _, u := range existing {
-			if strings.Contains(u, svc.Public) {
+			if sameHost(u, svc.Public) {
 				covered = true
 				break
 			}
