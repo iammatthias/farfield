@@ -151,6 +151,10 @@ services:
       - SESSION_COOKIE_DOMAIN=${SESSION_COOKIE_DOMAIN:-}
       - CONTENT_API_KEY=${CONTENT_API_KEY:-}
       - CONTENT_READ_KEY=${CONTENT_READ_KEY:-}
+      # Cloudflare deploy hook for the website's static build. A bearer secret —
+      # anyone holding it can queue builds — so the value lives in .env only.
+      # Unset means publishing simply does not trigger a rebuild.
+      - CF_DEPLOY_HOOK_URL=${CF_DEPLOY_HOOK_URL:-}
       - FEED_URL=http://feed:8788
       - FEED_READ_KEY=${FEED_READ_KEY:-}
       - BOOKMARKS_URL=http://bookmarks:8793

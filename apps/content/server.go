@@ -52,6 +52,10 @@ type Server struct {
 
 	// pulse records request telemetry; nil disables it (tests never start it).
 	pulse *pulse.Recorder
+
+	// rebuild pokes the website's deploy hook when a write changes what the
+	// static build reads; nil when no hook is configured (dev, tests).
+	rebuild *rebuildTrigger
 }
 
 // publicReadPerMin caps anonymous hits to the public single-entry read endpoint
@@ -111,6 +115,16 @@ func run(host, port string) error {
 
 	s.pulse = pulse.New(s.db, "content")
 	defer s.pulse.Close()
+
+	// The website is a static build; without this it does not learn that
+	// anything was published until the next code push. The URL is a bearer
+	// secret and lives only in the deployment environment.
+	s.rebuild = newRebuildTrigger(store.Env("CF_DEPLOY_HOOK_URL", ""))
+	if s.rebuild == nil {
+		slog.Info("no CF_DEPLOY_HOOK_URL — publishing will not trigger a site rebuild")
+	}
+	defer s.rebuild.Close()
+
 	return web.Serve(host, port, s.routes())
 }
 
@@ -199,8 +213,11 @@ func (s *Server) routes() http.Handler {
 
 	// Everything content serves is text — HTML, JSON — so Gzip wraps the
 	// whole mux. Logging sits outside so the recorded status is the final one;
-	// pulse traffic recording sits innermost so logged timings stay real.
-	return web.CORS(web.LogRequests(web.Gzip(s.pulse.Wrap(mux))),
+	// pulse traffic recording sits innermost so logged timings stay real. The
+	// rebuild trigger sits innermost of all: it must see the database as each
+	// handler left it, and its fingerprinting should not be counted as request
+	// time by pulse.
+	return web.CORS(web.LogRequests(web.Gzip(s.pulse.Wrap(s.rebuild.Wrap(s.db, mux)))),
 		"GET", "POST", "PUT", "DELETE", "OPTIONS")
 }
 
