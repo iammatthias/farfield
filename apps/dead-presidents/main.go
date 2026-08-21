@@ -30,10 +30,15 @@ var webFS embed.FS
 func cacheControl(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch {
-		case r.URL.Query().Get("v") != "":
-			w.Header().Set("Cache-Control", "public, max-age=31536000, immutable")
+		// The document is checked first, because it is the thing that carries
+		// the versioned links — it must never be the thing pinned for a year.
+		// With the ?v= case ahead of it, requesting /index.html?v=anything
+		// returned the shell as immutable, freezing a visitor on that build
+		// until their cache expired; a shared link could do it deliberately.
 		case r.URL.Path == "/" || r.URL.Path == "/index.html":
 			w.Header().Set("Cache-Control", "no-cache")
+		case r.URL.Query().Get("v") != "":
+			w.Header().Set("Cache-Control", "public, max-age=31536000, immutable")
 		default:
 			w.Header().Set("Cache-Control", "public, max-age=3600")
 		}

@@ -409,10 +409,19 @@ func (s *Server) handleAdminDelete(w http.ResponseWriter, r *http.Request) {
 		// not be deletable through the media routes.
 		existed, thumb, err := deleteMeta(s.db, cid)
 		if err != nil {
+			// Redirecting to a list the blob is still on read as "deleted, but
+			// the page is stale" — so the operator retries, or worse, stops
+			// trusting the list. Say what happened.
 			slog.Error("delete metadata", "cid", cid, "err", err)
+			http.Error(w, "could not delete", http.StatusInternalServerError)
+			return
 		} else if existed {
 			if err := s.store.Delete(cid); err != nil {
+				// The row is gone but the bytes are not: report it rather than
+				// leave an orphan nothing will ever reference again.
 				slog.Error("delete bytes", "cid", cid, "err", err)
+				http.Error(w, "metadata removed but the stored bytes could not be deleted", http.StatusInternalServerError)
+				return
 			}
 			s.deleteThumbBytes(thumb)
 		}

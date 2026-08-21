@@ -150,7 +150,34 @@ func (s *blobStore) putBytes(data []byte, ext string) (string, error) {
 			return "", fmt.Errorf("store remote copy: %w", err)
 		}
 	}
-	if err := os.WriteFile(final, data, 0o644); err != nil {
+	// Temp-then-rename, the same discipline refill uses. Writing straight to
+	// the CID path meant a crash mid-write stranded a truncated file at the
+	// final name — and because the os.Stat above treats any file at that path
+	// as "already stored", every later upload of those exact bytes
+	// short-circuits onto the corrupt copy and serves it forever. The store's
+	// own invariant is that a blob re-hashes to its name, so a partial write
+	// there is permanent damage, not a transient one.
+	tmp, err := os.CreateTemp(s.dir, ".upload-*")
+	if err != nil {
+		return "", err
+	}
+	tmpName := tmp.Name()
+	defer os.Remove(tmpName) // no-op once the rename succeeds
+	if _, err := tmp.Write(data); err != nil {
+		tmp.Close()
+		return "", err
+	}
+	if err := tmp.Sync(); err != nil {
+		tmp.Close()
+		return "", err
+	}
+	if err := tmp.Close(); err != nil {
+		return "", err
+	}
+	if err := os.Chmod(tmpName, 0o644); err != nil {
+		return "", err
+	}
+	if err := os.Rename(tmpName, final); err != nil {
 		return "", err
 	}
 	return fullCID, nil

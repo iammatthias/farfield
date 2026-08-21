@@ -889,7 +889,13 @@ func (s *Server) handleEnrollCapture(w http.ResponseWriter, r *http.Request) {
 		ID: store.ShortID(), BundleID: bundle, UDID: udid,
 		Name: strings.TrimSpace(attrs.DeviceName), Product: attrs.Product, Source: "capture",
 	}); err != nil {
+		// Falling through to the done page told the visitor their device was
+		// whitelisted when it was not: they only find out much later, when the
+		// install fails with no clue why. The landing page renders .Error.
 		slog.Error("enrol add device", "err", err)
+		http.Redirect(w, r, "/register/"+token+"?error=Could+not+register+this+device.+Please+try+again.",
+			http.StatusFound)
+		return
 	}
 	slog.Info("device enrolled", "bundle", bundle, "product", attrs.Product)
 	http.Redirect(w, r, "/register/"+token+"/done", http.StatusFound)
@@ -920,7 +926,13 @@ func (s *Server) handleRegisterSubmit(w http.ResponseWriter, r *http.Request) {
 		ID: store.ShortID(), BundleID: bundle, UDID: udid,
 		Name: strings.TrimSpace(r.FormValue("name")), Source: "capture",
 	}); err != nil {
+		// Same reason as the capture path: a done page after a failed insert
+		// is a lie the visitor only discovers when the install fails.
 		slog.Error("submit device", "err", err)
+		http.Redirect(w, r, "/register/"+token+"?error="+
+			url.QueryEscape("Could not register this device. Please try again."),
+			http.StatusSeeOther)
+		return
 	}
 	http.Redirect(w, r, "/register/"+token+"/done", http.StatusSeeOther)
 }
@@ -949,13 +961,33 @@ func (s *Server) handleAppDelete(w http.ResponseWriter, r *http.Request) {
 }
 
 // removeAppFiles drops a deleted app's .ipa blobs and screenshot images.
+//
+// Every removal is refcounted first. The store dedupes globally by content, so
+// the same image uploaded under two bundles is two rows pointing at one file:
+// deleting app A used to take the bytes out from under app B's gallery, which
+// then 404s forever with no remote object left to refill from. The single
+// screenshot delete already guarded this; whole-app delete did not.
 func (s *Server) removeAppFiles(buildCIDs []string, shots []Screenshot) {
 	for _, c := range buildCIDs {
+		if others, err := buildsWithCID(s.db, c); err != nil {
+			// Never delete on an unreadable refcount — a lost blob cannot be
+			// recovered, a kept one is only wasted disk.
+			slog.Warn("skipping blob removal: refcount unreadable", "cid", c, "err", err)
+			continue
+		} else if others > 0 {
+			continue
+		}
 		if err := s.blobs.remove(c, ".ipa"); err != nil {
 			slog.Warn("could not remove blob", "cid", c, "err", err)
 		}
 	}
 	for _, sh := range shots {
+		if others, err := screenshotsWithCID(s.db, sh.CID); err != nil {
+			slog.Warn("skipping screenshot removal: refcount unreadable", "cid", sh.CID, "err", err)
+			continue
+		} else if others > 0 {
+			continue
+		}
 		if err := s.blobs.remove(sh.CID, sh.Ext); err != nil {
 			slog.Warn("could not remove screenshot", "cid", sh.CID, "err", err)
 		}

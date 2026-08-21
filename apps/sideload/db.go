@@ -801,20 +801,50 @@ func createShare(db *sql.DB, buildID string, ttl time.Duration, maxInstalls int,
 
 // recordInstall counts one delivered install against a token and flips it to
 // consumed when its budget is spent. Self tokens (max 0) count forever.
+// The counter is incremented in the database, not in Go, and the row is only
+// touched while it is still active and under its cap.
+//
+// Writing absolute values computed from a Token loaded at the start of the
+// request lost updates two ways. Two downloads finishing together both read
+// used=0, both passed canStart, and both delivered — so a "single-use" share
+// link handed the .ipa to two parties. Worse, a slow download that began
+// before consumption and finished after it wrote its stale snapshot back,
+// setting state='active' and consumed_at=” over a row another request had
+// just consumed: the self-revoking link came back to life, repeatably.
+//
+// The WHERE clause is the guard. A row that is no longer active, or already
+// at its cap, matches nothing and the caller learns the install did not count.
 func recordInstall(db *sql.DB, t *Token, ua, ip string) error {
-	t.UsedInstalls++
-	t.LastUA, t.LastIP = ua, ip
-	consumedAt := t.ConsumedAt
-	if t.MaxInstalls > 0 && t.UsedInstalls >= t.MaxInstalls {
-		t.State = stateConsumed
-		consumedAt = store.NowRFC3339()
-		t.ConsumedAt = consumedAt
+	res, err := db.Exec(`UPDATE install_tokens
+		SET used_installs = used_installs + 1,
+		    last_ua = ?,
+		    last_ip = ?,
+		    state = CASE WHEN max_installs > 0 AND used_installs + 1 >= max_installs
+		                 THEN ? ELSE state END,
+		    consumed_at = CASE WHEN max_installs > 0 AND used_installs + 1 >= max_installs
+		                       THEN ? ELSE consumed_at END
+		WHERE token = ?
+		  AND state = ?
+		  AND (max_installs = 0 OR used_installs < max_installs)`,
+		ua, ip, stateConsumed, store.NowRFC3339(), t.Token, stateActive)
+	if err != nil {
+		return err
 	}
-	_, err := db.Exec(`UPDATE install_tokens
-		SET used_installs = ?, last_ua = ?, last_ip = ?, state = ?, consumed_at = ?
-		WHERE token = ?`,
-		t.UsedInstalls, ua, ip, t.State, consumedAt, t.Token)
-	return err
+	if n, _ := res.RowsAffected(); n == 0 {
+		// Another request consumed it between canStart and here. Not an
+		// error — the bytes were already served — but the caller's in-memory
+		// Token is now stale, so refresh it rather than let it write back.
+		if fresh, ferr := getToken(db, t.Token); ferr == nil && fresh != nil {
+			*t = *fresh
+		}
+		return nil
+	}
+	// Re-read so the caller's copy reflects what the database decided, rather
+	// than what this request assumed.
+	if fresh, ferr := getToken(db, t.Token); ferr == nil && fresh != nil {
+		*t = *fresh
+	}
+	return nil
 }
 
 // revokeToken marks a token revoked. Reports whether it existed and was active.
@@ -883,4 +913,15 @@ func pruneTokens(db *sql.DB) (int64, error) {
 	}
 	n, _ := res.RowsAffected()
 	return n, nil
+}
+
+// buildsWithCID counts builds still pointing at a blob. Builds dedupe by
+// content like screenshots do, so the same .ipa uploaded under two bundles
+// shares one file — the count is what makes deleting one app safe for the
+// other. Called after the app's own rows are gone, so a non-zero result means
+// somebody else still needs the bytes.
+func buildsWithCID(db *sql.DB, cid string) (int, error) {
+	var n int
+	err := db.QueryRow(`SELECT COUNT(*) FROM builds WHERE cid = ?`, cid).Scan(&n)
+	return n, err
 }

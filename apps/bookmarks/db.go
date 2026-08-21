@@ -163,6 +163,13 @@ func backfillCIDs(db *sql.DB) error {
 		}
 		bs = append(bs, *b)
 	}
+	// A scan cut short mid-iteration leaves rows.Err() set and exits the loop
+	// normally. Ignoring it reports a completed migration that silently skipped
+	// every remaining row, leaving them without a CID forever.
+	if err := rows.Err(); err != nil {
+		rows.Close()
+		return err
+	}
 	rows.Close()
 	for i := range bs {
 		if _, err := db.Exec(`UPDATE bookmarks SET cid = ? WHERE id = ?`,
