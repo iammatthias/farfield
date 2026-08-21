@@ -36,34 +36,7 @@ func main() {
 		os.Exit(1)
 	}
 
-	mux := http.NewServeMux()
-	// Serve the shared farfield theme at the same path the other apps use, so
-	// bard inherits the canonical stylesheet instead of a local copy that drifts.
-	mux.Handle("GET /static/styles.css", theme.CSSHandler())
-	mux.HandleFunc("GET /status", func(w http.ResponseWriter, r *http.Request) {
-		web.WriteJSON(w, http.StatusOK, struct {
-			Service string `json:"service"`
-			OK      bool   `json:"ok"`
-		}{Service: "bard", OK: true})
-	})
-	// Ahead of the file server: a single-page site still needs its own robots
-	// per hostname, and these are more specific than the "/" catch-all.
-	mux.HandleFunc("GET /robots.txt", web.RobotsHandler("/sitemap.xml"))
-	mux.HandleFunc("GET /sitemap.xml", web.SitemapHandler("/"))
-	// index.html is a static shell with no template pass, so the shared
-	// asset version is substituted once here. Ahead of the file server, which
-	// would otherwise serve the unstamped bytes.
-	if shell, err := fs.ReadFile(site, "index.html"); err == nil {
-		stamped := theme.StampAssets(shell)
-		serveShell := func(w http.ResponseWriter, r *http.Request) {
-			w.Header().Set("Content-Type", "text/html; charset=utf-8")
-			w.Header().Set("Cache-Control", "no-cache")
-			w.Write(stamped)
-		}
-		mux.HandleFunc("GET /{$}", serveShell)
-		mux.HandleFunc("GET /index.html", serveShell)
-	}
-	mux.Handle("/", cacheControl(http.FileServerFS(site)))
+	mux := routes(site)
 
 	// Bard is otherwise database-free; this SQLite file exists purely so the
 	// pulse collector can roll up request events. A static site must never
@@ -105,4 +78,45 @@ func cacheControl(next http.Handler) http.Handler {
 		}
 		next.ServeHTTP(w, r)
 	})
+}
+
+// routes builds the mux.
+//
+// Extracted from main so a test can construct it. ServeMux validates route
+// patterns at registration and panics on a bad one, and while that was inline
+// in main() nothing ever exercised it: a mangled pattern passed go build, go
+// vet, the whole test suite, CI and the image build, then panicked at
+// container start — the first moment anything ran the binary, and well past
+// the point where a deploy can be called off. A pattern is only as checked as
+// the code path that registers it.
+func routes(site fs.FS) *http.ServeMux {
+	mux := http.NewServeMux()
+	// Serve the shared farfield theme at the same path the other apps use, so
+	// bard inherits the canonical stylesheet instead of a local copy that drifts.
+	mux.Handle("GET /static/styles.css", theme.CSSHandler())
+	mux.HandleFunc("GET /status", func(w http.ResponseWriter, r *http.Request) {
+		web.WriteJSON(w, http.StatusOK, struct {
+			Service string `json:"service"`
+			OK      bool   `json:"ok"`
+		}{Service: "bard", OK: true})
+	})
+	// Ahead of the file server: a single-page site still needs its own robots
+	// per hostname, and these are more specific than the "/" catch-all.
+	mux.HandleFunc("GET /robots.txt", web.RobotsHandler("/sitemap.xml"))
+	mux.HandleFunc("GET /sitemap.xml", web.SitemapHandler("/"))
+	// index.html is a static shell with no template pass, so the shared asset
+	// version is substituted once here. Ahead of the file server, which would
+	// otherwise serve the unstamped bytes.
+	if shell, err := fs.ReadFile(site, "index.html"); err == nil {
+		stamped := theme.StampAssets(shell)
+		serveShell := func(w http.ResponseWriter, r *http.Request) {
+			w.Header().Set("Content-Type", "text/html; charset=utf-8")
+			w.Header().Set("Cache-Control", "no-cache")
+			w.Write(stamped)
+		}
+		mux.HandleFunc("GET /{$}", serveShell)
+		mux.HandleFunc("GET /index.html", serveShell)
+	}
+	mux.Handle("/", cacheControl(http.FileServerFS(site)))
+	return mux
 }
