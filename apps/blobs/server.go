@@ -36,6 +36,16 @@ const (
 	uploadMemoryLimit = 1 << 20 // 1 MiB
 )
 
+// publicBytesPerMin bounds anonymous blob reads per client IP.
+//
+// Deliberately generous. These bytes are the public site.s images, so one
+// visitor opening a gallery is a legitimate burst of tens of requests in a few
+// seconds — a tight limit would show up as broken images, not as security.
+// This is sized to stop enumeration and bulk scraping while never being
+// reachable by a person browsing. /status is left unlimited on purpose: the
+// container healthcheck and pulse probe it, and it is a few bytes of JSON.
+const publicBytesPerMin = 600
+
 // Server holds the running blob service.
 type Server struct {
 	db        *sql.DB
@@ -51,6 +61,9 @@ type Server struct {
 	sources hygieneSources
 	// pulse records request telemetry; nil disables it (tests never start it).
 	pulse *pulse.Recorder
+
+	// rl bounds the anonymous byte and meta reads; keyed callers are exempt.
+	rl *web.RateLimiter
 }
 
 // openStore selects the byte-store backend from the environment.
@@ -135,6 +148,9 @@ func run(host, port string) error {
 }
 
 func (s *Server) routes() http.Handler {
+	if s.rl == nil {
+		s.rl = web.NewRateLimiter(publicBytesPerMin, time.Minute)
+	}
 	mux := http.NewServeMux()
 
 	// HTML admin UI — session-gated.
@@ -155,8 +171,8 @@ func (s *Server) routes() http.Handler {
 	// so it is bearer-gated when BLOBS_READ_KEY is set. /status stays public.
 	mux.HandleFunc("GET /status", s.handleStatus)
 	mux.HandleFunc("GET /blobs", s.auth.RequireReadKey(s.handleAPIList))
-	mux.HandleFunc("GET /blobs/{cid}", s.handleAPIGetBytes)
-	mux.HandleFunc("GET /blobs/{cid}/meta", s.handleAPIGetMeta)
+	mux.HandleFunc("GET /blobs/{cid}", web.RateLimit(s.rl, s.auth.HasReadKey, s.handleAPIGetBytes))
+	mux.HandleFunc("GET /blobs/{cid}/meta", web.RateLimit(s.rl, s.auth.HasReadKey, s.handleAPIGetMeta))
 
 	// JSON write API — API-key-gated.
 	mux.HandleFunc("POST /blobs", s.auth.RequireAPIKey(s.handleAPIUpload))

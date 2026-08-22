@@ -11,6 +11,7 @@ import (
 	"net/http"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/iammatthias/farfield/lib/cid"
 	"github.com/iammatthias/farfield/lib/keys"
@@ -24,12 +25,20 @@ import (
 //go:embed templates
 var assets embed.FS
 
+// publicScanPerMin bounds anonymous QR reads per client IP. A scan is a single
+// redirect and an SVG render, so a person never approaches this; a loop against
+// a printed code.s URL does. Keyed callers are exempt.
+const publicScanPerMin = 120
+
 // Server holds the running QR service.
 type Server struct {
 	db        *sql.DB
 	auth      *web.Auth
 	rd        *web.Renderer
 	publicURL string // base URL for proxy QR targets, e.g. https://qr.farfield.systems
+
+	// rl bounds the anonymous scan paths; keyed callers are exempt.
+	rl *web.RateLimiter
 
 	// svgCache memoizes rendered SVGs. Encoding is a pure function of
 	// (payload, EC) and the CID moves whenever either input changes, so a
@@ -92,6 +101,9 @@ func run(host, port string) error {
 }
 
 func (s *Server) routes() http.Handler {
+	if s.rl == nil {
+		s.rl = web.NewRateLimiter(publicScanPerMin, time.Minute)
+	}
 	mux := http.NewServeMux()
 
 	// HTML admin UI — session-gated.
@@ -111,8 +123,8 @@ func (s *Server) routes() http.Handler {
 	// Public QR rendering — must stay open: strangers scan these. Only for
 	// codes marked public AND enabled. The .svg suffix is optional; {id}
 	// captures it and the handler trims it.
-	mux.HandleFunc("GET /qr/{id}", s.handleQRSVG)
-	mux.HandleFunc("GET /r/{id}", s.handleProxyRedirect)
+	mux.HandleFunc("GET /qr/{id}", web.RateLimit(s.rl, s.auth.HasReadKey, s.handleQRSVG))
+	mux.HandleFunc("GET /r/{id}", web.RateLimit(s.rl, s.auth.HasReadKey, s.handleProxyRedirect))
 
 	// JSON read API — bearer-token-gated when QR_READ_KEY is set: the list and
 	// detail enumerate every code and its target, so they are not public like

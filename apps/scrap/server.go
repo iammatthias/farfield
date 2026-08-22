@@ -37,6 +37,12 @@ var composeLangs = []string{
 	"sql", "swift", "toml", "typescript", "yaml",
 }
 
+// publicReadPerMin caps anonymous reads of a paste per client IP per minute.
+// Rendering runs chroma over the body — up to 2 MiB — so this is a CPU bound,
+// not a courtesy. A human reads one paste at a time; a scraper does not.
+// Keyed callers are exempt, so the terminal API is unaffected.
+const publicReadPerMin = 60
+
 // Server holds the running scrap service.
 type Server struct {
 	db        *sql.DB
@@ -44,7 +50,12 @@ type Server struct {
 	rd        *web.Renderer
 	publicURL string           // absolute base for URLs the API returns
 	limiter   *web.FailLimiter // failed token attempts, per IP+paste
-	chromaCSS template.CSS     // highlight stylesheet, embedded into view pages
+
+	// rl bounds the anonymous read paths. Rendering a paste runs chroma over
+	// up to 2 MiB and /pastes reads bodies, so an unthrottled loop against one
+	// public URL burns CPU and DB reads with no ceiling. Keyed callers exempt.
+	rl        *web.RateLimiter
+	chromaCSS template.CSS // highlight stylesheet, embedded into view pages
 
 	// pulse records request telemetry; nil disables it (tests never start it).
 	pulse *pulse.Recorder
@@ -121,6 +132,9 @@ func (s *Server) parseTemplates() error {
 }
 
 func (s *Server) routes() http.Handler {
+	if s.rl == nil {
+		s.rl = web.NewRateLimiter(publicReadPerMin, time.Minute)
+	}
 	mux := http.NewServeMux()
 
 	// Author UI — session-gated. Compose lives at /; manage is the table.
@@ -143,9 +157,9 @@ func (s *Server) routes() http.Handler {
 
 	// Public reads. Literal /pastes outranks the /{id} wildcard in ServeMux
 	// precedence, as do /login, /status, and /static/*.
-	mux.HandleFunc("GET /pastes", s.handlePublicIndex)
-	mux.HandleFunc("GET /{id}", s.handleView)
-	mux.HandleFunc("GET /{id}/raw", s.handleRaw)
+	mux.HandleFunc("GET /pastes", web.RateLimit(s.rl, s.auth.HasReadKey, s.handlePublicIndex))
+	mux.HandleFunc("GET /{id}", web.RateLimit(s.rl, s.auth.HasReadKey, s.handleView))
+	mux.HandleFunc("GET /{id}/raw", web.RateLimit(s.rl, s.auth.HasReadKey, s.handleRaw))
 	mux.HandleFunc("POST /{id}/unlock", s.handleUnlock)
 
 	// Terminal API — raw text in, a URL out.
