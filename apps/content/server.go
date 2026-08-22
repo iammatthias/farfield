@@ -113,6 +113,8 @@ func run(host, port string) error {
 
 	defer keys.Attach(s.auth, "content")() // admin-issued keys, when KEYS_DB_PATH is set
 
+	go s.sweepLoop() // retention is hourly, not once at boot
+
 	s.pulse = pulse.New(s.db, "content")
 	defer s.pulse.Close()
 
@@ -962,4 +964,24 @@ func (s *Server) handleAPISeriesOne(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	web.WriteRecord(w, r, se.CID, se)
+}
+
+// sweepLoop applies the retention promises hourly, not just at boot.
+//
+// purgeTrash and PruneSessions ran once at startup. A container that stays up
+// for weeks — which is the normal case here, uptime was nine days at the last
+// reboot — therefore stopped honouring them the moment it finished booting:
+// the trash page says entries are purged after 30 days, and an entry trashed
+// on day two of an uptime sat there indefinitely. Same for expired sessions.
+// The retention window was real only for a process that kept restarting.
+func (s *Server) sweepLoop() {
+	for {
+		if err := purgeTrash(s.db); err != nil {
+			slog.Warn("trash purge failed", "err", err)
+		}
+		if err := store.PruneSessions(s.db); err != nil {
+			slog.Warn("session prune failed", "err", err)
+		}
+		time.Sleep(time.Hour)
+	}
 }

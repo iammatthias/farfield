@@ -139,6 +139,7 @@ func run(host, port string) error {
 		return fmt.Errorf("creating upload staging dir %s: %w", s.tusDir, err)
 	}
 	s.pruneStaleUploads() // reclaim abandoned partial uploads from a prior run
+	go s.sweepLoop()      // and keep reclaiming, hourly, while this process lives
 	s.resumeFinalizing()  // re-run finalizes a prior crash interrupted
 
 	defer keys.Attach(s.auth, "library")() // admin-issued keys, when KEYS_DB_PATH is set

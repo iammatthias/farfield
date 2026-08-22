@@ -56,8 +56,10 @@ func startChecker(db *sql.DB) {
 	}()
 	go func() {
 		pruneChecks(db)
+		pruneTraffic(db)
 		for range time.Tick(24 * time.Hour) {
 			pruneChecks(db)
+			pruneTraffic(db)
 		}
 	}()
 }
@@ -145,5 +147,34 @@ func performCheck(client *http.Client, t Target) checkResult {
 		StatusCode: resp.StatusCode,
 		LatencyMS:  latency,
 		OK:         resp.StatusCode == t.ExpectedStatus,
+	}
+}
+
+// trafficRetention bounds the rolled-up traffic tables.
+//
+// checks had a 45-day bound; hits_daily and referrers_daily had none, so they
+// grew for the life of the deployment — 79k rows across ten weeks when this
+// was written, in a database already at 136 MB, and every backup snapshot
+// carries the whole file to R2 four times a day. The console's longest window
+// is 30 days, so 180 keeps roughly six months of history: far past anything
+// displayed, bounded enough to stop the file growing forever.
+//
+// Nothing currently in the table is older than this, so enabling it deletes
+// nothing today — it only stops the unbounded growth from here.
+const trafficRetention = 180 * 24 * time.Hour
+
+// pruneTraffic drops rolled-up traffic days past the retention window. The
+// day column is a YYYY-MM-DD string, which orders correctly as text.
+func pruneTraffic(db *sql.DB) {
+	cutoff := time.Now().UTC().Add(-trafficRetention).Format("2006-01-02")
+	for _, table := range []string{"hits_daily", "referrers_daily"} {
+		res, err := db.Exec(`DELETE FROM `+table+` WHERE day < ?`, cutoff)
+		if err != nil {
+			slog.Warn("traffic prune failed", "table", table, "err", err)
+			continue
+		}
+		if n, _ := res.RowsAffected(); n > 0 {
+			slog.Info("traffic prune", "table", table, "deleted", n, "before", cutoff)
+		}
 	}
 }

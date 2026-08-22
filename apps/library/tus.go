@@ -412,3 +412,21 @@ func firstErr(errs ...error) error {
 	}
 	return nil
 }
+
+// sweepLoop reclaims abandoned staging hourly rather than only at boot.
+//
+// pruneStaleUploads ran once at startup, so a partial upload abandoned during
+// a long-lived process was never cleaned up while that process lived —
+// staging rows and their files accumulated on the data volume for the
+// container's whole lifetime. Same reasoning as the trash purge in content:
+// a retention window enforced only at boot is a retention window only for a
+// process that keeps restarting.
+func (s *Server) sweepLoop() {
+	for {
+		s.pruneStaleUploads()
+		if err := store.PruneSessions(s.db); err != nil {
+			slog.Warn("session prune failed", "err", err)
+		}
+		time.Sleep(time.Hour)
+	}
+}
