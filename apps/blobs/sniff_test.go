@@ -31,8 +31,22 @@ func TestSniffMime(t *testing.T) {
 		{"m4v", ftypHeader("M4V "), "video/mp4"},
 		{"m4a", ftypHeader("M4A "), "audio/mp4"},
 		{"m4b audiobook", ftypHeader("M4B "), "audio/mp4"},
+		// The HEIF family — what an iPhone actually uploads. Go does not sniff
+		// these, so without the brand table a photo landed as octet-stream at
+		// 0x0: no preview, no type, no dimensions, and indistinguishable from a
+		// corrupt file on the hygiene page. Blob bytes have no backup, so
+		// looking like junk has already cost one photo.
+		{"iphone heic", ftypHeader("heic", "mif1", "miaf"), "image/heic"},
+		{"heic heix", ftypHeader("heix"), "image/heic"},
+		{"heic sequence", ftypHeader("hevc"), "image/heic-sequence"},
+		{"heif heim", ftypHeader("heim"), "image/heif"},
+		{"heif mif1 major", ftypHeader("mif1"), "image/heif"},
+		{"heif msf1 major", ftypHeader("msf1"), "image/heif"},
+		{"avif", ftypHeader("avif"), "image/avif"},
+		{"avif sequence", ftypHeader("avis"), "image/avif-sequence"},
 		// Unknowns stay opaque.
 		{"junk", []byte{0xde, 0xad, 0xbe, 0xef, 0xde, 0xad, 0xbe, 0xef, 0, 0, 0, 0}, "application/octet-stream"},
+		{"unknown ftyp brand", ftypHeader("zzzz"), "application/octet-stream"},
 		{"short", []byte{0x00}, "application/octet-stream"},
 	}
 	for _, c := range cases {

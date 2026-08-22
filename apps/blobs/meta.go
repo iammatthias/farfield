@@ -123,6 +123,28 @@ func sniffMime(data []byte) string {
 			return "video/mp4"
 		case "M4A ", "M4B ":
 			return "audio/mp4"
+
+		// HEIF family — what an iPhone actually uploads. Without these an
+		// iPhone photo fell through to application/octet-stream at 0x0, which
+		// on the hygiene page is indistinguishable from a corrupt file: no
+		// preview, no type, no dimensions. That is not cosmetic. Blob bytes
+		// have no backup, so a photo that merely LOOKS like junk is one
+		// click from being gone for good, and a photo has been lost that way
+		// before. Naming the format is what stops it reading as garbage.
+		case "heic", "heix":
+			return "image/heic"
+		case "hevc", "hevx":
+			return "image/heic-sequence"
+		case "heim", "heis":
+			return "image/heif"
+		case "hevm", "hevs":
+			return "image/heif-sequence"
+		case "mif1", "msf1":
+			return "image/heif"
+		case "avif":
+			return "image/avif"
+		case "avis":
+			return "image/avif-sequence"
 		}
 	}
 	return m
