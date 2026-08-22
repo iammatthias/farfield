@@ -125,7 +125,8 @@ func run(host, port string) error {
 	}
 	defer s.rebuild.Close()
 
-	return web.Serve(host, port, s.routes())
+	return web.Serve(host, port, web.MaxBodyExcept(s.routes(), web.DefaultMaxBody,
+		web.PathPrefixSkipper("/embed")))
 }
 
 func (s *Server) routes() http.Handler {

@@ -303,3 +303,22 @@ func MaxBody(next http.Handler, limit int64) http.Handler {
 // Apps that genuinely stream large uploads (blobs, library, sideload) set
 // their own limits on those routes and must not be wrapped at this size.
 const DefaultMaxBody = 2 << 20 // 2 MiB
+
+// MaxBodyExcept is MaxBody with an escape hatch, mirroring GzipExcept.
+//
+// Most write routes in the fleet carry a form or a small JSON document and
+// should be bounded. A handful genuinely stream — blob and .ipa uploads, tus
+// PATCHes, the editor's upload proxy — and those set their own, much larger,
+// per-route limits. A single fleet-wide cap would either be too small for
+// those or too large to be worth having, so the routes that stream opt out by
+// prefix and everything else gets the default.
+func MaxBodyExcept(next http.Handler, limit int64, skip func(*http.Request) bool) http.Handler {
+	capped := MaxBody(next, limit)
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if skip != nil && skip(r) {
+			next.ServeHTTP(w, r)
+			return
+		}
+		capped.ServeHTTP(w, r)
+	})
+}

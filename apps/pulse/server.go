@@ -79,7 +79,7 @@ func run(host, port string) error {
 		startCollector(db, dbPath, interval)
 	}
 
-	return web.Serve(host, port, s.routes())
+	return web.Serve(host, port, web.MaxBody(s.routes(), web.DefaultMaxBody))
 }
 
 func (s *Server) routes() http.Handler {

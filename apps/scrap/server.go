@@ -78,7 +78,7 @@ func run(host, port string) error {
 
 	s.pulse = pulse.New(s.db, "scrap")
 	defer s.pulse.Close()
-	return web.Serve(host, port, s.routes())
+	return web.Serve(host, port, web.MaxBody(s.routes(), web.DefaultMaxBody))
 }
 
 // newServer builds a Server without templates (parseTemplates) or routes —

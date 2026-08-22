@@ -112,3 +112,29 @@ func TestPlateShipsItsOwnFonts(t *testing.T) {
 		t.Error("404 plate carries no vendored faces")
 	}
 }
+
+// TestMaxBodyExceptSkipsStreamingRoutes — the streaming uploads must stay
+// uncapped, or a 100 MiB .ipa becomes a 413.
+func TestMaxBodyExceptSkipsStreamingRoutes(t *testing.T) {
+	h := MaxBodyExcept(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if _, err := io.ReadAll(r.Body); err != nil {
+			http.Error(w, "too large", http.StatusRequestEntityTooLarge)
+			return
+		}
+		w.WriteHeader(http.StatusOK)
+	}), 1024, PathPrefixSkipper("/upload"))
+
+	big := strings.Repeat("x", 4096)
+
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, httptest.NewRequest("POST", "/upload", strings.NewReader(big)))
+	if rec.Code != http.StatusOK {
+		t.Errorf("POST /upload = %d, want 200 — streaming route must not be capped", rec.Code)
+	}
+
+	rec = httptest.NewRecorder()
+	h.ServeHTTP(rec, httptest.NewRequest("POST", "/api/entries", strings.NewReader(big)))
+	if rec.Code != http.StatusRequestEntityTooLarge {
+		t.Errorf("POST /api/entries = %d, want 413 — ordinary write must be capped", rec.Code)
+	}
+}

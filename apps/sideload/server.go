@@ -82,7 +82,8 @@ func run(host, port string) error {
 
 	s.pulse = pulse.New(s.db, "sideload")
 	defer s.pulse.Close()
-	return web.Serve(host, port, s.routes())
+	return web.Serve(host, port, web.MaxBodyExcept(s.routes(), web.DefaultMaxBody,
+		web.PathPrefixSkipper("/upload", "/app", "/api/builds")))
 }
 
 func newServer(db *sql.DB, blobs *blobStore, password, apiKey string, cookieSecure bool, publicURL string) *Server {

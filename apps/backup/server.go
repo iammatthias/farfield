@@ -79,7 +79,7 @@ func run(host, port string) error {
 
 	s.pulse = pulse.New(s.db, "backup")
 	defer s.pulse.Close()
-	return web.Serve(host, port, s.routes())
+	return web.Serve(host, port, web.MaxBody(s.routes(), web.DefaultMaxBody))
 }
 
 // snapshotLoop snapshots every app shortly after boot (deploys restart the

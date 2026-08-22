@@ -88,7 +88,7 @@ func run(host, port string) error {
 
 	s.pulse = pulse.New(s.db, "qr")
 	defer s.pulse.Close()
-	return web.Serve(host, port, s.routes())
+	return web.Serve(host, port, web.MaxBody(s.routes(), web.DefaultMaxBody))
 }
 
 func (s *Server) routes() http.Handler {

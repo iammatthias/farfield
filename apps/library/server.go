@@ -145,7 +145,8 @@ func run(host, port string) error {
 
 	s.pulse = pulse.New(s.db, "library")
 	defer s.pulse.Close()
-	return web.Serve(host, port, s.routes())
+	return web.Serve(host, port, web.MaxBodyExcept(s.routes(), web.DefaultMaxBody,
+		web.PathPrefixSkipper("/upload", "/api/upload")))
 }
 
 func (s *Server) routes() http.Handler {

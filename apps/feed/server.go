@@ -114,7 +114,8 @@ func run(host, port string) error {
 
 	s.pulse = pulse.New(s.db, "feed")
 	defer s.pulse.Close()
-	return web.Serve(host, port, s.routes())
+	return web.Serve(host, port, web.MaxBodyExcept(s.routes(), web.DefaultMaxBody,
+		web.PathPrefixSkipper("/embed")))
 }
 
 func (s *Server) routes() http.Handler {
