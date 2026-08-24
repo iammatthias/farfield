@@ -237,12 +237,17 @@ func (s *Server) toQR(ctx context.Context, text string) routeResult {
 	if err != nil {
 		return failed(routeQR, err)
 	}
-	res := routeResult{route: routeQR, ref: id, reply: s.qr.PublicURL + "/qr/" + id + ".svg"}
-	// The picture is the point of texting for a QR code, so fetch the raster
-	// and send it inline. A failure here costs the image, not the code.
-	if png, err := s.qr.PNG(ctx, id); err == nil {
-		res.image, res.imageName = png, id+".png"
+	// The picture is the whole point of texting for a QR code, so send it and
+	// nothing else — a URL beside it is noise you would have to open. The link
+	// is the fallback, not the default: it appears only when the raster could
+	// not be fetched, so a failure still leaves something usable in the thread.
+	res := routeResult{route: routeQR, ref: id}
+	png, err := s.qr.PNG(ctx, id)
+	if err != nil {
+		res.reply = s.qr.PublicURL + "/qr/" + id + ".png"
+		return res
 	}
+	res.image, res.imageName = png, id+".png"
 	return res
 }
 
