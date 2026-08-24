@@ -492,7 +492,13 @@ services:
       - BLOBS_DB_PATH=/data/blobs.sqlite
       - PASSWORD=${PASSWORD:?set PASSWORD in .env — refusing to start with a default}
       - SESSION_SECRET=${SESSION_SECRET:-}
-      - SESSION_COOKIE_DOMAIN=${SESSION_COOKIE_DOMAIN:-}
+      # Deliberately NOT the fleet-wide cookie domain. backup has no public
+      # hostname — it is reached over the tailnet, where a cookie scoped to
+      # .farfield.systems would never be sent, so login would silently loop.
+      # Host-only is also the right isolation for the one console that can
+      # restore or delete every database in the fleet: a session minted here
+      # does not travel, and a session from elsewhere does not open it.
+      - SESSION_COOKIE_DOMAIN=
       - BLOBS_URL=http://blobs:8789
       - BLOBS_API_KEY=${BLOBS_API_KEY:-}
       - COOKIE_SECURE=true
