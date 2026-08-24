@@ -215,26 +215,45 @@ func (c *photonClient) Download(ctx context.Context, guid string) ([]byte, error
 
 // SendImage uploads bytes to the line and sends them into a conversation —
 // how a generated QR code arrives as a picture rather than a link.
-func (c *photonClient) SendImage(ctx context.Context, chatGUID, name string, data []byte) error {
+// upload puts bytes on the line and returns the attachment guid.
+func (c *photonClient) upload(ctx context.Context, name string, data []byte) (string, error) {
 	if c == nil {
-		return fmt.Errorf("photon line not configured")
+		return "", fmt.Errorf("photon line not configured")
 	}
 	up, err := c.atts.UploadAttachment(ctx, &imsg.UploadAttachmentRequest{
 		FileName: name,
 		Data:     data,
 	})
 	if err != nil {
-		return err
+		return "", err
 	}
 	guid := up.GetAttachment().GetGuid()
 	if guid == "" {
-		return fmt.Errorf("photon upload returned no attachment guid")
+		return "", fmt.Errorf("photon upload returned no attachment guid")
 	}
-	_, err = c.msgs.SendAttachmentMessage(ctx, &imsg.SendAttachmentMessageRequest{
+	return guid, nil
+}
+
+func (c *photonClient) SendImage(ctx context.Context, chatGUID, name string, data []byte) error {
+	guid, err := c.upload(ctx, name, data)
+	if err != nil {
+		return err
+	}
+	return c.sendAttachment(ctx, chatGUID, guid)
+}
+
+// sendAttachment posts an already-uploaded attachment into a conversation.
+//
+// AttachmentRef deliberately carries only the guid. Setting its optional
+// attachment_name as well made every send fail with "Unknown server error" —
+// upload already recorded the filename, and naming it twice is what the server
+// objects to. Isolating upload from send is what made that visible; the
+// combined path could only report that something in it had failed.
+func (c *photonClient) sendAttachment(ctx context.Context, chatGUID, guid string) error {
+	_, err := c.msgs.SendAttachmentMessage(ctx, &imsg.SendAttachmentMessageRequest{
 		ChatGuid: chatGUID,
 		Attachment: &imsg.AttachmentRef{
-			Source:         &imsg.AttachmentRef_AttachmentGuid{AttachmentGuid: guid},
-			AttachmentName: &name,
+			Source: &imsg.AttachmentRef_AttachmentGuid{AttachmentGuid: guid},
 		},
 	})
 	return err

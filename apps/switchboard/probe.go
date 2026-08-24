@@ -82,3 +82,69 @@ func runProbeDownload(guid string) error {
 	fmt.Fprintf(os.Stdout, "%d bytes\n", len(data))
 	return nil
 }
+
+// runProbeUpload tries to put a small file on the line. Sending an image
+// requires an upload first — AttachmentRef only ever references a guid — so
+// whether this works decides whether image replies are possible at all.
+func runProbeUpload() error {
+	client, err := newPhotonClient(
+		store.Env("SPECTRUM_PROJECT_ID", ""),
+		store.Env("SPECTRUM_PROJECT_SECRET", ""),
+		store.Env("SPECTRUM_IMESSAGE_ADDRESS", "imessage.spectrum.photon.codes:443"),
+		store.Env("SPECTRUM_CLOUD_URL", "https://spectrum.photon.codes"),
+	)
+	if err != nil {
+		return err
+	}
+	defer client.Close()
+	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+	defer cancel()
+
+	// A 1x1 PNG — the smallest thing that is unambiguously a real image.
+	png := []byte{
+		0x89, 'P', 'N', 'G', 0x0d, 0x0a, 0x1a, 0x0a, 0, 0, 0, 0x0d, 'I', 'H', 'D', 'R',
+		0, 0, 0, 1, 0, 0, 0, 1, 8, 6, 0, 0, 0, 0x1f, 0x15, 0xc4, 0x89,
+		0, 0, 0, 0x0a, 'I', 'D', 'A', 'T', 0x78, 0x9c, 0x63, 0, 1, 0, 0, 5, 0, 1,
+		0x0d, 0x0a, 0x2d, 0xb4, 0, 0, 0, 0, 'I', 'E', 'N', 'D', 0xae, 0x42, 0x60, 0x82,
+	}
+	guid, err := client.upload(ctx, "probe.png", png)
+	if err != nil {
+		return err
+	}
+	fmt.Fprintf(os.Stdout, "uploaded guid=%s\n", guid)
+	return nil
+}
+
+// runProbeSend uploads a file and sends it, reporting which step fails.
+// Upload and send are separate RPCs with separate failure modes, and the
+// service only ever saw the combined error.
+func runProbeSend(path string) error {
+	client, err := newPhotonClient(
+		store.Env("SPECTRUM_PROJECT_ID", ""),
+		store.Env("SPECTRUM_PROJECT_SECRET", ""),
+		store.Env("SPECTRUM_IMESSAGE_ADDRESS", "imessage.spectrum.photon.codes:443"),
+		store.Env("SPECTRUM_CLOUD_URL", "https://spectrum.photon.codes"),
+	)
+	if err != nil {
+		return err
+	}
+	defer client.Close()
+	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+	defer cancel()
+
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return err
+	}
+	chat := dmChatGUID(store.Env("SWITCHBOARD_ALLOW", ""))
+	guid, err := client.upload(ctx, "probe.png", data)
+	if err != nil {
+		return fmt.Errorf("upload: %w", err)
+	}
+	fmt.Fprintf(os.Stderr, "uploaded %s\n", guid)
+	if err := client.sendAttachment(ctx, chat, guid); err != nil {
+		return fmt.Errorf("send: %w", err)
+	}
+	fmt.Fprintln(os.Stdout, "sent")
+	return nil
+}

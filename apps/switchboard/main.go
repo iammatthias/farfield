@@ -29,6 +29,12 @@ func main() {
 
 	if len(os.Args) > 1 && os.Args[1] == "probe" {
 		run := func() error {
+			if len(os.Args) > 3 && os.Args[2] == "send" {
+				return runProbeSend(os.Args[3])
+			}
+			if len(os.Args) > 2 && os.Args[2] == "upload" {
+				return runProbeUpload()
+			}
 			if len(os.Args) > 2 {
 				return runProbeDownload(os.Args[2])
 			}
