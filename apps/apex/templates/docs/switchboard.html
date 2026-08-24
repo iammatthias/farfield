@@ -14,7 +14,7 @@
   <div class="endpoint"><span class="method">/feed</span><span class="path">text</span><div class="returns">Force a post, even for a bare link.</div></div>
   <div class="endpoint"><span class="method">/bm</span><span class="path">url [category]</span><div class="returns">Force a bookmark.</div></div>
   <div class="endpoint"><span class="method">/scrap</span><span class="path">text</span><div class="returns">Create an unlisted paste; replies with the link.</div></div>
-  <div class="endpoint"><span class="method">/qr</span><span class="path">url [label]</span><div class="returns">Create a QR code; replies with the image inline.</div></div>
+  <div class="endpoint"><span class="method">/qr</span><span class="path">url [label]</span><div class="returns">Create a QR code; replies with the picture and nothing else. The link is the fallback, sent only if the image cannot be fetched.</div></div>
   <div class="endpoint"><span class="method">/status</span><span class="path"></span><div class="returns">Fleet health roll-up, probed live.</div></div>
   <div class="endpoint"><span class="method">/pulse</span><span class="path"></span><div class="returns">Uptime targets and any open incidents.</div></div>
   <div class="endpoint"><span class="method">+</span><span class="path">text</span><div class="returns">Append to the last post, within 15 minutes.</div></div>
@@ -30,6 +30,13 @@
   <p>Photon signs every delivery: HMAC-SHA256 over <code>v0:{timestamp}:{rawBody}</code>, sent as <code>X-Spectrum-Signature</code>. switchboard verifies it against the raw bytes before parsing anything, refuses timestamps outside five minutes, dedupes on the message id so a redelivery cannot act twice, and requires the sender to be in the allowlist.</p>
   <p>Both gates fail closed. With no signing secret the route returns 404 rather than accepting unsigned deliveries; with an empty allowlist every message is ignored. That is deliberate — the endpoint is public by necessity and publishes to a public feed, so the failure mode of a half-configured service must be silence, not a stranger's words on the site.</p>
   <p>A message from an unknown sender is logged and dropped without a reply, since answering would confirm the number is live. Rejections return 2xx, because Photon retries only on 5xx and none of these are fixed by retrying.</p>
+
+  <h2>Credentials</h2>
+  <p>switchboard holds its own scoped keys — one minted <code>ffk_</code> token per app it dispatches to, write scope, revocable individually. It does not borrow the apps' own env keys: reusing those would mean that wiring switchboard up silently switched on an app's env-key write path as a side effect. It deliberately holds no blobs credential at all, because feed owns blob uploads and photos reach it as bytes.</p>
+  <p>The allowlist and the webhook secret live only in the deployment's environment. No number is configured in code, in this documentation, or anywhere in the repository.</p>
+
+  <h2>Diagnostics</h2>
+  <p><code>switchboard probe</code> asks the line directly instead of waiting for a webhook: it dumps recent messages, downloads a single attachment by guid, or runs the two halves of an image reply — upload, then send — as separate steps. It exists because this integration's observed behaviour has differed from its documentation in several places, and measuring settled each one faster than reasoning about it.</p>
 
   <h2>Housekeeping</h2>
   <p>The message log is dedupe record, audit trail, and undo target at once. It is bounded at 90 days by an hourly sweep — the records it points at live in the apps that own them, so nothing is lost when a log row ages out.</p>

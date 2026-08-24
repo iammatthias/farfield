@@ -13,6 +13,16 @@
 //
 //	switchboard                    serve the HTTP service (default)
 //	switchboard health             probe /status (backs the Docker healthcheck)
+//	switchboard probe              dump recent messages from the line as JSON
+//	switchboard probe <guid>       download one attachment, report its size
+//	switchboard probe upload       upload a test image, report the guid
+//	switchboard probe send <file>  upload and send a file, as separate steps
+//
+// The probe subcommands exist because the webhook is otherwise the only view of
+// a message, and this integration's real behaviour has differed from its
+// documentation in several places — content shape, attachment field names, and
+// which requests need a chatGuid to route. They ask the line directly, so a
+// message that already arrived can be inspected without sending another.
 package main
 
 import (

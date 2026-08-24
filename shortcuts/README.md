@@ -13,6 +13,12 @@ Three small iOS Shortcuts that publish to the farfield apps, written in
 Each shortcut is share-sheet enabled and prompts for nothing it can avoid.
 Refine titles, categories, visibility, etc. in the admin UIs.
 
+> **These are superseded by `switchboard`**, which reaches the same apps by
+> iMessage: a text becomes a feed post, a bare link a bookmark, `/scrap` a
+> paste, `/qr` a QR code — and unlike these shortcuts it can post photos, which
+> the `feed` one never could. They still work and are left in place; nothing
+> here depends on them. See `farfield.systems/docs/switchboard`.
+
 ## Build
 
 macOS only (Apple's `shortcuts sign` is macOS-only).

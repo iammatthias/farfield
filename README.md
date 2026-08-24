@@ -20,6 +20,7 @@ moderating content, plus a public JSON API the website reads.
 | `sideload`| `sideload.farfield.systems`| ad-hoc iOS build distribution                   |
 | `pulse`   | `pulse.farfield.systems`   | uptime checks + per-app traffic rollups         |
 | `keys`    | `keys.farfield.systems`    | issue/revoke scoped API keys for every app      |
+| `switchboard`| `switchboard.farfield.systems`| iMessage front door — a text becomes a post, a link a bookmark |
 | `backup`  | tailnet-only               | snapshots every app's database into R2         |
 
 ## Stack

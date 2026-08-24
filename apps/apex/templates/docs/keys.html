@@ -25,6 +25,10 @@
   <h2>Authentication</h2>
   <p>The admin UI is session-gated behind the shared <code>PASSWORD</code>, with brute-force limiting on the login form. There is deliberately no JSON write API: a credential minter should not itself be drivable by a credential. <code>/status</code> stays public.</p>
 
+  <h2>Minting from the command line</h2>
+  <p><code>keys mint &lt;name&gt; &lt;app&gt; &lt;scope&gt; [expires-days]</code> issues one key and prints the token on stdout. This is not a hole in the rule above — it needs shell access to the host and the key store on disk, not a credential over the network, so nothing reachable from outside can mint. It exists because provisioning one service to talk to another happens over SSH, where there is no browser to hold a session.</p>
+  <p>As in the console, only the token's hash is stored, so this is the one and only time the token is visible. stdout carries the token alone and everything else goes to stderr, which keeps <code>keys mint … | pbcopy</code> and shell capture honest.</p>
+
   <h2>API</h2>
   <div class="endpoint">
     <span class="method">GET</span>
