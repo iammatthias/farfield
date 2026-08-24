@@ -266,6 +266,9 @@ services:
       - FARFIELD_TRUSTED_PROXIES=${FARFIELD_TRUSTED_PROXIES:-}
       - PULSE_PORT=8798
       - PULSE_DB_PATH=/data/pulse.sqlite
+      # Read-only key for the overview/traffic JSON, so switchboard can answer
+      # "/pulse" over iMessage without holding the shared PASSWORD.
+      - PULSE_READ_KEY=${PULSE_READ_KEY:-}
       - PASSWORD=${PASSWORD:?set PASSWORD in .env — refusing to start with a default}
       - SESSION_SECRET=${SESSION_SECRET:-}
       - SESSION_COOKIE_DOMAIN=${SESSION_COOKIE_DOMAIN:-}
@@ -413,6 +416,53 @@ services:
       - SESSION_SECRET=${SESSION_SECRET:-}
       - SESSION_COOKIE_DOMAIN=${SESSION_COOKIE_DOMAIN:-}
       - COOKIE_SECURE=true
+    volumes:
+      - ./data:/data
+
+  switchboard:
+    <<: *defaults
+    build:
+      context: .
+      args: { APP: switchboard }
+    image: farfield-switchboard
+    depends_on:
+      feed:
+        condition: service_healthy
+    ports:
+      - "${FARFIELD_BIND_IP:-127.0.0.1}:${SWITCHBOARD_PORT:-8802}:8802"
+    environment:
+      - HOST=0.0.0.0
+      - SESSION_EPOCH=${SESSION_EPOCH:-}
+      - FARFIELD_TRUSTED_PROXIES=${FARFIELD_TRUSTED_PROXIES:-}
+      - SWITCHBOARD_PORT=8802
+      - SWITCHBOARD_DB_PATH=/data/switchboard.sqlite
+      - PASSWORD=${PASSWORD:?set PASSWORD in .env — refusing to start with a default}
+      - SESSION_SECRET=${SESSION_SECRET:-}
+      - SESSION_COOKIE_DOMAIN=${SESSION_COOKIE_DOMAIN:-}
+      - COOKIE_SECURE=true
+      - KEYS_DB_PATH=/data/keys.sqlite
+      # Photon (iMessage). Without the webhook secret the hook 404s, and
+      # without the allowlist every inbound message is ignored — both fail
+      # closed on purpose.
+      - SPECTRUM_PROJECT_ID=${SPECTRUM_PROJECT_ID:-}
+      - SPECTRUM_PROJECT_SECRET=${SPECTRUM_PROJECT_SECRET:-}
+      - SPECTRUM_IMESSAGE_ADDRESS=${SPECTRUM_IMESSAGE_ADDRESS:-imessage.spectrum.photon.codes:443}
+      - SWITCHBOARD_WEBHOOK_SECRET=${SWITCHBOARD_WEBHOOK_SECRET:-}
+      - SWITCHBOARD_ALLOW=${SWITCHBOARD_ALLOW:-}
+      - SWITCHBOARD_BOOKMARK_CATEGORY=${SWITCHBOARD_BOOKMARK_CATEGORY:-unsorted}
+      # Sibling services it dispatches to. It holds their keys so the phone
+      # never has to; it deliberately has no blobs key — feed owns that.
+      - FEED_URL=http://feed:8788
+      - FEED_API_KEY=${FEED_API_KEY:-}
+      - BOOKMARKS_URL=http://bookmarks:8793
+      - BOOKMARKS_API_KEY=${BOOKMARKS_API_KEY:-}
+      - SCRAP_URL=http://scrap:8799
+      - SCRAP_API_KEY=${SCRAP_API_KEY:-}
+      - QR_URL=http://qr:8794
+      - QR_API_KEY=${QR_API_KEY:-}
+      - QR_PUBLIC_URL=${QR_PUBLIC_URL:-https://qr.farfield.systems}
+      - PULSE_URL=http://pulse:8798
+      - PULSE_READ_KEY=${PULSE_READ_KEY:-}
     volumes:
       - ./data:/data
 

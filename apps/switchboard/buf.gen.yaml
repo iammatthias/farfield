@@ -1,0 +1,38 @@
+# Codegen for Photon's iMessage contract.
+#
+# Photon publishes the contract to the BSR; nothing is vendored here beyond the
+# generated Go. The input is PINNED to a BSR commit so regeneration is
+# reproducible and a vendor push cannot silently change our wire types — bump
+# the pin deliberately, regenerate, and commit the diff.
+#
+# Regenerate with:
+#   go run github.com/bufbuild/buf/cmd/buf@v1.47.2 generate
+#
+# Go tooling only, per the repo's no-extra-toolchains rule: buf runs through
+# `go run` and the plugins run remotely on the BSR, so nothing has to be
+# installed to build or rebuild this.
+version: v2
+inputs:
+  - module: buf.build/photon-hq/imessage:295f823a6a8649c9ab5bfab017b64f82
+managed:
+  enabled: true
+  # Photon's protos import google.api.http annotations. Without this, the
+  # prefix override below rewrites those imports too and the generated code
+  # points at a gen/google/api package that is never emitted (buf generates the
+  # input module only). Left alone, they resolve to the canonical genproto
+  # module, which is where the real types live.
+  disable:
+    - file_option: go_package
+      module: buf.build/googleapis/googleapis
+  override:
+    - file_option: go_package_prefix
+      value: github.com/iammatthias/farfield/apps/switchboard/gen
+plugins:
+  - remote: buf.build/protocolbuffers/go:v1.36.6
+    out: gen
+    opt: paths=source_relative
+  - remote: buf.build/grpc/go:v1.5.1
+    out: gen
+    opt:
+      - paths=source_relative
+      - require_unimplemented_servers=false

@@ -114,8 +114,10 @@ func run(host, port string) error {
 
 	s.pulse = pulse.New(s.db, "feed")
 	defer s.pulse.Close()
+	// The media endpoint carries photo bytes, so it is exempt from the 2 MiB
+	// default and applies its own (blobs-sized) cap instead.
 	return web.Serve(host, port, web.MaxBodyExcept(s.routes(), web.DefaultMaxBody,
-		web.PathPrefixSkipper("/embed")))
+		web.PathPrefixSkipper("/embed", "/api/posts/media")))
 }
 
 func (s *Server) routes() http.Handler {
@@ -154,6 +156,9 @@ func (s *Server) routes() http.Handler {
 
 	// JSON write API — API-key-gated.
 	mux.HandleFunc("POST /api/posts", s.auth.RequireAPIKey(s.handleAPICreate))
+	// Same resource, multipart: text plus image bytes, which feed stores in
+	// blobs itself so callers never need a blobs key.
+	mux.HandleFunc("POST /api/posts/media", s.auth.RequireAPIKey(s.handleAPICreateMedia))
 	mux.HandleFunc("PUT /api/posts/{slug}", s.auth.RequireAPIKey(s.handleAPIUpdate))
 	mux.HandleFunc("DELETE /api/posts/{slug}", s.auth.RequireAPIKey(s.handleAPIDelete))
 

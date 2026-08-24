@@ -8,8 +8,12 @@ package qrenc
 // Following ISO/IEC 18004 (QR Code 2005).
 
 import (
+	"bytes"
 	"errors"
 	"fmt"
+	"image"
+	"image/color"
+	"image/png"
 	"strings"
 )
 
@@ -1080,4 +1084,68 @@ func EncodeSVG(payload []byte, ec ECLevel) (string, int, error) {
 		return "", 0, err
 	}
 	return RenderSVG(mod), version, nil
+}
+
+// ── PNG rendering ──────────────────────────────────────────────────────────
+
+// pngScale is the default pixel size of one QR module. A version-3 code (29
+// modules) renders at (29+8)*8 = 296px, which is a sensible size to look at in
+// a message thread or drop into a document without resampling artifacts.
+const pngScale = 8
+
+// RenderPNG rasterizes a QR matrix at scale pixels per module, with the same
+// four-module quiet zone and colors RenderSVG uses.
+//
+// It exists because not every consumer can display an SVG: an image sent over
+// iMessage has to be a raster to appear inline rather than as a file. The
+// image is paletted (two entries), so the encoder emits a 1-bit-per-pixel PNG
+// and the result stays a few hundred bytes.
+func RenderPNG(mod [][]byte, scale int) ([]byte, error) {
+	n := len(mod)
+	if n == 0 {
+		return nil, errors.New("empty matrix")
+	}
+	if scale < 1 {
+		scale = pngScale
+	}
+	const quiet = 4
+	full := (n + quiet*2) * scale
+	img := image.NewPaletted(image.Rect(0, 0, full, full), color.Palette{
+		color.RGBA{R: 0xff, G: 0xff, B: 0xff, A: 0xff},
+		color.RGBA{R: 0x0a, G: 0x0a, B: 0x0a, A: 0xff},
+	})
+	// Pix is zero-valued, which is palette index 0 — the light background — so
+	// only the dark modules need writing.
+	for y := 0; y < n; y++ {
+		for x := 0; x < n; x++ {
+			if mod[y][x] != 1 {
+				continue
+			}
+			px, py := (x+quiet)*scale, (y+quiet)*scale
+			for dy := 0; dy < scale; dy++ {
+				row := img.Pix[(py+dy)*img.Stride+px:]
+				for dx := 0; dx < scale; dx++ {
+					row[dx] = 1
+				}
+			}
+		}
+	}
+	var buf bytes.Buffer
+	if err := png.Encode(&buf, img); err != nil {
+		return nil, err
+	}
+	return buf.Bytes(), nil
+}
+
+// EncodePNG encodes a payload straight to PNG bytes.
+func EncodePNG(payload []byte, ec ECLevel, scale int) ([]byte, int, error) {
+	mod, version, err := Encode(payload, ec)
+	if err != nil {
+		return nil, 0, err
+	}
+	out, err := RenderPNG(mod, scale)
+	if err != nil {
+		return nil, 0, err
+	}
+	return out, version, nil
 }

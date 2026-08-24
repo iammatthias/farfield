@@ -48,6 +48,7 @@ var services = []Service{
 	{Name: "scrap", Port: 8799, Public: "scrap.farfield.systems"},
 	{Name: "sideload", Port: 8800, Public: "sideload.farfield.systems"},
 	{Name: "keys", Port: 8801, Public: "keys.farfield.systems"},
+	{Name: "switchboard", Port: 8802, Public: "switchboard.farfield.systems"},
 }
 
 // Services returns every service, in port order, as a fresh slice the caller

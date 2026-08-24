@@ -1,0 +1,61 @@
+{{define "title"}}Log · farfield switchboard{{end}}
+{{define "content"}}
+  {{template "topbar" .}}
+
+  {{if not .Ready}}
+    <p class="notice">
+      Switchboard is not fully wired. It needs
+      <code>SWITCHBOARD_WEBHOOK_SECRET</code> (the hook 404s without it),
+      <code>SWITCHBOARD_ALLOW</code> (empty ignores every message), and
+      <code>SPECTRUM_PROJECT_ID</code>/<code>SPECTRUM_PROJECT_SECRET</code>
+      (no replies, no photos).
+    </p>
+  {{end}}
+
+  <p class="summary">
+    <span>Messages {{len .Messages}}</span>
+    <span>Allowed senders {{.Senders}}</span>
+  </p>
+
+  {{if .Messages}}
+    <div class="table-wrap">
+      <table class="admin">
+        <thead>
+          <tr>
+            <th>When</th>
+            <th>From</th>
+            <th>Message</th>
+            <th>Route</th>
+            <th>Result</th>
+          </tr>
+        </thead>
+        <tbody>
+          {{range .Messages}}
+            <tr>
+              <td class="when">{{.ReceivedAt}}</td>
+              <td class="ref">{{.Sender}}</td>
+              <td class="body">
+                {{if .Body}}
+                  <div class="text">{{.Body}}</div>
+                {{else}}
+                  <span class="muted">—</span>
+                {{end}}
+              </td>
+              <td class="route">
+                {{.Route}}
+                {{if eq .Status "error"}}<span class="badge draft">error</span>
+                {{else if eq .Status "ignored"}}<span class="badge draft">ignored</span>{{end}}
+              </td>
+              <td class="reply">
+                {{if .Ref}}<span class="ref">{{.Ref}}</span><br>{{end}}
+                {{.Reply}}
+              </td>
+            </tr>
+          {{end}}
+        </tbody>
+      </table>
+    </div>
+  {{else}}
+    <p class="muted">Nothing yet. Text the line and it shows up here.</p>
+  {{end}}
+{{end}}

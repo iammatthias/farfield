@@ -53,6 +53,7 @@ func run(host, port string) error {
 		auth: &web.Auth{
 			DB:           db,
 			Password:     store.Env("PASSWORD", ""),
+			ReadKey:      store.Env("PULSE_READ_KEY", ""),
 			CookieSecure: store.Env("COOKIE_SECURE", "false") == "true",
 		},
 		rd: &web.Renderer{Templates: tmpl, AssetVer: theme.Version,
@@ -97,8 +98,8 @@ func (s *Server) routes() http.Handler {
 	mux.HandleFunc("GET /traffic", s.auth.RequireSession(s.handleTraffic))
 
 	// Gated JSON mirrors of the console pages.
-	mux.HandleFunc("GET /api/overview", s.auth.RequireSession(s.handleAPIOverview))
-	mux.HandleFunc("GET /api/traffic", s.auth.RequireSession(s.handleAPITraffic))
+	mux.HandleFunc("GET /api/overview", s.sessionOrKey(s.handleAPIOverview))
+	mux.HandleFunc("GET /api/traffic", s.sessionOrKey(s.handleAPITraffic))
 
 	// Login — public HTML.
 	mux.HandleFunc("GET /login", s.handleLoginForm)
@@ -134,6 +135,27 @@ func (s *Server) handleStatus(w http.ResponseWriter, r *http.Request) {
 
 // targetRow is one overview line: the target, its latest check, uptime
 // windows, and the open incident if any.
+// sessionOrKey guards the read-only JSON the console renders from.
+//
+// The console reaches it with a browser session; switchboard reaches it with
+// PULSE_READ_KEY, to answer "/pulse" over iMessage. Session-only would have
+// forced a headless caller to hold the shared PASSWORD, which is strictly
+// worse than a scoped read key. It stays read-only either way — target CRUD
+// remains session-gated.
+// A presented read key short-circuits; everything else falls through to the
+// original session guard untouched, so the console keeps its redirect-to-login
+// behaviour on an expired session rather than getting a bare 401.
+func (s *Server) sessionOrKey(next http.HandlerFunc) http.HandlerFunc {
+	guarded := s.auth.RequireSession(next)
+	return func(w http.ResponseWriter, r *http.Request) {
+		if s.auth.HasReadKey(r) {
+			next(w, r)
+			return
+		}
+		guarded(w, r)
+	}
+}
+
 type targetRow struct {
 	Target
 	Last      *Check        `json:"last"`

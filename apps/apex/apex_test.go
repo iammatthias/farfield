@@ -1,6 +1,7 @@
 package main
 
 import (
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -124,8 +125,12 @@ func TestStatusNegotiation(t *testing.T) {
 		}
 	}
 	// apex is the prober itself — always up, so the summary is at least 1/N.
-	if !strings.Contains(body, "1/15 services up") && !strings.Contains(body, "15/15 services up") {
-		t.Errorf("summary line missing or wrong: %q", body)
+	// N comes from the registry rather than a literal: hardcoding it meant
+	// every new service failed this test for the wrong reason.
+	n := len(fleet.Services())
+	if !strings.Contains(body, fmt.Sprintf("1/%d services up", n)) &&
+		!strings.Contains(body, fmt.Sprintf("%d/%d services up", n, n)) {
+		t.Errorf("summary line missing or wrong (expected 1/%d or %d/%d)", n, n, n)
 	}
 }
 

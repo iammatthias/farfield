@@ -16,6 +16,7 @@ use (
 	./apps/qr
 	./apps/scrap
 	./apps/sideload
+	./apps/switchboard
 	./lib/auth
 	./lib/backup
 	./lib/cid

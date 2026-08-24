@@ -317,12 +317,43 @@ func validateCode(c *Code) string {
 // Results are memoized: encoding is pure in (payload, EC) and the full
 // pipeline (Reed-Solomon + 8 mask trials) is the most expensive work in the
 // service, so repeat renders of the same code hit the cache.
+// payloadFor is what the QR actually encodes: the target itself for a direct
+// code, or this service's stable redirect URL for a proxy code.
+func (s *Server) payloadFor(c *Code) string {
+	if c.Mode == ModeProxy {
+		return s.publicURL + "/r/" + c.ID
+	}
+	return c.Target
+}
+
+// writeQRPNG serves the raster rendering. It is not memoized: the SVG cache
+// exists because SVG strings are the hot path for the admin UI and the website,
+// whereas a PNG is fetched occasionally and would cost far more memory per
+// entry than it saves.
+func (s *Server) writeQRPNG(w http.ResponseWriter, r *http.Request, c *Code) {
+	ec, _ := qrenc.ParseECLevel(c.EC)
+	raster, _, err := qrenc.EncodePNG([]byte(s.payloadFor(c)), ec, 0)
+	if err != nil {
+		s.fail(w, "encode QR png", err)
+		return
+	}
+	// A distinct ETag from the SVG's: the two renderings share a CID, and a
+	// client holding the SVG's tag would otherwise get a 304 for the PNG and
+	// render the wrong bytes.
+	etag := c.CID + "-png"
+	w.Header().Set("ETag", `"`+etag+`"`)
+	if web.ETagMatch(r, etag) {
+		w.WriteHeader(http.StatusNotModified)
+		return
+	}
+	w.Header().Set("Content-Type", "image/png")
+	w.Header().Set("Cache-Control", "public, max-age=300")
+	_, _ = w.Write(raster)
+}
+
 func (s *Server) encodeFor(c *Code) (string, int, error) {
 	ec, _ := qrenc.ParseECLevel(c.EC)
-	payload := c.Target
-	if c.Mode == ModeProxy {
-		payload = s.publicURL + "/r/" + c.ID
-	}
+	payload := s.payloadFor(c)
 
 	key := svgCacheKey(c)
 	if key != "" {
@@ -379,7 +410,12 @@ func (s *Server) handleLoginForm(w http.ResponseWriter, r *http.Request) {
 // Private or disabled records return 404 so their existence is not revealed.
 // The CID is sent as a strong ETag so clients (and CDNs) can revalidate.
 func (s *Server) handleQRSVG(w http.ResponseWriter, r *http.Request) {
-	id := strings.TrimSuffix(r.PathValue("id"), ".svg")
+	raw := r.PathValue("id")
+	// One route serves both renderings; the extension picks. PNG exists for
+	// consumers that cannot display an SVG — an image sent over iMessage has to
+	// be a raster to appear inline instead of as a file attachment.
+	wantPNG := strings.HasSuffix(raw, ".png")
+	id := strings.TrimSuffix(strings.TrimSuffix(raw, ".svg"), ".png")
 	c, err := getCode(s.db, id)
 	if err != nil {
 		s.fail(w, "get code", err)
@@ -387,6 +423,10 @@ func (s *Server) handleQRSVG(w http.ResponseWriter, r *http.Request) {
 	}
 	if c == nil || !c.Public || !c.Enabled {
 		http.NotFound(w, r)
+		return
+	}
+	if wantPNG {
+		s.writeQRPNG(w, r, c)
 		return
 	}
 	svg, _, err := s.encodeFor(c)

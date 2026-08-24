@@ -13,6 +13,7 @@ single-binary services; the website reads three of them.
 | daily     | `https://daily.farfield.systems`     | daily artifacts: the photo (NASA APOD)  |
 | bookmarks | `https://bookmarks.farfield.systems` | curated link list with OG metadata      |
 | qr        | `https://qr.farfield.systems`        | direct and editable-proxy QR codes      |
+| switchboard | `https://switchboard.farfield.systems` | iMessage → the fleet (webhook only)  |
 | apex      | `https://farfield.systems`           | the standalone landing page (not an API)|
 
 The `backup` service is internal (tailnet-only) and has no public API. The
@@ -89,8 +90,16 @@ series fragment can back an unpublished entry.
 | `GET /api/posts/{slug}`     | `Post` — public, rate-limited; `404`; `ETag` |
 | `GET /status`             | `{ "service", "ok", "posts" }`                |
 | `POST /api/posts`         | create — `X-API-Key`                          |
+| `POST /api/posts/media`   | create from multipart (text + images) — `X-API-Key` |
 | `PUT /api/posts/{slug}`     | replace — `X-API-Key`                        |
 | `DELETE /api/posts/{slug}`  | delete — `X-API-Key`                         |
+
+`POST /api/posts/media` takes `multipart/form-data`: a `body` field, a `tags`
+field (comma-separated), and any number of `file` parts. feed uploads each file
+to blobs itself and appends a `![](blob://<cid>)` embed per image, so a caller
+holding photo bytes needs no blobs key of its own. Parts stream straight
+through rather than buffering, and the endpoint is exempt from the default 2 MiB
+body cap (it applies the blobs-sized one instead).
 
 A single post by slug is **public** so "view source" links open in a browser —
 the slug must already be known and the body is published — but it is rate-limited
@@ -155,7 +164,8 @@ for records marked both `public` and `enabled`.
 
 | Method & path                    | Returns                                          |
 |----------------------------------|--------------------------------------------------|
-| `GET /qr/{id}`                   | SVG QR image for a public/enabled record; `ETag` |
+| `GET /qr/{id}` (or `.svg`)       | SVG QR image for a public/enabled record; `ETag` |
+| `GET /qr/{id}.png`               | PNG QR image, same record; `ETag`                |
 | `GET /r/{id}`                    | `303` redirect for public/enabled proxy records  |
 | `GET /api/codes`                 | `{ "codes": [QRCode, …] }` — public/enabled only; `ETag` |
 | `GET /api/codes/{id}`            | `QRCode` — `404` if missing/private/disabled; `ETag` |
@@ -166,6 +176,38 @@ for records marked both `public` and `enabled`.
 
 The write API is disabled unless `QR_API_KEY` is set on the service. The HTML
 admin UI is rooted at `/` and gated by the shared `PASSWORD`.
+
+## switchboard — `https://switchboard.farfield.systems`
+
+switchboard is the fleet's iMessage front door. Photon delivers an inbound
+message to a signed webhook; switchboard authenticates it, decides what it
+meant, and dispatches it to the app that owns that job — then replies in the
+same thread.
+
+| Method & path        | Returns                                              |
+|----------------------|------------------------------------------------------|
+| `POST /hooks/photon` | Photon webhook — HMAC-gated, not `X-API-Key`         |
+| `GET /status`        | `{ "service", "ok", "messages", "hook", "line" }`     |
+
+It has no other public API — the console at `/` is session-gated, and it is a
+producer for the other services rather than a thing clients read.
+
+**Message grammar.** Plain text becomes a feed post; text plus photos becomes a
+post with the images; a message that is *only* a URL becomes a bookmark.
+Trailing `#hashtags` become tags. Commands: `/feed`, `/bm`, `/scrap`, `/qr`,
+`/status`, `/pulse`, `/help`, `/undo`, `/tags a, b`, and `+ text` to append to
+the last post.
+
+**Webhook authentication.** Photon signs each delivery: HMAC-SHA256 over
+`v0:{timestamp}:{rawBody}`, sent as `X-Spectrum-Signature: v0=<hex>` with
+`X-Spectrum-Timestamp`. switchboard verifies the signature against the raw
+bytes, rejects timestamps outside five minutes, dedupes on the message id, and
+requires the sender to be in `SWITCHBOARD_ALLOW`. Both the secret and the
+allowlist fail closed — an unset secret 404s the route, an empty allowlist
+ignores every message.
+
+Rejections answer `2xx` (Photon retries `5xx` only, and none of these are fixed
+by retrying); a bad signature answers `401`.
 
 ## Record shapes
 
