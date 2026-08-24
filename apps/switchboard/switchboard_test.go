@@ -429,3 +429,108 @@ func TestParseTargets(t *testing.T) {
 		t.Errorf("targets = %+v", got)
 	}
 }
+
+// The shape that actually arrives: content is flat — text plus an attachments
+// array keyed by guid/fileName/totalBytes — not the union the SDK docs
+// describe. Parsing only the union lost a real message its photo AND its
+// caption, so both shapes are pinned here.
+func TestFlattenFlatContent(t *testing.T) {
+	c := content{
+		Text: "￼Test",
+		Attachments: []content{{
+			GUID:       "spc-att-aa2fa55c",
+			FileName:   "IMG_6899.HEIC",
+			MimeType:   "image/heic",
+			TotalBytes: "1338165",
+		}},
+	}
+	text, atts := flatten(c)
+	if text != "Test" {
+		t.Errorf("text = %q, want %q (U+FFFC placeholder must be stripped)", text, "Test")
+	}
+	if len(atts) != 1 {
+		t.Fatalf("attachments = %d, want 1", len(atts))
+	}
+	if atts[0].ID != "spc-att-aa2fa55c" {
+		t.Errorf("id = %q, want the guid", atts[0].ID)
+	}
+	if atts[0].Name != "IMG_6899.HEIC" || atts[0].MimeType != "image/heic" {
+		t.Errorf("attachment = %+v", atts[0])
+	}
+	if atts[0].Size != 1338165 {
+		t.Errorf("size = %d, want 1338165 (totalBytes arrives as a string)", atts[0].Size)
+	}
+}
+
+// A bare photo with no caption: the text is only the placeholder, so it must
+// flatten to empty rather than to a stray box glyph.
+func TestFlattenBarePhoto(t *testing.T) {
+	text, atts := flatten(content{
+		Text:        "￼",
+		Attachments: []content{{GUID: "g1", FileName: "IMG.HEIC"}},
+	})
+	if text != "" {
+		t.Errorf("text = %q, want empty", text)
+	}
+	if len(atts) != 1 {
+		t.Errorf("attachments = %d, want 1", len(atts))
+	}
+}
+
+// The documented union shape must keep working — both are accepted.
+func TestFlattenUnionStillWorks(t *testing.T) {
+	text, atts := flatten(content{Type: "group", Items: []content{
+		{Type: "text", Text: "beach day"},
+		{Type: "attachment", ID: "a1", Name: "IMG_1.HEIC", MimeType: "image/heic", Size: 10},
+	}})
+	if text != "beach day" || len(atts) != 1 || atts[0].ID != "a1" {
+		t.Errorf("union shape broke: text=%q atts=%+v", text, atts)
+	}
+}
+
+// One attachment must not be counted twice when it appears under both a type
+// tag and an attachments array.
+func TestFlattenDedupesAttachments(t *testing.T) {
+	_, atts := flatten(content{
+		Type:        "attachment",
+		GUID:        "same",
+		FileName:    "x.heic",
+		Attachments: []content{{GUID: "same", FileName: "x.heic"}},
+	})
+	if len(atts) != 1 {
+		t.Errorf("attachments = %d, want 1", len(atts))
+	}
+}
+
+// A photo message must route to feed rather than be ignored. This is the
+// regression the live bug produced: a real photo-plus-caption flattened to
+// nothing and was recorded as "none/ignored", so neither the image nor the
+// caption ever reached the feed.
+func TestPhotoRoutesToFeedNotIgnored(t *testing.T) {
+	s, srv, _ := newTestServer(t)
+	post(t, srv, "m-photo", "+15551234567", "", func(e *envelope) {
+		e.Message.Content = content{
+			Text:        "￼Test",
+			Attachments: []content{{GUID: "g1", FileName: "IMG.HEIC", MimeType: "image/heic"}},
+		}
+	})
+	rec, err := getMessage(s.db, "m-photo")
+	if err != nil {
+		t.Fatalf("getMessage: %v", err)
+	}
+	if rec == nil {
+		t.Fatal("photo message was not recorded at all")
+	}
+	if rec.Route != routeFeed {
+		t.Errorf("route = %q, want %q — the photo was ignored", rec.Route, routeFeed)
+	}
+	if rec.Body != "Test" {
+		t.Errorf("body = %q, want %q — the caption was lost", rec.Body, "Test")
+	}
+	// The test server has no Photon line, so fetching the bytes fails and the
+	// dispatch is recorded as an error. That is the correct outcome here: what
+	// matters is that it tried, rather than silently dropping the message.
+	if rec.Status != statusError {
+		t.Errorf("status = %q, want %q (no line configured in tests)", rec.Status, statusError)
+	}
+}

@@ -58,20 +58,79 @@ type webhookMessage struct {
 	Content content `json:"content"`
 }
 
-// content is one message's payload. Spectrum discriminates on Type; a message
-// composed of several parts (a caption plus three photos, say) arrives as one
-// "group" whose Items hold the pieces. That is what makes "photos sent together
-// become one post" observable — iMessage's own grouping survives the wire, so
-// nothing has to be inferred from arrival timing.
+// content is one message's payload.
+//
+// Two shapes are in play and both are accepted, because the documented one is
+// not the one that arrives. Spectrum's SDK models content as a union
+// discriminated on Type, where a caption plus photos is a "group" holding
+// Items. The line's own model — and the normalized-events webhook — is flat
+// instead: a Text alongside an Attachments array. Parsing only the union cost
+// a real message its photo *and* its caption, so this reads whichever is
+// present rather than betting on one.
+//
+// Attachment identity is equally unsettled: the docs say `id` with `name` and
+// `size`, the wire says `guid` with `fileName` and `totalBytes` (a string,
+// since proto renders int64 that way). All of them are read.
 type content struct {
-	Type     string    `json:"type"`
-	Text     string    `json:"text"`
-	ID       string    `json:"id"`
-	Name     string    `json:"name"`
-	MimeType string    `json:"mimeType"`
-	Size     int64     `json:"size"`
-	Items    []content `json:"items"`
+	Type string `json:"type"`
+	Text string `json:"text"`
+
+	ID             string `json:"id"`
+	GUID           string `json:"guid"`
+	AttachmentGUID string `json:"attachmentGuid"`
+
+	Name       string      `json:"name"`
+	FileName   string      `json:"fileName"`
+	MimeType   string      `json:"mimeType"`
+	Size       int64       `json:"size"`
+	TotalBytes json.Number `json:"totalBytes"`
+
+	Items       []content `json:"items"`
+	Attachments []content `json:"attachments"`
 }
+
+// attachmentID returns the attachment's identifier under whichever key it came
+// in on, or "" when this node is not an attachment.
+func (c content) attachmentID() string {
+	for _, id := range []string{c.ID, c.GUID, c.AttachmentGUID} {
+		if id != "" {
+			return id
+		}
+	}
+	return ""
+}
+
+// bytes reports the declared size, from either spelling.
+func (c content) bytes() int64 {
+	if c.Size > 0 {
+		return c.Size
+	}
+	if n, err := c.TotalBytes.Int64(); err == nil {
+		return n
+	}
+	return 0
+}
+
+// filename is the attachment's name under whichever key it came in on.
+func (c content) filename() string {
+	if c.FileName != "" {
+		return c.FileName
+	}
+	return c.Name
+}
+
+// inert content arms carry no instruction: a tapback, a read receipt, someone
+// joining a thread. They are skipped entirely so their incidental text (a
+// reaction's emoji, say) never becomes a post.
+var inertContent = map[string]bool{
+	"reaction": true, "read": true, "typing": true, "avatar": true,
+	"rename": true, "addMember": true, "removeMember": true, "leaveSpace": true,
+}
+
+// objectReplacement is U+FFFC, which Apple embeds in a message's text at each
+// attachment's position. Left in, every photo caption would start with a stray
+// glyph that renders as a hollow box in the post.
+const objectReplacement = "￼"
 
 // attachment is one inbound file, metadata only — the bytes live on the line
 // until we pull them.
@@ -88,27 +147,41 @@ type attachment struct {
 // empty and is ignored.
 func flatten(c content) (text string, atts []attachment) {
 	var texts []string
-	var walk func(content)
-	walk = func(c content) {
-		switch c.Type {
-		case "text", "richlink":
-			if s := strings.TrimSpace(c.Text); s != "" {
-				texts = append(texts, s)
-			}
-		case "attachment":
-			if c.ID != "" {
-				atts = append(atts, attachment{
-					ID: c.ID, Name: c.Name, MimeType: c.MimeType, Size: c.Size,
-				})
-			}
-		case "group":
-			for _, item := range c.Items {
-				walk(item)
-			}
+	seen := map[string]bool{}
+
+	// inList marks nodes reached through an Attachments array: those are
+	// attachments whether or not they carry a Type saying so.
+	var walk func(node content, inList bool)
+	walk = func(node content, inList bool) {
+		if inertContent[node.Type] {
+			return
+		}
+		if s := cleanText(node.Text); s != "" {
+			texts = append(texts, s)
+		}
+		if id := node.attachmentID(); id != "" && !seen[id] &&
+			(inList || node.Type == "attachment" || node.filename() != "" || node.MimeType != "") {
+			seen[id] = true
+			atts = append(atts, attachment{
+				ID: id, Name: node.filename(), MimeType: node.MimeType, Size: node.bytes(),
+			})
+		}
+		for _, item := range node.Items {
+			walk(item, false)
+		}
+		for _, a := range node.Attachments {
+			walk(a, true)
 		}
 	}
-	walk(c)
+	walk(c, false)
 	return strings.TrimSpace(strings.Join(texts, "\n")), atts
+}
+
+// cleanText normalizes a message's text: attachment placeholders removed, ends
+// trimmed. A caption that was nothing but a placeholder becomes empty, which is
+// what makes a bare photo post as a photo rather than as a box glyph.
+func cleanText(s string) string {
+	return strings.TrimSpace(strings.ReplaceAll(s, objectReplacement, " "))
 }
 
 // verifySignature checks Photon's HMAC over the exact bytes received.
@@ -198,11 +271,11 @@ func (s *Server) handleWebhook(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	s.dispatchWebhook(w, r, &env, r.Header.Get(hdrWebhookID))
+	s.dispatchWebhook(w, r, &env, r.Header.Get(hdrWebhookID), body)
 }
 
 // dispatchWebhook applies the sender/shape filters, dedupes, and routes.
-func (s *Server) dispatchWebhook(w http.ResponseWriter, r *http.Request, env *envelope, webhookID string) {
+func (s *Server) dispatchWebhook(w http.ResponseWriter, r *http.Request, env *envelope, webhookID string, body []byte) {
 	msg := &env.Message
 	sender := normalizeHandle(msg.Sender.ID)
 
@@ -257,6 +330,13 @@ func (s *Server) dispatchWebhook(w http.ResponseWriter, r *http.Request, env *en
 		if err := recordMessage(s.db, rec); err != nil {
 			slog.Error("record message", "err", err)
 		}
+		// A message that flattens to nothing is either genuinely inert (a
+		// tapback) or a content shape the parser does not know — and from the
+		// outside those look identical. Logging the raw content makes the
+		// difference visible immediately instead of requiring the sender to
+		// reproduce it while someone watches.
+		slog.Warn("message flattened to nothing",
+			"type", msg.Content.Type, "content", truncate(rawContent(body), 400))
 		web.WriteJSON(w, http.StatusOK, map[string]any{"ignored": "empty"})
 		return
 	}
@@ -332,4 +412,26 @@ func (s *Server) allowed(handle string) bool {
 		return false
 	}
 	return s.allow[handle]
+}
+
+// rawContent extracts the message.content subtree from a delivery, for
+// diagnostics. It returns "" when the body cannot be walked — the caller is
+// already on an error path and must not fail again.
+func rawContent(body []byte) string {
+	var probe struct {
+		Message struct {
+			Content json.RawMessage `json:"content"`
+		} `json:"message"`
+	}
+	if err := json.Unmarshal(body, &probe); err != nil {
+		return ""
+	}
+	return string(probe.Message.Content)
+}
+
+func truncate(s string, n int) string {
+	if len(s) <= n {
+		return s
+	}
+	return s[:n] + "…"
 }

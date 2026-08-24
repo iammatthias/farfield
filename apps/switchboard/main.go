@@ -27,6 +27,20 @@ func main() {
 	_ = store.LoadEnv() // finds the root .env, wherever the app is run from
 	slog.SetDefault(slog.New(slog.NewTextHandler(os.Stderr, nil)))
 
+	if len(os.Args) > 1 && os.Args[1] == "probe" {
+		run := func() error {
+			if len(os.Args) > 2 {
+				return runProbeDownload(os.Args[2])
+			}
+			return runProbe(10)
+		}
+		if err := run(); err != nil {
+			slog.Error("probe", "err", err)
+			os.Exit(1)
+		}
+		return
+	}
+
 	if len(os.Args) > 1 && os.Args[1] == "health" {
 		// Probes /status — backs the Docker healthcheck (distroless: no curl).
 		os.Exit(web.Health(store.Env("SWITCHBOARD_PORT", "8802")))

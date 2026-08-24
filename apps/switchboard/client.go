@@ -239,3 +239,21 @@ func (c *photonClient) SendImage(ctx context.Context, chatGUID, name string, dat
 	})
 	return err
 }
+
+// RecentMessages fetches the newest messages on the line. It backs the probe
+// subcommand — the webhook's normalized JSON hides which content arm a message
+// used, and this returns the server's own view of it.
+func (c *photonClient) RecentMessages(ctx context.Context, chatGUID string, n int) ([]*imsg.Message, error) {
+	if c == nil {
+		return nil, fmt.Errorf("photon line not configured")
+	}
+	size := int32(n)
+	resp, err := c.msgs.ListChatMessages(ctx, &imsg.ListChatMessagesRequest{
+		ChatGuid: chatGUID,
+		PageSize: &size,
+	})
+	if err != nil {
+		return nil, err
+	}
+	return resp.GetMessages(), nil
+}

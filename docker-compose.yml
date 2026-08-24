@@ -450,19 +450,22 @@ services:
       - SWITCHBOARD_WEBHOOK_SECRET=${SWITCHBOARD_WEBHOOK_SECRET:-}
       - SWITCHBOARD_ALLOW=${SWITCHBOARD_ALLOW:-}
       - SWITCHBOARD_BOOKMARK_CATEGORY=${SWITCHBOARD_BOOKMARK_CATEGORY:-unsorted}
-      # Sibling services it dispatches to. It holds their keys so the phone
-      # never has to; it deliberately has no blobs key — feed owns that.
+      # Sibling services it dispatches to. Its credentials are its own — minted
+      # ffk_ tokens scoped per app, not the apps' env keys — so revoking
+      # switchboard's access never touches anything else, and adding it here
+      # cannot switch on an app's env-key write path as a side effect.
+      # It deliberately has no blobs credential: feed owns blob uploads.
       - FEED_URL=http://feed:8788
-      - FEED_API_KEY=${FEED_API_KEY:-}
+      - SWITCHBOARD_FEED_KEY=${SWITCHBOARD_FEED_KEY:-}
       - BOOKMARKS_URL=http://bookmarks:8793
-      - BOOKMARKS_API_KEY=${BOOKMARKS_API_KEY:-}
+      - SWITCHBOARD_BOOKMARKS_KEY=${SWITCHBOARD_BOOKMARKS_KEY:-}
       - SCRAP_URL=http://scrap:8799
-      - SCRAP_API_KEY=${SCRAP_API_KEY:-}
+      - SWITCHBOARD_SCRAP_KEY=${SWITCHBOARD_SCRAP_KEY:-}
       - QR_URL=http://qr:8794
-      - QR_API_KEY=${QR_API_KEY:-}
+      - SWITCHBOARD_QR_KEY=${SWITCHBOARD_QR_KEY:-}
       - QR_PUBLIC_URL=${QR_PUBLIC_URL:-https://qr.farfield.systems}
       - PULSE_URL=http://pulse:8798
-      - PULSE_READ_KEY=${PULSE_READ_KEY:-}
+      - SWITCHBOARD_PULSE_KEY=${SWITCHBOARD_PULSE_KEY:-}
     volumes:
       - ./data:/data
 

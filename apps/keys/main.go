@@ -18,6 +18,14 @@ func main() {
 	_ = store.LoadEnv() // finds the root .env, wherever the app is run from
 	slog.SetDefault(slog.New(slog.NewTextHandler(os.Stderr, nil)))
 
+	if len(os.Args) > 1 && os.Args[1] == "mint" {
+		if err := runMint(os.Args[2:]); err != nil {
+			slog.Error("mint", "err", err)
+			os.Exit(1)
+		}
+		return
+	}
+
 	// "health" probes the running server's /status for Docker healthchecks.
 	if len(os.Args) > 1 && os.Args[1] == "health" {
 		os.Exit(web.Health(store.Env("KEYS_PORT", "8801")))

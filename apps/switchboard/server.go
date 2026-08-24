@@ -102,20 +102,20 @@ func run(host, port string) error {
 	}
 
 	s.feed = &feedClient{svc: newSvc(
-		store.Env("FEED_URL", "http://127.0.0.1:8788"), store.Env("FEED_API_KEY", ""))}
+		store.Env("FEED_URL", "http://127.0.0.1:8788"), store.Env("SWITCHBOARD_FEED_KEY", ""))}
 	s.bookmarks = &bookmarksClient{
 		svc: newSvc(store.Env("BOOKMARKS_URL", "http://127.0.0.1:8793"),
-			store.Env("BOOKMARKS_API_KEY", "")),
+			store.Env("SWITCHBOARD_BOOKMARKS_KEY", "")),
 		DefaultCategory: store.Env("SWITCHBOARD_BOOKMARK_CATEGORY", "unsorted"),
 	}
 	s.scrap = &scrapClient{svc: newSvc(
-		store.Env("SCRAP_URL", "http://127.0.0.1:8799"), store.Env("SCRAP_API_KEY", ""))}
+		store.Env("SCRAP_URL", "http://127.0.0.1:8799"), store.Env("SWITCHBOARD_SCRAP_KEY", ""))}
 	s.qr = &qrClient{
-		svc:       newSvc(store.Env("QR_URL", "http://127.0.0.1:8794"), store.Env("QR_API_KEY", "")),
+		svc:       newSvc(store.Env("QR_URL", "http://127.0.0.1:8794"), store.Env("SWITCHBOARD_QR_KEY", "")),
 		PublicURL: strings.TrimRight(store.Env("QR_PUBLIC_URL", "https://qr.farfield.systems"), "/"),
 	}
 	s.pulseSvc = newSvc(store.Env("PULSE_URL", "http://127.0.0.1:8798"),
-		store.Env("PULSE_READ_KEY", store.Env("PULSE_API_KEY", "")))
+		store.Env("SWITCHBOARD_PULSE_KEY", ""))
 
 	s.photon, err = newPhotonClient(
 		store.Env("SPECTRUM_PROJECT_ID", ""),
