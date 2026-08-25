@@ -12,7 +12,29 @@ single-binary services; the website reads three of them.
 | bookmarks | `https://bookmarks.farfield.systems` | curated link list with OG metadata      |
 | qr        | `https://qr.farfield.systems`        | direct and editable-proxy QR codes      |
 | switchboard | `https://switchboard.farfield.systems` | iMessage → the fleet (webhook only)  |
-| apex      | `https://farfield.systems`           | the standalone landing page (not an API)|
+| apex      | `https://farfield.systems`           | the landing page, plus `/api/profile`   |
+
+**`GET https://farfield.systems/api/profile`** renders the site's freshest
+public material as ready-to-splice GitHub-flavored markdown — for the
+self-updating profile README, or anything else that wants a keyless summary.
+Public, anonymous, rate-limited per client IP, `ETag` (send `If-None-Match`
+for a `304`). The response:
+
+```jsonc
+{
+  "sections": {
+    "feed":    "<gfm: latest feed post — blockquote, first image, permalink>",
+    "writing": "<gfm: 3 newest entries from posts/art/recipes/open-source>",
+    "daily":   "<gfm: today's generative art plate, linked and captioned>"
+  },
+  "updatedAt": "RFC3339"
+}
+```
+
+A section whose upstream is unavailable is **absent**, never empty — splice
+per-section and keep your previous content for a missing key. The document is
+served from a ten-minute cache and only ever contains material already public
+on iammatthias.com.
 
 `bard` and `dead-presidents` are no longer farfield services. They were always
 projects that happened to be hosted here rather than parts of the content

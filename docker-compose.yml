@@ -215,6 +215,11 @@ services:
       # probed at the address the host publishes on. Without this apex reports
       # a healthy host service as permanently down.
       - FARFIELD_BIND_IP=${FARFIELD_BIND_IP:-172.17.0.1}
+      # Read keys for the profile document (/api/profile): apex renders the
+      # latest public material server-side so the GitHub README cron needs no
+      # credentials of its own. daily's art API is public and needs none.
+      - FEED_READ_KEY=${FEED_READ_KEY:-}
+      - CONTENT_READ_KEY=${CONTENT_READ_KEY:-}
       - HOST=0.0.0.0
       - SESSION_EPOCH=${SESSION_EPOCH:-}
       - FARFIELD_TRUSTED_PROXIES=${FARFIELD_TRUSTED_PROXIES:-}

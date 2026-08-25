@@ -231,6 +231,14 @@ func routes() (http.Handler, error) {
 	// Crawlers fetch these per hostname. apex is the only farfield host with
 	// more than one page, so its sitemap enumerates the docs registry —
 	// nothing to keep in sync by hand.
+	// The profile document: the site's freshest public material as markdown,
+	// for the self-updating GitHub README. Public and anonymous by design (the
+	// consumer is a keyless Actions cron), so it rides the same per-IP rate
+	// limit as the other public reads, and a server-side cache keeps a burst
+	// from fanning out to the siblings.
+	profile := newProfileServer()
+	mux.HandleFunc("GET /api/profile", web.RateLimit(profile.rl, nil, profile.handle))
+
 	mux.HandleFunc("GET /robots.txt", web.RobotsHandler("/sitemap.xml"))
 	mux.HandleFunc("GET /sitemap.xml", web.SitemapHandler(sitemapPaths()...))
 
