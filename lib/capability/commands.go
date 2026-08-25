@@ -107,6 +107,25 @@ func PublicTargets() []Target {
 	return out
 }
 
+// ServiceURL is where a caller reaches one farfield service.
+//
+// The port comes from lib/fleet rather than a literal, because a literal is a
+// second copy of the registry that nothing checks. The host is a parameter for
+// the same reason HostTargets takes one: inside the compose network a service
+// answers to its own name, and outside it answers on the address the container
+// publishes — which is the docker0 gateway, not loopback. Getting that wrong
+// fails as "connection refused" against a service that is perfectly healthy.
+func ServiceURL(name, host string) string {
+	svc, ok := fleet.Lookup(name)
+	if !ok {
+		return ""
+	}
+	if strings.TrimSpace(host) == "" {
+		host = "127.0.0.1"
+	}
+	return fmt.Sprintf("http://%s:%d", host, svc.Port)
+}
+
 // HostTargets probes each service at the address the containers publish on.
 // This is the view from the box itself, for a caller that is not in the compose
 // network and so cannot resolve service names.

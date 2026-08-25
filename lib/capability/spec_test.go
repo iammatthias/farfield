@@ -174,3 +174,32 @@ func TestRegistryRejectsDuplicates(t *testing.T) {
 	}()
 	NewRegistry(&Spec{Name: "x"}, &Spec{Name: "y", Aliases: []string{"x"}})
 }
+
+// TestServiceURLUsesTheRegistryAndTheGivenHost guards the mistake that took
+// every sibling call down when switchboard stopped being a container: it kept
+// defaulting to loopback, where nothing listens, because the fleet publishes on
+// the docker0 gateway. Ports come from lib/fleet so they cannot drift from it.
+func TestServiceURLUsesTheRegistryAndTheGivenHost(t *testing.T) {
+	if got := ServiceURL("feed", "172.17.0.1"); got != "http://172.17.0.1:8788" {
+		t.Errorf("ServiceURL(feed, 172.17.0.1) = %q", got)
+	}
+	if got := ServiceURL("pulse", "172.17.0.1"); got != "http://172.17.0.1:8798" {
+		t.Errorf("ServiceURL(pulse, 172.17.0.1) = %q", got)
+	}
+	// An empty host is a caller that did not know; loopback is the only safe
+	// guess, and it is at least a working default in local development.
+	if got := ServiceURL("feed", ""); got != "http://127.0.0.1:8788" {
+		t.Errorf("ServiceURL(feed, \"\") = %q", got)
+	}
+	// A name the registry does not know returns empty rather than a plausible
+	// URL that would fail somewhere further away from the mistake.
+	if got := ServiceURL("not-a-service", "172.17.0.1"); got != "" {
+		t.Errorf("ServiceURL for an unknown service = %q, want empty", got)
+	}
+	// Every service switchboard dispatches to must be addressable.
+	for _, name := range []string{"feed", "bookmarks", "scrap", "qr", "pulse"} {
+		if ServiceURL(name, "10.0.0.1") == "" {
+			t.Errorf("%s is not in the fleet registry — switchboard cannot reach it", name)
+		}
+	}
+}

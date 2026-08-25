@@ -95,28 +95,7 @@ func run(host, port string) error {
 		rl:            web.NewRateLimiter(inboundPerMin, time.Minute),
 	}
 
-	// The keys are switchboard's own minted tokens rather than the apps' env
-	// keys, which is why they are named here instead of read by lib/capability.
-	s.caps = capability.New(capability.Config{
-		FeedURL: store.Env("FEED_URL", "http://127.0.0.1:8788"),
-		FeedKey: store.Env("SWITCHBOARD_FEED_KEY", ""),
-
-		BookmarksURL: store.Env("BOOKMARKS_URL", "http://127.0.0.1:8793"),
-		BookmarksKey: store.Env("SWITCHBOARD_BOOKMARKS_KEY", ""),
-		BookmarkCat:  store.Env("SWITCHBOARD_BOOKMARK_CATEGORY", "unsorted"),
-
-		ScrapURL: store.Env("SCRAP_URL", "http://127.0.0.1:8799"),
-		ScrapKey: store.Env("SWITCHBOARD_SCRAP_KEY", ""),
-
-		QRURL:       store.Env("QR_URL", "http://127.0.0.1:8794"),
-		QRKey:       store.Env("SWITCHBOARD_QR_KEY", ""),
-		QRPublicURL: store.Env("QR_PUBLIC_URL", "https://qr.farfield.systems"),
-
-		PulseURL: store.Env("PULSE_URL", "http://127.0.0.1:8798"),
-		PulseKey: store.Env("SWITCHBOARD_PULSE_KEY", ""),
-
-		Targets: statusTargets(),
-	})
+	s.caps = capability.New(siblingConfig())
 	s.reg = s.commands()
 
 	s.photon, err = newPhotonClient(
@@ -149,6 +128,43 @@ func run(host, port string) error {
 	s.pulse = pulse.New(s.db, "switchboard")
 	defer s.pulse.Close()
 	return web.Serve(host, port, web.MaxBody(s.routes(), web.DefaultMaxBody))
+}
+
+// siblingConfig addresses the services switchboard dispatches to.
+//
+// Every default is derived from lib/fleet at the fleet's bind address, never
+// written down. switchboard used to be a container and received compose DNS
+// names (http://feed:8788) from docker-compose.yml; as a host unit it receives
+// none of them, and the fallback used to be loopback — where nothing listens,
+// because the containers publish on the docker0 gateway. Every command that
+// called a sibling failed as "connection refused" against a service that was
+// perfectly healthy. Deriving the address means the move cannot break it again,
+// and the ports cannot drift from the registry.
+//
+// The keys stay here rather than in lib/capability: they are switchboard's own
+// minted tokens under its own variable names, not the apps' env keys.
+func siblingConfig() capability.Config {
+	bind := store.Env("FARFIELD_BIND_IP", "127.0.0.1")
+	return capability.Config{
+		FeedURL: store.Env("FEED_URL", capability.ServiceURL("feed", bind)),
+		FeedKey: store.Env("SWITCHBOARD_FEED_KEY", ""),
+
+		BookmarksURL: store.Env("BOOKMARKS_URL", capability.ServiceURL("bookmarks", bind)),
+		BookmarksKey: store.Env("SWITCHBOARD_BOOKMARKS_KEY", ""),
+		BookmarkCat:  store.Env("SWITCHBOARD_BOOKMARK_CATEGORY", "unsorted"),
+
+		ScrapURL: store.Env("SCRAP_URL", capability.ServiceURL("scrap", bind)),
+		ScrapKey: store.Env("SWITCHBOARD_SCRAP_KEY", ""),
+
+		QRURL:       store.Env("QR_URL", capability.ServiceURL("qr", bind)),
+		QRKey:       store.Env("SWITCHBOARD_QR_KEY", ""),
+		QRPublicURL: store.Env("QR_PUBLIC_URL", "https://qr.farfield.systems"),
+
+		PulseURL: store.Env("PULSE_URL", capability.ServiceURL("pulse", bind)),
+		PulseKey: store.Env("SWITCHBOARD_PULSE_KEY", ""),
+
+		Targets: statusTargets(),
+	}
 }
 
 // statusTargets is what /status probes.

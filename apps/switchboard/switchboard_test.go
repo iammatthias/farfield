@@ -583,3 +583,47 @@ func TestHelpListsEveryRegisteredCommand(t *testing.T) {
 		}
 	}
 }
+
+// TestSiblingConfigHonoursTheBindAddress is the regression guard for the defect
+// that survived the move to a host unit: as a container switchboard received
+// compose DNS names from docker-compose.yml, and as a unit it receives nothing,
+// so every sibling URL fell back to loopback. Nothing listens there — the fleet
+// publishes on the docker0 gateway — so /feed, /bm, /scrap, /qr and /pulse all
+// failed with "connection refused" against perfectly healthy services.
+func TestSiblingConfigHonoursTheBindAddress(t *testing.T) {
+	t.Setenv("FARFIELD_BIND_IP", "172.17.0.1")
+	cfg := siblingConfig()
+
+	for name, url := range map[string]string{
+		"feed": cfg.FeedURL, "bookmarks": cfg.BookmarksURL,
+		"scrap": cfg.ScrapURL, "qr": cfg.QRURL, "pulse": cfg.PulseURL,
+	} {
+		if url == "" {
+			t.Errorf("%s has no URL", name)
+			continue
+		}
+		if strings.Contains(url, "127.0.0.1") || strings.Contains(url, "localhost") {
+			t.Errorf("%s = %q — loopback is where nothing listens once switchboard "+
+				"is a host unit", name, url)
+		}
+		if !strings.Contains(url, "172.17.0.1") {
+			t.Errorf("%s = %q, want the bind address", name, url)
+		}
+	}
+
+	// The status roll-up has to travel the same road.
+	for _, target := range cfg.Targets {
+		if strings.Contains(target.URL, "127.0.0.1") {
+			t.Errorf("status target %s = %q — loopback", target.Name, target.URL)
+		}
+	}
+}
+
+// An explicit env var still wins, for a deployment that is neither.
+func TestSiblingConfigEnvOverrides(t *testing.T) {
+	t.Setenv("FARFIELD_BIND_IP", "172.17.0.1")
+	t.Setenv("FEED_URL", "http://feed.internal:9999")
+	if got := siblingConfig().FeedURL; got != "http://feed.internal:9999" {
+		t.Errorf("FeedURL = %q, want the override", got)
+	}
+}
