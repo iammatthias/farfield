@@ -48,6 +48,10 @@ var probeClient = &http.Client{Timeout: 2 * time.Second}
 // name. A service is up iff its /status answers 200 inside the timeout.
 func probeFleet() fleetReport {
 	services := fleet.Services()
+	// Where the host publishes its ports, for the services that are not
+	// containers. Loopback is right in local development, where everything runs
+	// on this machine; production sets the docker bridge gateway.
+	hostAddr := store.Env("FARFIELD_BIND_IP", "127.0.0.1")
 	obs := make([]observation, len(services))
 	var wg sync.WaitGroup
 	for i, svc := range services {
@@ -59,7 +63,7 @@ func probeFleet() fleetReport {
 		go func(i int, svc fleet.Service) {
 			defer wg.Done()
 			start := time.Now()
-			resp, err := probeClient.Get(svc.InternalStatusURL())
+			resp, err := probeClient.Get(svc.StatusURL(hostAddr))
 			o := observation{Name: svc.Name, Public: svc.Public,
 				LatencyMS: time.Since(start).Milliseconds()}
 			if err == nil {

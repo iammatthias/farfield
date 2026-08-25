@@ -80,12 +80,25 @@ func Lookup(name string) (Service, bool) {
 	return Service{}, false
 }
 
-// InternalStatusURL is the service's /status probe address on the compose
-// network, where service names resolve as hostnames.
+// StatusURL is the service's /status probe address for a caller inside the
+// fleet.
 //
-// Meaningless for a Host service, which has no compose DNS name — probe those
-// at the address the containers publish on instead.
-func (s Service) InternalStatusURL() string {
+// A container answers to its compose service name. A Host service does not —
+// it has no compose DNS entry at all — so it is probed at the address the host
+// publishes on, which a container can route to. Getting this wrong does not
+// error: the prober simply reports a healthy service as down forever, which is
+// how switchboard's move showed up as "13/14 services up".
+//
+// hostAddr is the fleet's bind address (FARFIELD_BIND_IP — the docker bridge
+// gateway in production, loopback in local development). It is ignored for
+// services that are containers.
+func (s Service) StatusURL(hostAddr string) string {
+	if s.Host {
+		if hostAddr == "" {
+			hostAddr = "127.0.0.1"
+		}
+		return fmt.Sprintf("http://%s:%d/status", hostAddr, s.Port)
+	}
 	return fmt.Sprintf("http://%s:%d/status", s.Name, s.Port)
 }
 

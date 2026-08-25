@@ -210,6 +210,11 @@ services:
     ports:
       - "${FARFIELD_BIND_IP:-127.0.0.1}:${APEX_PORT:-8790}:8790"
     environment:
+      # apex probes every service in the registry. Most answer to their compose
+      # name; the ones that run on the host as systemd units do not, and are
+      # probed at the address the host publishes on. Without this apex reports
+      # a healthy host service as permanently down.
+      - FARFIELD_BIND_IP=${FARFIELD_BIND_IP:-172.17.0.1}
       - HOST=0.0.0.0
       - SESSION_EPOCH=${SESSION_EPOCH:-}
       - FARFIELD_TRUSTED_PROXIES=${FARFIELD_TRUSTED_PROXIES:-}

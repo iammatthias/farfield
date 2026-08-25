@@ -127,3 +127,45 @@ func TestDevfleetMatchesRegistry(t *testing.T) {
 		t.Errorf("devfleet service %q missing from the fleet registry", name)
 	}
 }
+
+// TestStatusURLRoutesHostServicesToTheHost guards the failure switchboard's
+// move exposed: apex probes every service in the registry, and a service that
+// left the compose network has no name to answer to there. It does not error —
+// the prober just reports a healthy service as down forever, which surfaced as
+// "13/14 services up" with nothing actually wrong.
+func TestStatusURLRoutesHostServicesToTheHost(t *testing.T) {
+	var host, container Service
+	for _, s := range Services() {
+		if s.Host && host.Name == "" {
+			host = s
+		}
+		if !s.Host && container.Name == "" {
+			container = s
+		}
+	}
+	if host.Name == "" {
+		t.Skip("no Host service in the registry")
+	}
+
+	// A container answers to its compose name, whatever the host address is.
+	want := "http://" + container.Name + ":" + strconv.Itoa(container.Port) + "/status"
+	if got := container.StatusURL("172.17.0.1"); got != want {
+		t.Errorf("%s: StatusURL = %q, want %q", container.Name, got, want)
+	}
+
+	// A host service must NOT be probed by name — that name does not resolve.
+	got := host.StatusURL("172.17.0.1")
+	if strings.Contains(got, host.Name+":") {
+		t.Errorf("%s: StatusURL = %q — probing a host service by its compose name "+
+			"reports it down forever", host.Name, got)
+	}
+	want = "http://172.17.0.1:" + strconv.Itoa(host.Port) + "/status"
+	if got != want {
+		t.Errorf("%s: StatusURL = %q, want %q", host.Name, got, want)
+	}
+
+	// Empty means the caller did not know; loopback is the local-dev answer.
+	if got := host.StatusURL(""); got != "http://127.0.0.1:"+strconv.Itoa(host.Port)+"/status" {
+		t.Errorf("%s: StatusURL(\"\") = %q", host.Name, got)
+	}
+}
