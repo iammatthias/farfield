@@ -7,6 +7,14 @@
     <a href="/targets/new">New target</a>
   </div>
 
+  {{if .Orphans}}
+    <p class="muted">
+      {{.Orphans}} target{{if ne .Orphans 1}}s point{{else}} points{{end}} at a
+      farfield hostname the registry no longer serves. Seeding never removes a
+      target, so these keep probing a name whose DNS is gone — delete them, or
+      put the service back.
+    </p>
+  {{end}}
   {{if .Targets}}
     <div class="table-wrap">
       <table class="telemetry">
@@ -24,7 +32,7 @@
         <tbody>
           {{range .Targets}}
             <tr>
-              <td>{{.Name}}</td>
+              <td>{{.Name}}{{if .Orphaned}} <span class="badge alarm" title="No service in the fleet registry serves this hostname any more">not in the registry</span>{{end}}</td>
               <td class="mono">{{.URL}}</td>
               <td class="mono">{{.Method}}</td>
               <td class="num">{{.ExpectedStatus}}</td>

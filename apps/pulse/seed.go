@@ -97,3 +97,39 @@ func seedTargets(db *sql.DB) {
 		}
 	}
 }
+
+// ── registry drift ─────────────────────────────────────────────────────────
+
+// Orphaned reports whether a target points at a farfield hostname that no
+// service in the registry claims any more.
+//
+// Seeding is additive on purpose — a target the operator deletes stays deleted,
+// which means it can never remove one either. So when a service leaves the
+// fleet its target keeps probing a hostname whose DNS is gone, and the only
+// symptom is a permanent red row that everyone learns to ignore. bard and
+// dead-presidents did exactly that.
+//
+// The test is the URL's host rather than the target's name, which keeps the
+// deliberately hand-made targets clean: "backup (internal)" points at a compose
+// name and anything watching an external site points somewhere else entirely.
+// Only a farfield subdomain that the registry no longer serves is drift.
+func Orphaned(rawURL string) bool {
+	u, err := url.Parse(rawURL)
+	if err != nil {
+		return false
+	}
+	host := strings.ToLower(u.Hostname())
+	if host != apexDomain && !strings.HasSuffix(host, "."+apexDomain) {
+		return false
+	}
+	for _, svc := range fleet.Services() {
+		if svc.Public != "" && strings.EqualFold(svc.Public, host) {
+			return false
+		}
+	}
+	return true
+}
+
+// apexDomain is the zone the registry's public hostnames live under. A host
+// outside it is somebody's deliberate choice, not drift.
+const apexDomain = "farfield.systems"

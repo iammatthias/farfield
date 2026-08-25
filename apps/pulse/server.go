@@ -239,13 +239,31 @@ func (s *Server) handleAPIOverview(w http.ResponseWriter, r *http.Request) {
 
 // ── target CRUD ────────────────────────────────────────────────────────────
 
+// targetView is one row plus what the registry says about it.
+type targetView struct {
+	Target
+	// Orphaned marks a target aimed at a farfield hostname the registry no
+	// longer serves. Flagged rather than removed: seeding is additive so that a
+	// target deleted by hand stays deleted, which means nothing here may delete
+	// one either. The operator decides; this only makes it visible.
+	Orphaned bool
+}
+
 func (s *Server) handleTargets(w http.ResponseWriter, r *http.Request) {
 	targets, err := listTargets(s.db)
 	if err != nil {
 		s.fail(w, "list targets", err)
 		return
 	}
-	s.rd.Render(w, "targets.html", map[string]any{"Targets": targets})
+	views := make([]targetView, len(targets))
+	orphans := 0
+	for i, t := range targets {
+		views[i] = targetView{Target: t, Orphaned: Orphaned(t.URL)}
+		if views[i].Orphaned {
+			orphans++
+		}
+	}
+	s.rd.Render(w, "targets.html", map[string]any{"Targets": views, "Orphans": orphans})
 }
 
 func (s *Server) handleNewTarget(w http.ResponseWriter, r *http.Request) {

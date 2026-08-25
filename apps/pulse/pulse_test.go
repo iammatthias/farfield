@@ -2,6 +2,7 @@ package main
 
 import (
 	"database/sql"
+	"github.com/iammatthias/farfield/lib/fleet"
 	"io"
 	"net/http"
 	"net/http/cookiejar"
@@ -756,5 +757,56 @@ func TestSameHostRejectsLookalikes(t *testing.T) {
 		if got := sameHost(tc.url, tc.host); got != tc.want {
 			t.Errorf("sameHost(%q, %q) = %v, want %v", tc.url, tc.host, got, tc.want)
 		}
+	}
+}
+
+// TestOrphanedFlagsRetiredHostnamesOnly is the guard for the drift that took a
+// week to notice: bard left the fleet, its uptime target stayed, and it probed
+// a hostname whose DNS was gone until someone read the red row.
+//
+// Seeding is additive so a target deleted by hand stays deleted — which means
+// nothing can remove one automatically either. Flagging is the most that can be
+// done safely, so it has to be accurate: a false positive on a deliberate
+// target trains the operator to ignore the flag.
+func TestOrphanedFlagsRetiredHostnamesOnly(t *testing.T) {
+	// A farfield subdomain no service claims: the actual drift.
+	for _, u := range []string{
+		"https://bard.farfield.systems/status",
+		"https://dead-presidents.farfield.systems/status",
+		"http://epochs.farfield.systems/status",
+	} {
+		if !Orphaned(u) {
+			t.Errorf("Orphaned(%q) = false, want true", u)
+		}
+	}
+
+	// Every service the registry still serves.
+	for _, svc := range fleet.Services() {
+		if svc.Public == "" {
+			continue
+		}
+		if Orphaned(svc.PublicURL() + "status") {
+			t.Errorf("Orphaned flagged %s, which is in the registry", svc.Name)
+		}
+	}
+
+	// Deliberate targets that are not farfield hostnames at all. Flagging these
+	// is the failure mode that would make the badge worthless.
+	for _, u := range []string{
+		"http://backup:8791/status",         // compose name, internal by design
+		"http://scrap:8799/status",          // ditto
+		"http://172.17.0.1:8802/status",     // the host gateway
+		"https://bard.pure---internet.com/", // another project entirely
+		"https://example.com/health",        // somebody else's site
+		"not a url at all",
+	} {
+		if Orphaned(u) {
+			t.Errorf("Orphaned(%q) = true, want false", u)
+		}
+	}
+
+	// A hostname that merely CONTAINS the domain is not under it.
+	if Orphaned("https://farfield.systems.evil.example/status") {
+		t.Error("Orphaned matched a lookalike host by substring")
 	}
 }

@@ -427,6 +427,10 @@ td.nowrap, th.nowrap { white-space: nowrap; }
 .badge.live { color: var(--accent); background: var(--accent-soft);
 	border-color: var(--accent-line); }
 .badge.draft { opacity: 0.6; }
+/* A state that wants attention without shouting: the alarm ink on its own
+   tint, the same pairing the incident rows use. */
+.badge.alarm { color: var(--alarm); background: var(--alarm-soft);
+  border-color: color-mix(in srgb, var(--alarm) 35%, transparent); }
 
 /* ── rendered markdown ─────────────────────────────────────────────────── */
 /* Applied to server-rendered bodies (.prose) — admin previews and any app
