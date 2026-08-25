@@ -196,11 +196,26 @@ same thread.
 It has no other public API — the console at `/` is session-gated, and it is a
 producer for the other services rather than a thing clients read.
 
-**Message grammar.** Plain text becomes a feed post; text plus photos becomes a
-post with the images; a message that is *only* a URL becomes a bookmark.
-Trailing `#hashtags` become tags. Commands: `/feed`, `/bm`, `/scrap`, `/qr`,
-`/status`, `/pulse`, `/help`, `/undo`, `/tags a, b`, and `+ text` to append to
-the last post.
+**Message grammar.** One rule: a leading `/` names a command, and anything else
+is conversation for the agent.
+
+Commands are deterministic and answered in the same webhook cycle — `/feed`,
+`/bm`, `/scrap`, `/qr`, `/status`, `/pulse`, `/append`, `/tags`, `/undo`,
+`/jobs`, `/job`, `/cancel`, `/help`. They are generated from one table in
+`lib/capability`, which also backs the `farfield` CLI and the markdown slash
+commands agents load, so the three surfaces cannot drift. `/help` renders that
+table rather than a maintained copy of it. Trailing `#hashtags` still become
+tags on anything that posts.
+
+Everything else is handed to an agent (`ff-agent`, omp by default) as a
+background turn: the webhook is acknowledged immediately, one "on it" follows if
+the turn runs past a few seconds, and the answer arrives when it is ready. At
+most two messages per request. Conversations keep their history per thread.
+Nothing streams. If the agent is unreachable, slash commands still work — that
+half never depends on a model.
+
+Capture-by-default and bare-URL-to-bookmark are **retired**: a bare thought is no
+longer silently published, and a shared link is no longer silently filed.
 
 **Webhook authentication.** Photon signs each delivery: HMAC-SHA256 over
 `v0:{timestamp}:{rawBody}`, sent as `X-Spectrum-Signature: v0=<hex>` with

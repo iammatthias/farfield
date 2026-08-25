@@ -9,6 +9,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"path/filepath"
 	"strconv"
 	"strings"
@@ -58,6 +59,25 @@ func newTestServer(t *testing.T) (*Server, *httptest.Server, *feedStub) {
 		ScrapURL: feedSrv.URL, ScrapKey: "k",
 		QRURL: feedSrv.URL, QRKey: "k",
 	})
+	// A real agent runner backed by a stub binary: the path from webhook to job
+	// row to reply is the thing worth testing, and mocking the runner would test
+	// the mock. The stub echoes a fixed answer and, for one prompt, hangs — so
+	// cancellation has something to cancel.
+	stub := filepath.Join(t.TempDir(), "stub-agent")
+	script := "#!/bin/sh\n" +
+		"while [ $# -gt 0 ]; do case \"$1\" in --prompt) p=$2; shift 2;; *) shift;; esac; done\n" +
+		"case \"$p\" in *hang*) sleep 60;; *fail*) echo 'stub exploded' >&2; exit 3;; esac\n" +
+		"printf 'stub answered: %s' \"$p\"\n"
+	if err := os.WriteFile(stub, []byte(script), 0o755); err != nil {
+		t.Fatalf("write stub agent: %v", err)
+	}
+	t.Setenv("FF_AGENT_CMD", stub)
+	t.Setenv("SWITCHBOARD_AGENT_ACK_AFTER", "50ms")
+	t.Setenv("SWITCHBOARD_AGENT_TIMEOUT", "10s")
+	s.agent = newAgentRunner(db, nil, t.TempDir())
+	if err := s.agent.prepare(); err != nil {
+		t.Fatalf("prepare agent workspace: %v", err)
+	}
 	s.reg = s.commands()
 
 	srv := httptest.NewServer(s.routes())
@@ -267,40 +287,14 @@ func TestWebhookIgnoresGroupThread(t *testing.T) {
 
 func TestWebhookDedupes(t *testing.T) {
 	_, srv, feed := newTestServer(t)
-	post(t, srv, "same-id", "+15551234567", "hello")
-	post(t, srv, "same-id", "+15551234567", "hello")
+	post(t, srv, "same-id", "+15551234567", "/feed hello")
+	post(t, srv, "same-id", "+15551234567", "/feed hello")
 	if feed.count() != 1 {
 		t.Errorf("posts = %d, want 1 — a redelivered webhook posted twice", feed.count())
 	}
 }
 
 // ── routing ────────────────────────────────────────────────────────────────
-
-func TestBareURLBecomesBookmark(t *testing.T) {
-	_, srv, feed := newTestServer(t)
-	post(t, srv, "m1", "+15551234567", "https://example.com/article")
-	feed.mu.Lock()
-	defer feed.mu.Unlock()
-	if len(feed.posts) != 1 {
-		t.Fatalf("calls = %d, want 1", len(feed.posts))
-	}
-	if feed.posts[0]["url"] != "https://example.com/article" {
-		t.Errorf("did not route to bookmarks: %v", feed.posts[0])
-	}
-}
-
-func TestURLWithTextBecomesPost(t *testing.T) {
-	_, srv, feed := newTestServer(t)
-	post(t, srv, "m1", "+15551234567", "worth reading https://example.com/article")
-	feed.mu.Lock()
-	defer feed.mu.Unlock()
-	if len(feed.posts) != 1 {
-		t.Fatalf("calls = %d, want 1", len(feed.posts))
-	}
-	if _, isBookmark := feed.posts[0]["url"]; isBookmark {
-		t.Error("a URL with surrounding text should be a post, not a bookmark")
-	}
-}
 
 func TestNormalizeHandle(t *testing.T) {
 	cases := []struct{ in, want string }{
@@ -454,34 +448,6 @@ func TestFlattenDedupesAttachments(t *testing.T) {
 // regression the live bug produced: a real photo-plus-caption flattened to
 // nothing and was recorded as "none/ignored", so neither the image nor the
 // caption ever reached the feed.
-func TestPhotoRoutesToFeedNotIgnored(t *testing.T) {
-	s, srv, _ := newTestServer(t)
-	post(t, srv, "m-photo", "+15551234567", "", func(e *envelope) {
-		e.Message.Content = content{
-			Text:        "￼Test",
-			Attachments: []content{{GUID: "g1", FileName: "IMG.HEIC", MimeType: "image/heic"}},
-		}
-	})
-	rec, err := getMessage(s.db, "m-photo")
-	if err != nil {
-		t.Fatalf("getMessage: %v", err)
-	}
-	if rec == nil {
-		t.Fatal("photo message was not recorded at all")
-	}
-	if rec.Route != "feed" {
-		t.Errorf("route = %q, want %q — the photo was ignored", rec.Route, "feed")
-	}
-	if rec.Body != "Test" {
-		t.Errorf("body = %q, want %q — the caption was lost", rec.Body, "Test")
-	}
-	// The test server has no Photon line, so fetching the bytes fails and the
-	// dispatch is recorded as an error. That is the correct outcome here: what
-	// matters is that it tried, rather than silently dropping the message.
-	if rec.Status != statusError {
-		t.Errorf("status = %q, want %q (no line configured in tests)", rec.Status, statusError)
-	}
-}
 
 // ── slash-command dispatch ─────────────────────────────────────────────────
 
@@ -625,5 +591,236 @@ func TestSiblingConfigEnvOverrides(t *testing.T) {
 	t.Setenv("FEED_URL", "http://feed.internal:9999")
 	if got := siblingConfig().FeedURL; got != "http://feed.internal:9999" {
 		t.Errorf("FeedURL = %q, want the override", got)
+	}
+}
+
+// ── the agent path ─────────────────────────────────────────────────────────
+
+// waitForJob polls until a job reaches a terminal state.
+func waitForJob(t *testing.T, s *Server, id string) *Job {
+	t.Helper()
+	deadline := time.Now().Add(10 * time.Second)
+	for time.Now().Before(deadline) {
+		j, err := getJob(s.db, id)
+		if err != nil {
+			t.Fatalf("getJob: %v", err)
+		}
+		if j != nil && j.Status != jobRunning {
+			return j
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	t.Fatalf("job %s never finished", id)
+	return nil
+}
+
+// onlyJob returns the single job recorded for the sender.
+func onlyJob(t *testing.T, s *Server) *Job {
+	t.Helper()
+	jobs, err := listJobs(s.db, "+15551234567", 10)
+	if err != nil {
+		t.Fatalf("listJobs: %v", err)
+	}
+	if len(jobs) != 1 {
+		t.Fatalf("jobs = %d, want 1", len(jobs))
+	}
+	return &jobs[0]
+}
+
+// TestPlainTextGoesToTheAgent pins the rule that replaced the guessing: a
+// message with no leading slash is conversation, not a feed post.
+func TestPlainTextGoesToTheAgent(t *testing.T) {
+	s, srv, feed := newTestServer(t)
+	post(t, srv, "m1", "+15551234567", "what is going on with the fleet")
+
+	if feed.count() != 0 {
+		t.Error("plain text reached a service — capture-by-default is back")
+	}
+	rec := recorded(t, s, "m1")
+	if rec.Route != routeAgent {
+		t.Errorf("route = %q, want %q", rec.Route, routeAgent)
+	}
+	// Nothing is said in the webhook cycle: the answer comes out of band.
+	if rec.Reply != "" {
+		t.Errorf("reply = %q, want empty — the agent answers later", rec.Reply)
+	}
+	job := waitForJob(t, s, rec.Ref)
+	if job.Status != jobDone {
+		t.Fatalf("status = %q (%s)", job.Status, job.Error)
+	}
+	if !strings.Contains(job.Result, "what is going on with the fleet") {
+		t.Errorf("result = %q, want the prompt echoed by the stub", job.Result)
+	}
+}
+
+// TestBareURLGoesToTheAgent: sharing a link no longer silently bookmarks it.
+func TestBareURLGoesToTheAgent(t *testing.T) {
+	s, srv, feed := newTestServer(t)
+	post(t, srv, "m1", "+15551234567", "https://example.com/article")
+
+	if feed.count() != 0 {
+		t.Error("a bare URL reached a service — bare-URL-to-bookmark is back")
+	}
+	if got := recorded(t, s, "m1").Route; got != routeAgent {
+		t.Errorf("route = %q, want %q", got, routeAgent)
+	}
+}
+
+// TestBarePhotoGoesToTheAgent: a photo with no caption is ambiguous, so it is
+// conversation rather than a guess at a post.
+func TestBarePhotoGoesToTheAgent(t *testing.T) {
+	s, srv, feed := newTestServer(t)
+	post(t, srv, "m1", "+15551234567", "", func(e *envelope) {
+		e.Message.Content = content{Type: "attachment", GUID: "att-1",
+			FileName: "IMG_1.HEIC", MimeType: "image/heic"}
+	})
+	if feed.count() != 0 {
+		t.Error("a bare photo reached feed")
+	}
+	if got := recorded(t, s, "m1").Route; got != routeAgent {
+		t.Errorf("route = %q, want %q", got, routeAgent)
+	}
+}
+
+// A slash command must never reach the agent — that is the whole point of the
+// deterministic half.
+func TestSlashCommandNeverReachesTheAgent(t *testing.T) {
+	s, srv, feed := newTestServer(t)
+	post(t, srv, "m1", "+15551234567", "/feed a real post")
+
+	if feed.count() != 1 {
+		t.Fatalf("feed calls = %d, want 1", feed.count())
+	}
+	jobs, err := listJobs(s.db, "+15551234567", 5)
+	if err != nil {
+		t.Fatalf("listJobs: %v", err)
+	}
+	if len(jobs) != 0 {
+		t.Errorf("a slash command started %d agent job(s)", len(jobs))
+	}
+}
+
+// TestAgentFailureIsRecordedAndReported: a failed turn must not vanish.
+func TestAgentFailureIsRecordedAndReported(t *testing.T) {
+	s, srv, _ := newTestServer(t)
+	post(t, srv, "m1", "+15551234567", "please fail now")
+
+	job := waitForJob(t, s, recorded(t, s, "m1").Ref)
+	if job.Status != jobFailed {
+		t.Fatalf("status = %q, want failed", job.Status)
+	}
+	if !strings.Contains(job.Error, "stub exploded") {
+		t.Errorf("error = %q, want the agent's own stderr", job.Error)
+	}
+}
+
+// TestCancelStopsARunningJob covers /cancel against a turn that is genuinely
+// mid-flight.
+func TestCancelStopsARunningJob(t *testing.T) {
+	s, srv, _ := newTestServer(t)
+	post(t, srv, "m1", "+15551234567", "please hang for a while")
+	id := recorded(t, s, "m1").Ref
+
+	// Wait for it to actually be running before cancelling it.
+	deadline := time.Now().Add(5 * time.Second)
+	for time.Now().Before(deadline) {
+		s.agent.mu.Lock()
+		_, live := s.agent.live[id]
+		s.agent.mu.Unlock()
+		if live {
+			break
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+
+	post(t, srv, "m2", "+15551234567", "/cancel "+id)
+	job := waitForJob(t, s, id)
+	if job.Status != jobCancelled {
+		t.Errorf("status = %q, want cancelled", job.Status)
+	}
+}
+
+// /cancel on a job that is not running closes the row rather than leaving it.
+func TestCancelClosesAStaleRow(t *testing.T) {
+	s, srv, _ := newTestServer(t)
+	stale := &Job{ID: "abc123", Sender: "+15551234567", Status: jobRunning, Prompt: "x"}
+	if err := insertJob(s.db, stale); err != nil {
+		t.Fatalf("insertJob: %v", err)
+	}
+	post(t, srv, "m1", "+15551234567", "/cancel abc123")
+
+	job, err := getJob(s.db, "abc123")
+	if err != nil || job == nil {
+		t.Fatalf("getJob: %v", err)
+	}
+	if job.Status == jobRunning {
+		t.Error("a stale running row survived /cancel")
+	}
+}
+
+// A job belonging to someone else is not addressable.
+func TestJobCommandsAreScopedToTheSender(t *testing.T) {
+	s, srv, _ := newTestServer(t)
+	other := &Job{ID: "ffff11", Sender: "+15559999999", Status: jobDone, Prompt: "secret"}
+	if err := insertJob(s.db, other); err != nil {
+		t.Fatalf("insertJob: %v", err)
+	}
+	post(t, srv, "m1", "+15551234567", "/job ffff11")
+	if reply := recorded(t, s, "m1").Reply; !strings.Contains(reply, "no job") {
+		t.Errorf("reply = %q — one sender could read another's job", reply)
+	}
+}
+
+func TestJobsCommandListsRecent(t *testing.T) {
+	s, srv, _ := newTestServer(t)
+	post(t, srv, "m0", "+15551234567", "/jobs")
+	if reply := recorded(t, s, "m0").Reply; !strings.Contains(reply, "nothing") {
+		t.Errorf("empty /jobs = %q", reply)
+	}
+
+	post(t, srv, "m1", "+15551234567", "remember this one")
+	waitForJob(t, s, recorded(t, s, "m1").Ref)
+	post(t, srv, "m2", "+15551234567", "/jobs")
+
+	reply := recorded(t, s, "m2").Reply
+	if !strings.Contains(reply, onlyJob(t, s).ID) || !strings.Contains(reply, jobDone) {
+		t.Errorf("/jobs = %q, want the job id and its status", reply)
+	}
+}
+
+// TestOrphanedJobsFailOnRestart: a turn cannot survive its process, so the row
+// must not claim it did.
+func TestOrphanedJobsFailOnRestart(t *testing.T) {
+	s, _, _ := newTestServer(t)
+	if err := insertJob(s.db, &Job{ID: "orph01", Sender: "+15551234567",
+		Status: jobRunning, Prompt: "interrupted"}); err != nil {
+		t.Fatalf("insertJob: %v", err)
+	}
+	n, err := failOrphanedJobs(s.db)
+	if err != nil || n != 1 {
+		t.Fatalf("failOrphanedJobs = %d, %v", n, err)
+	}
+	job, _ := getJob(s.db, "orph01")
+	if job.Status != jobFailed || job.FinishedAt == "" {
+		t.Errorf("orphan = %+v, want failed and finished", job)
+	}
+}
+
+// TestAgentDisabledStillAnswersCommands is the promise that the deterministic
+// half never depends on a model: with no agent binary, /qr and /help still work
+// and conversation is refused in a way that says what to do.
+func TestAgentDisabledStillAnswersCommands(t *testing.T) {
+	s, srv, feed := newTestServer(t)
+	s.agent.enabled = false
+
+	post(t, srv, "m1", "+15551234567", "/feed still works")
+	if feed.count() != 1 {
+		t.Errorf("feed calls = %d — a slash command needed the agent", feed.count())
+	}
+
+	post(t, srv, "m2", "+15551234567", "but conversation does not")
+	reply := recorded(t, s, "m2").Reply
+	if !strings.Contains(reply, "/help") {
+		t.Errorf("refusal = %q, want it to point somewhere useful", reply)
 	}
 }

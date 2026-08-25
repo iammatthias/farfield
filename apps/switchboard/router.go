@@ -19,6 +19,9 @@ const appendWindow = 15 * time.Minute
 // audit vocabulary and the command table cannot drift apart.
 const routeNone = "none"
 
+// routeAgent marks a message that became a conversation rather than a command.
+const routeAgent = "agent"
+
 // routeResult is one dispatched command's outcome.
 type routeResult struct {
 	route     string
@@ -60,6 +63,23 @@ func (s *Server) commands() *capability.Registry {
 			Summary: "reverse your last action",
 			Run:     s.runUndo,
 		},
+		&capability.Spec{
+			Name:    "jobs",
+			Summary: "what the agent is working on",
+			Run:     s.runJobs,
+		},
+		&capability.Spec{
+			Name:    "job",
+			Summary: "show one job's answer again",
+			Args:    []capability.Arg{{Name: "id"}},
+			Run:     s.runJob,
+		},
+		&capability.Spec{
+			Name:    "cancel",
+			Summary: "stop a running job",
+			Args:    []capability.Arg{{Name: "id"}},
+			Run:     s.runCancel,
+		},
 	)
 	// Registered last and closing over the finished registry, so help describes
 	// whatever this surface actually has rather than a list maintained beside it.
@@ -77,10 +97,11 @@ const helpHeader = "farfield switchboard"
 
 // route decides what an inbound message meant and carries it out.
 //
-// A leading slash names a command explicitly. Anything else falls through to
-// implicitFallback, which is the last of the old guessing behaviour and is
-// scheduled to become the agent handoff — at that point a message either names a
-// command or is conversation, with nothing in between.
+// One rule: a leading slash names a command, and anything else is conversation
+// for the agent. Nothing guesses in between any more. The two halves are
+// deliberately unalike — a command is deterministic, in-process, and answered
+// before this function returns; a conversation is a model turn that can take
+// minutes and answers later, out of band.
 func (s *Server) route(ctx context.Context, rec *Message, text string, atts []attachment) routeResult {
 	if name, rest, ok := capability.Split(text); ok {
 		spec, found := s.reg.Lookup(name)
@@ -91,7 +112,25 @@ func (s *Server) route(ctx context.Context, rec *Message, text string, atts []at
 		}
 		return s.dispatch(ctx, rec, spec, rest, atts)
 	}
-	return s.implicitFallback(ctx, rec, text, atts)
+	return s.toAgent(rec, text, atts)
+}
+
+// toAgent hands a message that named no command to the agent.
+//
+// It returns immediately with no reply text. Everything the sender hears comes
+// later and out of band: an acknowledgement if the turn runs long, then the
+// answer. Holding the webhook open for a model turn would invite a delivery
+// timeout and a retry, and a retried "do the thing" is the thing done twice.
+func (s *Server) toAgent(rec *Message, text string, atts []attachment) routeResult {
+	if s.agent == nil || !s.agent.enabled {
+		return failed(routeAgent, fmt.Errorf(
+			"no agent configured — slash commands still work, try /help"))
+	}
+	job, err := s.agent.start(rec, text, atts)
+	if err != nil {
+		return failed(routeAgent, err)
+	}
+	return routeResult{route: routeAgent, ref: job.ID}
 }
 
 // dispatch binds arguments and runs one command.
@@ -114,24 +153,6 @@ func (s *Server) dispatch(ctx context.Context, rec *Message, spec *capability.Sp
 		route: spec.Name, ref: res.Ref, reply: res.Text,
 		image: res.Image, imageName: res.ImageName,
 	}
-}
-
-// implicitFallback handles a message that named no command.
-//
-// This is the behaviour the slash-command rule replaces: a bare link became a
-// bookmark and anything else became a feed post, both by guessing. It stays only
-// until the agent lands, because deleting it first would leave every
-// non-command message with nowhere to go.
-func (s *Server) implicitFallback(ctx context.Context, rec *Message, text string, atts []attachment) routeResult {
-	name := "feed"
-	if len(atts) == 0 && capability.IsURL(text) {
-		name = "bm"
-	}
-	spec, ok := s.reg.Lookup(name)
-	if !ok {
-		return failed(routeNone, fmt.Errorf("no %s command registered", name))
-	}
-	return s.dispatch(ctx, rec, spec, text, atts)
 }
 
 // fetchAttachments pulls inbound photo bytes off the line.
@@ -245,4 +266,112 @@ func displayName(a attachment) string {
 		return n
 	}
 	return "attachment-" + a.ID
+}
+
+// ── the agent's own commands ───────────────────────────────────────────────
+
+// jobList is how many jobs /jobs shows. Small: this arrives as a text message,
+// and the interesting ones are always the newest.
+const jobList = 5
+
+// runJobs answers "what are you doing".
+//
+// It exists because an agent turn happens somewhere the thread cannot see. A
+// job that failed to send its result, or one still running while the sender
+// wandered off, is otherwise invisible.
+func (s *Server) runJobs(_ context.Context, _ *capability.Clients, in capability.Invocation) (capability.Result, error) {
+	jobs, err := listJobs(s.db, in.Actor, jobList)
+	if err != nil {
+		return capability.Result{}, err
+	}
+	if len(jobs) == 0 {
+		return capability.Result{Text: "nothing running, nothing recent"}, nil
+	}
+	var b strings.Builder
+	for i, j := range jobs {
+		if i > 0 {
+			b.WriteString("\n")
+		}
+		fmt.Fprintf(&b, "%s %s · %s · %s", j.ID, j.Status, jobAge(&j), truncate(j.Prompt, 40))
+	}
+	return capability.Result{Text: b.String()}, nil
+}
+
+// runJob repeats one job's answer.
+func (s *Server) runJob(_ context.Context, _ *capability.Clients, in capability.Invocation) (capability.Result, error) {
+	job, err := s.jobFor(in)
+	if err != nil {
+		return capability.Result{}, err
+	}
+	switch job.Status {
+	case jobRunning:
+		return capability.Result{Ref: job.ID,
+			Text: fmt.Sprintf("%s still running · %s", job.ID, jobAge(job))}, nil
+	case jobDone:
+		if strings.TrimSpace(job.Result) == "" {
+			return capability.Result{Ref: job.ID, Text: job.ID + " finished without an answer"}, nil
+		}
+		return capability.Result{Ref: job.ID, Text: job.Result}, nil
+	default:
+		return capability.Result{Ref: job.ID,
+			Text: fmt.Sprintf("%s %s · %s", job.ID, job.Status, firstLine([]byte(job.Error)))}, nil
+	}
+}
+
+// runCancel stops a running turn.
+func (s *Server) runCancel(_ context.Context, _ *capability.Clients, in capability.Invocation) (capability.Result, error) {
+	job, err := s.jobFor(in)
+	if err != nil {
+		return capability.Result{}, err
+	}
+	if job.Status != jobRunning {
+		return capability.Result{Ref: job.ID,
+			Text: fmt.Sprintf("%s already %s", job.ID, job.Status)}, nil
+	}
+	if s.agent == nil || !s.agent.cancel(job.ID) {
+		// The row says running but nothing here is: the process is gone. Close
+		// the row rather than leaving it to the next restart to notice.
+		if err := finishJob(s.db, job.ID, jobFailed, "", "no longer running"); err != nil {
+			return capability.Result{}, err
+		}
+		return capability.Result{Ref: job.ID, Text: job.ID + " was not running · closed it"}, nil
+	}
+	// The turn's own goroutine records the outcome and says so; saying it twice
+	// would spend two messages on one word.
+	return capability.Result{Ref: job.ID}, nil
+}
+
+// jobFor resolves the {id} argument, scoped to the sender.
+//
+// Scoped because "my last job" must never resolve to somebody else's, the same
+// reason /undo is scoped — even though the allowlist means there is usually
+// only one person.
+func (s *Server) jobFor(in capability.Invocation) (*Job, error) {
+	job, err := getJob(s.db, strings.TrimSpace(in.Arg("id")))
+	if err != nil {
+		return nil, err
+	}
+	if job == nil || job.Sender != in.Actor {
+		return nil, fmt.Errorf("no job %s", in.Arg("id"))
+	}
+	return job, nil
+}
+
+// jobAge renders how long a job has been running, or how long it took.
+func jobAge(j *Job) string {
+	start, err := time.Parse(time.RFC3339, j.StartedAt)
+	if err != nil {
+		return "?"
+	}
+	end := time.Now()
+	if j.FinishedAt != "" {
+		if t, err := time.Parse(time.RFC3339, j.FinishedAt); err == nil {
+			end = t
+		}
+	}
+	d := end.Sub(start).Round(time.Second)
+	if d < time.Minute {
+		return fmt.Sprintf("%ds", int(d.Seconds()))
+	}
+	return d.String()
 }

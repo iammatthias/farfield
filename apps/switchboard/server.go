@@ -5,6 +5,7 @@ import (
 	"embed"
 	"log/slog"
 	"net/http"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -48,6 +49,10 @@ type Server struct {
 	// reg is what this switchboard answers: the shared fleet commands plus the
 	// few that only mean something with a message log behind them.
 	reg *capability.Registry
+
+	// agent handles everything that named no command. It is the other half of
+	// the routing rule and the only half that can take minutes.
+	agent *agentRunner
 }
 
 // inboundPerMin bounds one sender's message rate. Far above texting speed, far
@@ -96,7 +101,6 @@ func run(host, port string) error {
 	}
 
 	s.caps = capability.New(siblingConfig())
-	s.reg = s.commands()
 
 	s.photon, err = newPhotonClient(
 		store.Env("SPECTRUM_PROJECT_ID", ""),
@@ -109,6 +113,25 @@ func run(host, port string) error {
 	}
 	defer s.photon.Close()
 
+	// The agent needs the line (to answer out of band) and the database (jobs
+	// outlive the request that made them), so it is built after both.
+	s.agent = newAgentRunner(db, s.photon,
+		store.Env("SWITCHBOARD_STATE_DIR", filepath.Join(filepath.Dir(
+			store.Env("SWITCHBOARD_DB_PATH", "switchboard.sqlite")), "switchboard-agent")))
+	if err := s.agent.prepare(); err != nil {
+		slog.Warn("could not write the agent workspace", "err", err)
+	}
+	s.reg = s.commands()
+
+	// A job that was running when the process died can never finish; leaving the
+	// row as "running" would keep somebody waiting for a message that is not
+	// coming.
+	if n, err := failOrphanedJobs(db); err != nil {
+		slog.Warn("could not close orphaned jobs", "err", err)
+	} else if n > 0 {
+		slog.Warn("closed orphaned jobs from a previous run", "count", n)
+	}
+
 	// Say plainly at boot which half is missing, because either one alone looks
 	// like a working service that silently does nothing.
 	if s.webhookSecret == "" {
@@ -119,6 +142,10 @@ func run(host, port string) error {
 	}
 	if s.photon == nil {
 		slog.Warn("SPECTRUM_PROJECT_ID/SECRET unset — no replies, no photo fetching")
+	}
+	if !s.agent.enabled {
+		slog.Warn("agent unavailable — anything that is not a slash command will be refused",
+			"cmd", s.agent.cmd)
 	}
 
 	defer keys.Attach(s.auth, "switchboard")() // admin-issued keys, when KEYS_DB_PATH is set
@@ -249,6 +276,9 @@ func (s *Server) sweepLoop() {
 		cutoff := time.Now().Add(-retention).UTC().Format(time.RFC3339)
 		if err := pruneMessages(s.db, cutoff); err != nil {
 			slog.Warn("could not prune messages", "err", err)
+		}
+		if err := pruneJobs(s.db, cutoff); err != nil {
+			slog.Warn("could not prune jobs", "err", err)
 		}
 		if err := store.PruneSessions(s.db); err != nil {
 			slog.Warn("could not prune sessions", "err", err)
