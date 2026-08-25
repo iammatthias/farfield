@@ -151,16 +151,36 @@ func TestProfileServesStaleOverNothing(t *testing.T) {
 	}
 }
 
-// TestProfileWordlessPost: an image-only post still renders something human.
+// TestProfileWordlessPost: an image-only post is just the image and the
+// permalink line. A blockquote asserts "these were the post's words", so no
+// text is ever invented to fill one — a placeholder that did got read as his.
 func TestProfileWordlessPost(t *testing.T) {
 	feed := `{"posts":[{"slug":"pic","body":"![](blob://bafyonly)","createdAt":"2026-08-24T00:00:00Z"}]}`
 	p, _ := newProfileTestServer(t, feed, stubContent, stubDaily, 200)
 	doc, _ := fetchProfile(t, p)
-	if !strings.Contains(doc.Sections["feed"], "wordless transmission") {
-		t.Errorf("feed = %q", doc.Sections["feed"])
+	got := doc.Sections["feed"]
+	if strings.Contains(got, ">") && strings.Contains(got, "transmission") {
+		t.Errorf("feed = %q — invented words in a blockquote", got)
 	}
-	if !strings.Contains(doc.Sections["feed"], "bafyonly") {
-		t.Errorf("feed = %q, want the image", doc.Sections["feed"])
+	if strings.Contains(got, "> ") {
+		t.Errorf("feed = %q — an image-only post must have no blockquote at all", got)
+	}
+	if !strings.Contains(got, "bafyonly") || !strings.Contains(got, "iammatthias.com/feed/pic") {
+		t.Errorf("feed = %q, want the image and the permalink", got)
+	}
+	if !strings.HasPrefix(strings.TrimSpace(got), "<img") {
+		t.Errorf("feed = %q, want it to open with the image", got)
+	}
+}
+
+// TestProfileEmptyPostOmitsSection: no words and no image means no section,
+// per the absent-not-empty contract.
+func TestProfileEmptyPostOmitsSection(t *testing.T) {
+	feed := `{"posts":[{"slug":"blank","body":"","createdAt":"2026-08-24T00:00:00Z"}]}`
+	p, _ := newProfileTestServer(t, feed, stubContent, stubDaily, 200)
+	doc, _ := fetchProfile(t, p)
+	if _, present := doc.Sections["feed"]; present {
+		t.Errorf("feed = %q, want the section absent", doc.Sections["feed"])
 	}
 }
 

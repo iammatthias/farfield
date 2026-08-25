@@ -23,7 +23,7 @@ for a `304`). The response:
 ```jsonc
 {
   "sections": {
-    "feed":    "<gfm: latest feed post — blockquote, first image, permalink>",
+    "feed":    "<gfm: latest post — blockquote (only if it has text), first image, permalink>",
     "writing": "<gfm: 3 newest entries from posts/art/recipes/open-source>",
     "daily":   "<gfm: today's generative art plate, linked and captioned>"
   },

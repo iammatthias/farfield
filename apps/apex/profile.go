@@ -185,16 +185,25 @@ func (p *profileServer) renderFeed(ctx context.Context) (string, error) {
 	}
 	text := strings.TrimSpace(blobEmbedRe.ReplaceAllString(post.Body, ""))
 
+	// An image-only post renders as just the image. A blockquote is a claim
+	// that these were the post's own words, so nothing is ever invented to
+	// fill one — an earlier draft put a placeholder there, and it read as if
+	// he had written it.
 	var b strings.Builder
-	if text == "" {
-		b.WriteString("> *(a wordless transmission)*\n")
-	} else {
+	if text != "" {
 		for _, line := range strings.Split(text, "\n") {
 			b.WriteString("> " + line + "\n")
 		}
 	}
 	if firstCID != "" {
-		fmt.Fprintf(&b, "\n<img src=\"https://blobs.farfield.systems/blobs/%s\" width=\"480\" alt=\"\">\n", firstCID)
+		if b.Len() > 0 {
+			b.WriteString("\n")
+		}
+		fmt.Fprintf(&b, "<img src=\"https://blobs.farfield.systems/blobs/%s\" width=\"480\" alt=\"\">\n", firstCID)
+	}
+	if b.Len() == 0 {
+		// No words and no image either — nothing worth splicing.
+		return "", fmt.Errorf("latest post has no renderable content")
 	}
 	fmt.Fprintf(&b, "\n*%s · [permalink](https://iammatthias.com/feed/%s)*",
 		shortDate(post.CreatedAt), post.Slug)
