@@ -8,6 +8,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/iammatthias/farfield/lib/capability"
 	"github.com/iammatthias/farfield/lib/keys"
 	"github.com/iammatthias/farfield/lib/pulse"
 	"github.com/iammatthias/farfield/lib/store"
@@ -17,12 +18,6 @@ import (
 
 //go:embed templates
 var assets embed.FS
-
-// target is one service the /status roll-up probes.
-type target struct {
-	Name string
-	URL  string
-}
 
 // Server holds the running switchboard service.
 type Server struct {
@@ -45,14 +40,14 @@ type Server struct {
 	// rl bounds how fast one sender can drive the fleet.
 	rl *web.RateLimiter
 
-	// Sibling services. switchboard holds their keys so the phone never has to.
-	feed      *feedClient
-	bookmarks *bookmarksClient
-	scrap     *scrapClient
-	qr        *qrClient
-	pulseSvc  svc
+	// caps is the fleet action layer — the same implementations the `farfield`
+	// CLI and the agents' slash commands run. switchboard holds the service keys
+	// so the phone never has to, which is the point of routing through it at all.
+	caps *capability.Clients
 
-	targets []target
+	// reg is what this switchboard answers: the shared fleet commands plus the
+	// few that only mean something with a message log behind them.
+	reg *capability.Registry
 }
 
 // inboundPerMin bounds one sender's message rate. Far above texting speed, far
@@ -98,24 +93,31 @@ func run(host, port string) error {
 		webhookSecret: store.Env("SWITCHBOARD_WEBHOOK_SECRET", ""),
 		allow:         parseAllow(store.Env("SWITCHBOARD_ALLOW", "")),
 		rl:            web.NewRateLimiter(inboundPerMin, time.Minute),
-		targets:       parseTargets(store.Env("SWITCHBOARD_TARGETS", defaultTargets)),
 	}
 
-	s.feed = &feedClient{svc: newSvc(
-		store.Env("FEED_URL", "http://127.0.0.1:8788"), store.Env("SWITCHBOARD_FEED_KEY", ""))}
-	s.bookmarks = &bookmarksClient{
-		svc: newSvc(store.Env("BOOKMARKS_URL", "http://127.0.0.1:8793"),
-			store.Env("SWITCHBOARD_BOOKMARKS_KEY", "")),
-		DefaultCategory: store.Env("SWITCHBOARD_BOOKMARK_CATEGORY", "unsorted"),
-	}
-	s.scrap = &scrapClient{svc: newSvc(
-		store.Env("SCRAP_URL", "http://127.0.0.1:8799"), store.Env("SWITCHBOARD_SCRAP_KEY", ""))}
-	s.qr = &qrClient{
-		svc:       newSvc(store.Env("QR_URL", "http://127.0.0.1:8794"), store.Env("SWITCHBOARD_QR_KEY", "")),
-		PublicURL: strings.TrimRight(store.Env("QR_PUBLIC_URL", "https://qr.farfield.systems"), "/"),
-	}
-	s.pulseSvc = newSvc(store.Env("PULSE_URL", "http://127.0.0.1:8798"),
-		store.Env("SWITCHBOARD_PULSE_KEY", ""))
+	// The keys are switchboard's own minted tokens rather than the apps' env
+	// keys, which is why they are named here instead of read by lib/capability.
+	s.caps = capability.New(capability.Config{
+		FeedURL: store.Env("FEED_URL", "http://127.0.0.1:8788"),
+		FeedKey: store.Env("SWITCHBOARD_FEED_KEY", ""),
+
+		BookmarksURL: store.Env("BOOKMARKS_URL", "http://127.0.0.1:8793"),
+		BookmarksKey: store.Env("SWITCHBOARD_BOOKMARKS_KEY", ""),
+		BookmarkCat:  store.Env("SWITCHBOARD_BOOKMARK_CATEGORY", "unsorted"),
+
+		ScrapURL: store.Env("SCRAP_URL", "http://127.0.0.1:8799"),
+		ScrapKey: store.Env("SWITCHBOARD_SCRAP_KEY", ""),
+
+		QRURL:       store.Env("QR_URL", "http://127.0.0.1:8794"),
+		QRKey:       store.Env("SWITCHBOARD_QR_KEY", ""),
+		QRPublicURL: store.Env("QR_PUBLIC_URL", "https://qr.farfield.systems"),
+
+		PulseURL: store.Env("PULSE_URL", "http://127.0.0.1:8798"),
+		PulseKey: store.Env("SWITCHBOARD_PULSE_KEY", ""),
+
+		Targets: statusTargets(),
+	})
+	s.reg = s.commands()
 
 	s.photon, err = newPhotonClient(
 		store.Env("SPECTRUM_PROJECT_ID", ""),
@@ -149,14 +151,28 @@ func run(host, port string) error {
 	return web.Serve(host, port, web.MaxBody(s.routes(), web.DefaultMaxBody))
 }
 
-// defaultTargets is the fleet as docker-compose names it. Overridden wholesale
-// by SWITCHBOARD_TARGETS.
-const defaultTargets = "content=http://content:8787,feed=http://feed:8788," +
-	"blobs=http://blobs:8789,apex=http://apex:8790,backup=http://backup:8791," +
-	"daily=http://daily:8792,bookmarks=http://bookmarks:8793,qr=http://qr:8794," +
-	"bard=http://bard:8795,dead-presidents=http://dead-presidents:8796," +
-	"library=http://library:8797,pulse=http://pulse:8798,scrap=http://scrap:8799," +
-	"sideload=http://sideload:8800,keys=http://keys:8801"
+// statusTargets is what /status probes.
+//
+// The default comes from lib/fleet rather than a list repeated here — the copy
+// this replaces had drifted out of the registry once already, and a status page
+// that silently stops watching a service is worse than no status page.
+// SWITCHBOARD_TARGETS still overrides it wholesale for an unusual deployment.
+func statusTargets() []capability.Target {
+	if raw := store.Env("SWITCHBOARD_TARGETS", ""); raw != "" {
+		return parseTargets(raw)
+	}
+	// switchboard runs on the host, not in the stack, so compose service names
+	// do not resolve here — probe the address the containers actually publish
+	// on. Skipping itself as well: a service reporting its own health in its
+	// own roll-up is noise, and it is not a container to probe anyway.
+	var out []capability.Target
+	for _, t := range capability.HostTargets(store.Env("FARFIELD_BIND_IP", "127.0.0.1")) {
+		if t.Name != "switchboard" {
+			out = append(out, t)
+		}
+	}
+	return out
+}
 
 // parseAllow builds the sender allowlist, normalizing each entry the same way
 // an inbound handle is normalized so the two can be compared directly.
@@ -171,8 +187,8 @@ func parseAllow(raw string) map[string]bool {
 }
 
 // parseTargets parses a "name=url,name=url" list.
-func parseTargets(raw string) []target {
-	var out []target
+func parseTargets(raw string) []capability.Target {
+	var out []capability.Target
 	for _, part := range strings.Split(raw, ",") {
 		name, url, ok := strings.Cut(strings.TrimSpace(part), "=")
 		if !ok {
@@ -180,7 +196,7 @@ func parseTargets(raw string) []target {
 		}
 		name, url = strings.TrimSpace(name), strings.TrimSpace(url)
 		if name != "" && url != "" {
-			out = append(out, target{Name: name, URL: url})
+			out = append(out, capability.Target{Name: name, URL: url})
 		}
 	}
 	return out

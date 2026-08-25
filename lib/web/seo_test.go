@@ -71,7 +71,7 @@ func TestRobotsHandlerNamesTheSitemapAndAllowsCrawling(t *testing.T) {
 func TestRobotsHandlerOmitsSitemapLineWhenThereIsNone(t *testing.T) {
 	w := httptest.NewRecorder()
 	r := httptest.NewRequest("GET", "/robots.txt", nil)
-	r.Host = "bard.farfield.systems"
+	r.Host = "library.farfield.systems"
 
 	RobotsHandler("")(w, r)
 

@@ -106,7 +106,7 @@ func TestSnapshotSkipsEmptyDatabases(t *testing.T) {
 	}
 	defer reg.Close()
 
-	// A tables-free app database, the shape apex/bard keep for their sidecar.
+	// A tables-free app database, the shape apex keeps for its sidecar.
 	empty, err := store.OpenDB(filepath.Join(dir, "apex.sqlite"))
 	if err != nil {
 		t.Fatal(err)

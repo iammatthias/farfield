@@ -113,9 +113,9 @@ const assetVersionToken = "__THEME_VERSION__"
 // StampAssets substitutes the real asset version into a static HTML shell.
 //
 // Apps that render through lib/web's shared layout get cache-busting for free.
-// The handful that ship a pre-built index.html — apex's landing page, bard,
-// dead-presidents — have no template pass, so they had hand-written version
-// strings that never tracked the theme. Since the theme is served
+// The handful that ship a pre-built index.html — apex's landing page among
+// them — have no template pass, so they had hand-written version strings that
+// never tracked the theme. Since the theme is served
 // `immutable, max-age=31536000`, a stale hand-written string meant a fleet-wide
 // theme change could not reach a warm cache for a year. Call this once at
 // startup on any embedded shell that links a shared asset.

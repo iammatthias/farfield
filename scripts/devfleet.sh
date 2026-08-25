@@ -14,7 +14,7 @@ LOGS=$DATA/logs
 mkdir -p "$DATA/blobs-data" "$LOGS"
 
 # app:port, in dependency order (blobs first — others upload to it)
-FLEET="blobs:8789 content:8787 feed:8788 apex:8790 backup:8791 daily:8792 bookmarks:8793 qr:8794 bard:8795 dead-presidents:8796 library:8797 pulse:8798 scrap:8799 sideload:8800 keys:8801 switchboard:8802"
+FLEET="blobs:8789 content:8787 feed:8788 apex:8790 backup:8791 daily:8792 bookmarks:8793 qr:8794 library:8797 pulse:8798 scrap:8799 sideload:8800 keys:8801 switchboard:8802"
 
 stop() {
   for pair in $FLEET; do

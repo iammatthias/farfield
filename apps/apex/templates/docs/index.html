@@ -11,22 +11,22 @@
                 </div>
 
                 <figure class="observation" aria-label="Ingress diagram: the Cloudflare edge reaches the fleet through a tunnel to one Caddy reverse proxy, which routes to every service; backup is reachable only on the tailnet.">
-                  <svg viewBox="0 0 640 424" role="img">
+                  <svg viewBox="0 0 640 372" role="img">
                     <g style="font-family:var(--font-mono);font-size:11px" fill="currentColor">
                       <!-- the edge -->
-                      <circle cx="42" cy="203" r="4.5" fill="currentColor"/>
-                      <text x="42" y="229" text-anchor="middle" opacity="0.6">edge</text>
+                      <circle cx="42" cy="177" r="4.5" fill="currentColor"/>
+                      <text x="42" y="203" text-anchor="middle" opacity="0.6">edge</text>
                       <!-- the tunnel: a dashed trajectory -->
-                      <path d="M 50 201 C 110 169, 175 169, 232 199" fill="none" stroke="currentColor" stroke-width="1" stroke-dasharray="4 4" opacity="0.55"/>
-                      <text x="142" y="165" text-anchor="middle" opacity="0.6">cloudflare tunnel</text>
+                      <path d="M 50 175 C 110 143, 175 143, 232 173" fill="none" stroke="currentColor" stroke-width="1" stroke-dasharray="4 4" opacity="0.55"/>
+                      <text x="142" y="139" text-anchor="middle" opacity="0.6">cloudflare tunnel</text>
                       <!-- caddy: signal in field -->
-                      <circle cx="246" cy="203" r="11" fill="none" stroke="var(--accent)" stroke-width="1.2" opacity="0.9"/>
-                      <circle cx="246" cy="203" r="3" fill="var(--accent)"/>
-                      <text x="246" y="233" text-anchor="middle" opacity="0.7">caddy :8080</text>
+                      <circle cx="246" cy="177" r="11" fill="none" stroke="var(--accent)" stroke-width="1.2" opacity="0.9"/>
+                      <circle cx="246" cy="177" r="3" fill="var(--accent)"/>
+                      <text x="246" y="207" text-anchor="middle" opacity="0.7">caddy :8080</text>
                       <!-- the bus: one trunk, one spine, a tick per service -->
                       <g stroke="currentColor" stroke-width="0.75" opacity="0.25" fill="none">
-                        <line x1="259" y1="203" x2="432" y2="203"/>
-                        <line x1="432" y1="34" x2="432" y2="372"/>
+                        <line x1="259" y1="177" x2="432" y2="177"/>
+                        <line x1="432" y1="34" x2="432" y2="320"/>
                       </g>
                       <!-- the services -->
                       <g opacity="0.85">
@@ -53,29 +53,23 @@
                         <text x="462" y="194">qr</text>
                         <line x1="432" y1="216" x2="446" y2="216" stroke="currentColor" stroke-width="0.75" opacity="0.25"/>
                         <circle cx="450" cy="216" r="3.5"/>
-                        <text x="462" y="220">bard</text>
+                        <text x="462" y="220">pulse</text>
                         <line x1="432" y1="242" x2="446" y2="242" stroke="currentColor" stroke-width="0.75" opacity="0.25"/>
                         <circle cx="450" cy="242" r="3.5"/>
-                        <text x="462" y="246">dead-presidents</text>
+                        <text x="462" y="246">scrap</text>
                         <line x1="432" y1="268" x2="446" y2="268" stroke="currentColor" stroke-width="0.75" opacity="0.25"/>
                         <circle cx="450" cy="268" r="3.5"/>
-                        <text x="462" y="272">pulse</text>
+                        <text x="462" y="272">sideload</text>
                         <line x1="432" y1="294" x2="446" y2="294" stroke="currentColor" stroke-width="0.75" opacity="0.25"/>
                         <circle cx="450" cy="294" r="3.5"/>
-                        <text x="462" y="298">scrap</text>
+                        <text x="462" y="298">keys</text>
                         <line x1="432" y1="320" x2="446" y2="320" stroke="currentColor" stroke-width="0.75" opacity="0.25"/>
                         <circle cx="450" cy="320" r="3.5"/>
-                        <text x="462" y="324">sideload</text>
-                        <line x1="432" y1="346" x2="446" y2="346" stroke="currentColor" stroke-width="0.75" opacity="0.25"/>
-                        <circle cx="450" cy="346" r="3.5"/>
-                        <text x="462" y="350">keys</text>
-                        <line x1="432" y1="372" x2="446" y2="372" stroke="currentColor" stroke-width="0.75" opacity="0.25"/>
-                        <circle cx="450" cy="372" r="3.5"/>
-                        <text x="462" y="376">apex</text>
+                        <text x="462" y="324">apex</text>
                       </g>
                       <!-- backup: deliberately off the public path -->
-                      <circle cx="450" cy="406" r="3.5" fill="none" stroke="currentColor" opacity="0.7"/>
-                      <text x="462" y="410" opacity="0.6">backup &middot; tailnet only</text>
+                      <circle cx="450" cy="354" r="3.5" fill="none" stroke="currentColor" opacity="0.7"/>
+                      <text x="462" y="358" opacity="0.6">backup &middot; tailnet only</text>
                     </g>
                   </svg>
                   <figcaption>Observation 01 &middot; ingress &mdash; edge &rarr; tunnel &rarr; caddy &rarr; services</figcaption>
@@ -175,22 +169,6 @@
                         <div class="url">sideload.farfield.systems</div>
                         <div class="desc">
                             One-tap OTA installs of ad-hoc iOS builds
-                        </div>
-                    </a>
-                    <a class="app-card" href="bard.html">
-                        <div class="name">bard</div>
-                        <div class="url">bard.pure---internet.com</div>
-                        <div class="desc">
-                            Onchain GPT: Shakespeare weights streamed from
-                            Ethereum, verified and run in the browser
-                        </div>
-                    </a>
-                    <a class="app-card" href="dead-presidents.html">
-                        <div class="name">dead presidents</div>
-                        <div class="url">dead-presidents.pure---internet.com</div>
-                        <div class="desc">
-                            Char-level GPT trained on presidential speeches,
-                            streamed and run entirely in the browser
                         </div>
                     </a>
                     <a class="app-card" href="backup.html">

@@ -11,7 +11,7 @@
 # lib/theme/*, a binary must be rebuilt to serve the change. `make dev`
 # handles that; it exists so nobody debugs a stale binary again.
 
-APPS := apex backup bard blobs bookmarks content daily dead-presidents feed keys library pulse qr scrap sideload
+APPS := apex backup blobs bookmarks content daily farfield feed keys library pulse qr scrap sideload switchboard
 
 .PHONY: build test race vet dev dev-stop e2e
 

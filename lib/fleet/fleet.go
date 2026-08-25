@@ -28,10 +28,23 @@ type Service struct {
 	// Public is the hostname the Cloudflare tunnel exposes, "" when the
 	// service is tailnet-only and has no public face.
 	Public string
+	// Host marks a service that runs on the host as a systemd unit rather
+	// than in the compose stack. It is still a farfield service and still
+	// answers on Port — it simply is not a container, so the drift tests
+	// expect it to be absent from docker-compose.yml rather than present.
+	//
+	// switchboard is the first: it hands messages to an agent, which means
+	// exec'ing a binary and reaching herdr, neither of which a distroless
+	// container with one volume can do.
+	Host bool
 }
 
-// services is the registry, in port order. epochs is deliberately absent —
-// it moved to a standalone Cloudflare Worker.
+// services is the registry, in port order. Two absences are deliberate and
+// both are the same story: epochs moved to a standalone Cloudflare Worker, and
+// bard and dead-presidents moved to the pure-internet monorepo. They were
+// always projects that happened to be hosted here rather than parts of the
+// content backend, and 8795/8796 are left unassigned so the ports still read
+// as theirs to anyone comparing this list against a running box.
 var services = []Service{
 	{Name: "content", Port: 8787, Public: "content.farfield.systems"},
 	{Name: "feed", Port: 8788, Public: "feed.farfield.systems"},
@@ -41,14 +54,12 @@ var services = []Service{
 	{Name: "daily", Port: 8792, Public: "daily.farfield.systems"},
 	{Name: "bookmarks", Port: 8793, Public: "bookmarks.farfield.systems"},
 	{Name: "qr", Port: 8794, Public: "qr.farfield.systems"},
-	{Name: "bard", Port: 8795, Public: "bard.farfield.systems"},
-	{Name: "dead-presidents", Port: 8796, Public: "dead-presidents.farfield.systems"},
 	{Name: "library", Port: 8797, Public: "library.farfield.systems"},
 	{Name: "pulse", Port: 8798, Public: "pulse.farfield.systems"},
 	{Name: "scrap", Port: 8799, Public: "scrap.farfield.systems"},
 	{Name: "sideload", Port: 8800, Public: "sideload.farfield.systems"},
 	{Name: "keys", Port: 8801, Public: "keys.farfield.systems"},
-	{Name: "switchboard", Port: 8802, Public: "switchboard.farfield.systems"},
+	{Name: "switchboard", Port: 8802, Public: "switchboard.farfield.systems", Host: true},
 }
 
 // Services returns every service, in port order, as a fresh slice the caller
@@ -71,6 +82,9 @@ func Lookup(name string) (Service, bool) {
 
 // InternalStatusURL is the service's /status probe address on the compose
 // network, where service names resolve as hostnames.
+//
+// Meaningless for a Host service, which has no compose DNS name — probe those
+// at the address the containers publish on instead.
 func (s Service) InternalStatusURL() string {
 	return fmt.Sprintf("http://%s:%d/status", s.Name, s.Port)
 }

@@ -326,7 +326,7 @@ func (s *Server) dispatchWebhook(w http.ResponseWriter, r *http.Request, env *en
 		ChatGUID: msg.Space.ID, Body: text,
 	}
 	if text == "" && len(atts) == 0 {
-		rec.Route, rec.Status = "none", statusIgnored
+		rec.Route, rec.Status = routeNone, statusIgnored
 		if err := recordMessage(s.db, rec); err != nil {
 			slog.Error("record message", "err", err)
 		}

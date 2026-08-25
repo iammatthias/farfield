@@ -11,15 +11,15 @@ import (
 // Message is one inbound iMessage and what switchboard did with it. The row is
 // three things at once: the idempotency record (Photon retries, and a webhook
 // delivered twice must not post twice), the audit log the console renders, and
-// the undo/append target — /undo and `+` both work by finding the most recent
-// successful row for a sender.
+// the undo/append target — /undo and /append both work by finding the most
+// recent successful row for a sender.
 type Message struct {
-	ID         string `json:"id"`     // Photon's message id — the idempotency key
+	ID         string `json:"id"` // Photon's message id — the idempotency key
 	WebhookID  string `json:"webhookId"`
 	Sender     string `json:"sender"` // E.164, normalized
 	ChatGUID   string `json:"chatGuid"`
 	Body       string `json:"body"`
-	Route      string `json:"route"`  // feed | bookmark | scrap | qr | status | ...
+	Route      string `json:"route"`  // a command name from the registry, or "none"
 	Ref        string `json:"ref"`    // id of whatever was created (slug, bookmark id)
 	Reply      string `json:"reply"`  // what we texted back; replayed on a retry
 	Status     string `json:"status"` // ok | ignored | error

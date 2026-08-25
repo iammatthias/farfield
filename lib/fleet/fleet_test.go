@@ -65,6 +65,18 @@ func TestComposeMatchesRegistry(t *testing.T) {
 
 	for _, s := range Services() {
 		got, ok := compose[s.Name]
+		// A Host service runs as a systemd unit, so its absence from compose is
+		// the correct state and its presence is the bug — that shape of drift
+		// (a service defined in two places, only one of which is running) is
+		// exactly what leaves a port answering from something nobody expected.
+		if s.Host {
+			if ok {
+				t.Errorf("%s is marked Host in the registry but still has a "+
+					"docker-compose.yml service — it would run twice on port %d", s.Name, s.Port)
+				delete(compose, s.Name)
+			}
+			continue
+		}
 		if !ok {
 			t.Errorf("registry service %q missing from docker-compose.yml", s.Name)
 			continue

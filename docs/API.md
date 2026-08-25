@@ -5,8 +5,6 @@ single-binary services; the website reads three of them.
 
 | Service   | URL                                  | Holds                                   |
 |-----------|--------------------------------------|-----------------------------------------|
-| bard      | `https://bard.pure---internet.com`  | browser inference from sealed on-chain weights |
-| dead-presidents | `https://dead-presidents.pure---internet.com` | char-level GPT on presidential speeches, run in-browser |
 | content   | `https://content.farfield.systems`   | collections, entries, series fragments  |
 | feed      | `https://feed.farfield.systems`      | short ephemeral posts                   |
 | blobs     | `https://blobs.farfield.systems`     | image/media bytes + metadata            |
@@ -16,8 +14,11 @@ single-binary services; the website reads three of them.
 | switchboard | `https://switchboard.farfield.systems` | iMessage → the fleet (webhook only)  |
 | apex      | `https://farfield.systems`           | the standalone landing page (not an API)|
 
-bard and dead-presidents moved to the pure---internet umbrella (2026-08);
-their `farfield.systems` hostnames still resolve during the transition.
+`bard` and `dead-presidents` are no longer farfield services. They were always
+projects that happened to be hosted here rather than parts of the content
+backend, and in 2026-08 they moved to the pure-internet monorepo — now
+`bard.pure---internet.com` and `dead-presidents.pure---internet.com`. Their
+`farfield.systems` hostnames are retired and no longer resolve.
 
 The `backup` service is internal (tailnet-only) and has no public API. The
 `keys` service (`https://keys.farfield.systems`) is the admin credential

@@ -93,10 +93,10 @@ func snapshotOne(db *sql.DB, t appTarget, blobsURL, apiKey string) (cid string, 
 	defer os.Remove(tmp)
 
 	// An empty database is not a backup — there is nothing to restore. Some
-	// apps (apex, bard, dead-presidents) keep a database purely to anchor
-	// their telemetry sidecar; since the requests tables moved out, those
-	// files hold zero tables and snapshotting them would only record noise
-	// that `backup verify` rightly rejects.
+	// apps (apex, for one) keep a database purely to anchor their telemetry
+	// sidecar; since the requests tables moved out, those files hold zero
+	// tables and snapshotting them would only record noise that
+	// `backup verify` rightly rejects.
 	var tables int
 	if err := appDB.QueryRow(`SELECT COUNT(*) FROM sqlite_master
 		WHERE type = 'table'`).Scan(&tables); err != nil {

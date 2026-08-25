@@ -16,6 +16,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/iammatthias/farfield/lib/capability"
 	"github.com/iammatthias/farfield/lib/web"
 )
 
@@ -49,10 +50,15 @@ func newTestServer(t *testing.T) (*Server, *httptest.Server, *feedStub) {
 		allow:         map[string]bool{"+15551234567": true},
 		rl:            web.NewRateLimiter(inboundPerMin, time.Minute),
 	}
-	s.feed = &feedClient{svc: newSvc(feedSrv.URL, "k")}
-	s.bookmarks = &bookmarksClient{svc: newSvc(feedSrv.URL, "k")}
-	s.scrap = &scrapClient{svc: newSvc(feedSrv.URL, "k")}
-	s.qr = &qrClient{svc: newSvc(feedSrv.URL, "k")}
+	// Every sibling points at the one stub; lib/capability does not care that
+	// feed, bookmarks, scrap and qr happen to be the same server here.
+	s.caps = capability.New(capability.Config{
+		FeedURL: feedSrv.URL, FeedKey: "k",
+		BookmarksURL: feedSrv.URL, BookmarksKey: "k",
+		ScrapURL: feedSrv.URL, ScrapKey: "k",
+		QRURL: feedSrv.URL, QRKey: "k",
+	})
+	s.reg = s.commands()
 
 	srv := httptest.NewServer(s.routes())
 	t.Cleanup(srv.Close)
@@ -296,64 +302,6 @@ func TestURLWithTextBecomesPost(t *testing.T) {
 	}
 }
 
-func TestSplitCommand(t *testing.T) {
-	cases := []struct{ in, cmd, rest string }{
-		{"/qr https://x.com", "qr", "https://x.com"},
-		{"/help", "help", ""},
-		{"+ more words", "+", "more words"},
-		{"+no space", "+", "no space"},
-		{"just a thought", "", "just a thought"},
-		{"/TAGS a, b", "tags", "a, b"},
-		{"", "", ""},
-	}
-	for _, c := range cases {
-		cmd, rest := splitCommand(c.in)
-		if cmd != c.cmd || rest != c.rest {
-			t.Errorf("splitCommand(%q) = (%q, %q), want (%q, %q)",
-				c.in, cmd, rest, c.cmd, c.rest)
-		}
-	}
-}
-
-func TestExtractTags(t *testing.T) {
-	cases := []struct {
-		in   string
-		body string
-		tags []string
-	}{
-		{"a walk #life #photo", "a walk", []string{"life", "photo"}},
-		{"no tags here", "no tags here", nil},
-		{"# heading stays", "# heading stays", nil},
-		{"body\n\n# not a tag", "body\n\n# not a tag", nil},
-		{"mid #tag sentence", "mid #tag sentence", nil},
-		{"dupes #a #a", "dupes", []string{"a"}},
-	}
-	for _, c := range cases {
-		body, tags := extractTags(c.in)
-		if body != c.body {
-			t.Errorf("extractTags(%q) body = %q, want %q", c.in, body, c.body)
-		}
-		if strings.Join(tags, ",") != strings.Join(c.tags, ",") {
-			t.Errorf("extractTags(%q) tags = %v, want %v", c.in, tags, c.tags)
-		}
-	}
-}
-
-func TestIsBareURL(t *testing.T) {
-	yes := []string{"https://example.com", "http://a.b/c?d=e"}
-	no := []string{"", "example.com", "hi https://example.com", "ftp://x.y", "/qr"}
-	for _, s := range yes {
-		if !isBareURL(s) {
-			t.Errorf("isBareURL(%q) = false, want true", s)
-		}
-	}
-	for _, s := range no {
-		if isBareURL(s) {
-			t.Errorf("isBareURL(%q) = true, want false", s)
-		}
-	}
-}
-
 func TestNormalizeHandle(t *testing.T) {
 	cases := []struct{ in, want string }{
 		{"+1 (555) 123-4567", "+15551234567"},
@@ -521,8 +469,8 @@ func TestPhotoRoutesToFeedNotIgnored(t *testing.T) {
 	if rec == nil {
 		t.Fatal("photo message was not recorded at all")
 	}
-	if rec.Route != routeFeed {
-		t.Errorf("route = %q, want %q — the photo was ignored", rec.Route, routeFeed)
+	if rec.Route != "feed" {
+		t.Errorf("route = %q, want %q — the photo was ignored", rec.Route, "feed")
 	}
 	if rec.Body != "Test" {
 		t.Errorf("body = %q, want %q — the caption was lost", rec.Body, "Test")
@@ -532,5 +480,106 @@ func TestPhotoRoutesToFeedNotIgnored(t *testing.T) {
 	// matters is that it tried, rather than silently dropping the message.
 	if rec.Status != statusError {
 		t.Errorf("status = %q, want %q (no line configured in tests)", rec.Status, statusError)
+	}
+}
+
+// ── slash-command dispatch ─────────────────────────────────────────────────
+
+// recorded returns the logged outcome for one delivered message.
+func recorded(t *testing.T, s *Server, id string) *Message {
+	t.Helper()
+	rec, err := getMessage(s.db, id)
+	if err != nil || rec == nil {
+		t.Fatalf("message %s not recorded: %v", id, err)
+	}
+	return rec
+}
+
+// TestSlashCommandDispatchesFromTheRegistry pins the path that replaces the old
+// hand-written switch: the leading slash names a command, the registry resolves
+// it, and the row records the command's own name so the audit vocabulary and the
+// command table stay the same list.
+func TestSlashCommandDispatchesFromTheRegistry(t *testing.T) {
+	s, srv, feed := newTestServer(t)
+	post(t, srv, "m1", "+15551234567", "/feed a deliberate post #life")
+
+	if feed.count() != 1 {
+		t.Fatalf("feed calls = %d, want 1", feed.count())
+	}
+	feed.mu.Lock()
+	body, _ := feed.posts[0]["body"].(string)
+	tags, _ := feed.posts[0]["tags"].([]any)
+	feed.mu.Unlock()
+	if body != "a deliberate post" {
+		t.Errorf("body = %q, want the hashtag stripped", body)
+	}
+	if len(tags) != 1 || tags[0] != "life" {
+		t.Errorf("tags = %v, want [life]", tags)
+	}
+
+	rec := recorded(t, s, "m1")
+	if rec.Route != "feed" || rec.Status != statusOK {
+		t.Errorf("route/status = %q/%q, want feed/ok", rec.Route, rec.Status)
+	}
+}
+
+// An alias resolves to the same command.
+func TestSlashCommandAlias(t *testing.T) {
+	s, srv, feed := newTestServer(t)
+	post(t, srv, "m1", "+15551234567", "/post via the alias")
+	if feed.count() != 1 {
+		t.Fatalf("feed calls = %d, want 1", feed.count())
+	}
+	if got := recorded(t, s, "m1").Route; got != "feed" {
+		t.Errorf("route = %q, want feed — an alias must record its canonical name", got)
+	}
+}
+
+// TestUnknownSlashCommandExplains: a mistyped command is someone misremembering
+// a name, so it answers with something actionable and touches no service.
+func TestUnknownSlashCommandExplains(t *testing.T) {
+	s, srv, feed := newTestServer(t)
+	post(t, srv, "m1", "+15551234567", "/nope do a thing")
+
+	if feed.count() != 0 {
+		t.Error("an unknown command reached a service")
+	}
+	rec := recorded(t, s, "m1")
+	if rec.Status != statusError {
+		t.Errorf("status = %q, want %q", rec.Status, statusError)
+	}
+	if !strings.Contains(rec.Reply, "/nope") || !strings.Contains(rec.Reply, "/help") {
+		t.Errorf("reply = %q, want it to name the command and point at /help", rec.Reply)
+	}
+}
+
+// A command missing a required argument answers with its usage rather than a
+// bare failure — over a text message that reply is the only documentation.
+func TestMissingArgumentAnswersWithUsage(t *testing.T) {
+	s, srv, _ := newTestServer(t)
+	post(t, srv, "m1", "+15551234567", "/qr")
+	if reply := recorded(t, s, "m1").Reply; !strings.Contains(reply, "/qr <target>") {
+		t.Errorf("reply = %q, want the usage", reply)
+	}
+}
+
+// TestHelpListsEveryRegisteredCommand is the drift guard at the switchboard
+// level: help is generated over this surface's registry, so a command added
+// without documentation is impossible.
+func TestHelpListsEveryRegisteredCommand(t *testing.T) {
+	s, srv, _ := newTestServer(t)
+	post(t, srv, "m1", "+15551234567", "/help")
+
+	reply := recorded(t, s, "m1").Reply
+	for _, spec := range s.reg.Specs() {
+		if !strings.Contains(reply, spec.Usage()) {
+			t.Errorf("/help omits %q", spec.Usage())
+		}
+	}
+	// The commands that only exist here, beside the shared fleet ones.
+	for _, want := range []string{"/undo", "/append", "/tags"} {
+		if !strings.Contains(reply, want) {
+			t.Errorf("/help omits %s", want)
+		}
 	}
 }

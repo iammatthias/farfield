@@ -3,12 +3,11 @@ go 1.27.0
 use (
 	./apps/apex
 	./apps/backup
-	./apps/bard
 	./apps/blobs
 	./apps/bookmarks
 	./apps/content
 	./apps/daily
-	./apps/dead-presidents
+	./apps/farfield
 	./apps/feed
 	./apps/keys
 	./apps/library
@@ -19,6 +18,7 @@ use (
 	./apps/switchboard
 	./lib/auth
 	./lib/backup
+	./lib/capability
 	./lib/cid
 	./lib/fleet
 	./lib/keys

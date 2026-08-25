@@ -3,12 +3,11 @@
 /opds
 /apps/apex/apex
 /apps/backup/backup
-/apps/bard/bard
 /apps/blobs/blobs
 /apps/bookmarks/bookmarks
 /apps/daily/daily
 /apps/content/content
-/apps/dead-presidents/dead-presidents
+/apps/farfield/farfield
 /apps/feed/feed
 /apps/keys/keys
 /apps/library/library
@@ -16,6 +15,7 @@
 /apps/qr/qr
 /apps/scrap/scrap
 /apps/sideload/sideload
+/apps/switchboard/switchboard
 
 # Local build/dev output and e2e deps.
 tmp/

@@ -4,6 +4,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"slices"
 	"strings"
 	"testing"
 )
@@ -69,14 +70,16 @@ func TestEveryReadSettingIsDelivered(t *testing.T) {
 	delivered := set(envComposeRe.FindAllStringSubmatch(string(composeRaw), -1))
 	documented := set(envDocRe.FindAllStringSubmatch(string(exampleRaw), -1))
 
-	// Every name the Go sources actually read.
-	read := map[string]string{} // name -> first file that reads it
+	// Every name the Go sources actually read, and every file that reads it.
+	// All readers, not just the first: a name is only exempt below when nothing
+	// in a container reads it, and one reader cannot answer that.
+	read := map[string][]string{} // name -> files that read it
 	for _, dir := range []string{"apps", "lib"} {
 		walkGo(t, filepath.Join(root, dir), func(path string, src []byte) {
+			rel, _ := filepath.Rel(root, path)
 			for _, m := range envReadRe.FindAllStringSubmatch(string(src), -1) {
-				if _, seen := read[m[1]]; !seen {
-					rel, _ := filepath.Rel(root, path)
-					read[m[1]] = rel
+				if !slices.Contains(read[m[1]], rel) {
+					read[m[1]] = append(read[m[1]], rel)
 				}
 			}
 		})
@@ -85,12 +88,38 @@ func TestEveryReadSettingIsDelivered(t *testing.T) {
 		t.Fatal("found no os.Getenv/store.Env calls at all — the scan is broken, not the config")
 	}
 
+	// A Host service is not a container, so compose is the wrong place to look
+	// for its settings — they arrive through its systemd EnvironmentFile. A
+	// name read only by host services is therefore correctly absent here, and
+	// accusing it would train everyone to ignore this test.
+	hostDirs := []string{}
+	for _, svc := range Services() {
+		if svc.Host {
+			hostDirs = append(hostDirs, filepath.Join("apps", svc.Name)+string(filepath.Separator))
+		}
+	}
+	onlyHostReads := func(files []string) bool {
+		for _, f := range files {
+			hosted := false
+			for _, dir := range hostDirs {
+				if strings.HasPrefix(f, dir) {
+					hosted = true
+					break
+				}
+			}
+			if !hosted {
+				return false
+			}
+		}
+		return len(files) > 0
+	}
+
 	for name, where := range read {
-		if !documented[name] || delivered[name] {
+		if !documented[name] || delivered[name] || onlyHostReads(where) {
 			continue
 		}
 		t.Errorf("%s is read by %s and documented in .env.example, but no service in "+
-			"docker-compose.yml passes it — setting it on the host does nothing", name, where)
+			"docker-compose.yml passes it — setting it on the host does nothing", name, where[0])
 	}
 }
 

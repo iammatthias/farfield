@@ -1,4 +1,22 @@
-package main
+// Package capability is the fleet's action layer: one description of everything
+// farfield can be asked to do, and one implementation of each.
+//
+// Before this package the same knowledge lived in two shapes and one of them was
+// a lie. switchboard held typed clients for its sibling services and a hardcoded
+// `switch` naming the commands, beside a hand-written help string that nothing
+// checked against either. Anything else wanting to post to feed — a CLI, an
+// agent, a cron job — had to rebuild the clients or fall back to curl.
+//
+// So the commands are declared once, as data, and every surface derives from that
+// declaration: the `farfield` CLI, the markdown slash commands agents load out of
+// ~/.claude/commands, switchboard's deterministic dispatch, and the help text all
+// read the same table. A command that is not in the table does not exist on any of
+// them, and help cannot drift from behaviour because it is generated from it.
+//
+// This file holds the service clients. Keys live with the caller and never with
+// the phone — that is the whole reason switchboard exists rather than letting a
+// device hold credentials.
+package capability
 
 import (
 	"bytes"
@@ -9,22 +27,23 @@ import (
 	"mime/multipart"
 	"net/http"
 	"net/textproto"
-	"sort"
 	"strings"
-	"sync"
 	"time"
 )
 
-// namedFile is one inbound photo on its way to the app that will store it.
-type namedFile struct {
+// UserAgent identifies farfield's own callers to the Cloudflare edge, which is
+// choosy about some default client strings and answers 403 to several of them.
+const UserAgent = "farfield-capability/1.0"
+
+// NamedFile is one inbound photo on its way to the app that will store it.
+type NamedFile struct {
 	Name string
 	Mime string
 	Data []byte
 }
 
-// svc is the shared shape of a sibling farfield service: a base URL and the
-// server-side API key for it. Keys live here and only here — the phone never
-// holds one, which is the point of routing through switchboard at all.
+// svc is the shared shape of a farfield service: a base URL and the API key for
+// it.
 type svc struct {
 	URL string
 	Key string
@@ -53,7 +72,7 @@ func (s svc) do(ctx context.Context, method, path, contentType string, body io.R
 	if contentType != "" {
 		req.Header.Set("Content-Type", contentType)
 	}
-	req.Header.Set("User-Agent", userAgent)
+	req.Header.Set("User-Agent", UserAgent)
 	resp, err := s.hc.Do(req)
 	if err != nil {
 		return nil, err
@@ -64,7 +83,7 @@ func (s svc) do(ctx context.Context, method, path, contentType string, body io.R
 		return nil, err
 	}
 	if resp.StatusCode >= 300 {
-		return nil, fmt.Errorf("%s: %s", resp.Status, firstLine(out))
+		return nil, fmt.Errorf("%s: %s", resp.Status, FirstLine(out))
 	}
 	return out, nil
 }
@@ -77,8 +96,10 @@ func (s svc) postJSON(ctx context.Context, path string, payload any) ([]byte, er
 	return s.do(ctx, http.MethodPost, path, "application/json", bytes.NewReader(buf))
 }
 
-// firstLine keeps an error reply to one readable line for a text message.
-func firstLine(b []byte) string {
+// FirstLine keeps an error reply to one readable line. Errors from here end up in
+// a text message as often as in a terminal, so a wall of JSON is never the right
+// answer.
+func FirstLine(b []byte) string {
 	s := strings.TrimSpace(string(b))
 	if i := strings.IndexByte(s, '\n'); i >= 0 {
 		s = s[:i]
@@ -91,7 +112,8 @@ func firstLine(b []byte) string {
 
 // ── feed ───────────────────────────────────────────────────────────────────
 
-type feedClient struct{ svc }
+// FeedClient publishes short posts.
+type FeedClient struct{ svc }
 
 type feedPost struct {
 	Slug string   `json:"slug"`
@@ -101,8 +123,9 @@ type feedPost struct {
 
 // CreatePost publishes a post. With photos it posts multipart to feed's media
 // endpoint, which uploads the bytes to blobs and embeds the resulting CIDs —
-// switchboard deliberately never touches blobs itself.
-func (c *feedClient) CreatePost(ctx context.Context, body string, tags []string, files []namedFile) (string, error) {
+// nothing here ever touches blobs directly, because feed owns the post that
+// references them.
+func (c *FeedClient) CreatePost(ctx context.Context, body string, tags []string, files []NamedFile) (string, error) {
 	if len(files) == 0 {
 		out, err := c.postJSON(ctx, "/api/posts", map[string]any{
 			"body": body, "tags": orEmpty(tags),
@@ -160,7 +183,7 @@ func decodeSlug(b []byte) (string, error) {
 	return p.Slug, nil
 }
 
-func (c *feedClient) getPost(ctx context.Context, slug string) (*feedPost, error) {
+func (c *FeedClient) getPost(ctx context.Context, slug string) (*feedPost, error) {
 	out, err := c.do(ctx, http.MethodGet, "/api/posts/"+slug, "", nil)
 	if err != nil {
 		return nil, err
@@ -175,7 +198,7 @@ func (c *feedClient) getPost(ctx context.Context, slug string) (*feedPost, error
 // AppendToPost adds a paragraph to an existing post. feed's update replaces the
 // whole record, so the current body is read first and the new text appended —
 // the alternative would silently discard everything already there.
-func (c *feedClient) AppendToPost(ctx context.Context, slug, body string, tags []string) (string, error) {
+func (c *FeedClient) AppendToPost(ctx context.Context, slug, body string, tags []string) (string, error) {
 	cur, err := c.getPost(ctx, slug)
 	if err != nil {
 		return "", err
@@ -184,12 +207,12 @@ func (c *feedClient) AppendToPost(ctx context.Context, slug, body string, tags [
 	if body != "" {
 		merged = strings.TrimSpace(merged + "\n\n" + body)
 	}
-	_, err = c.putPost(ctx, slug, merged, dedupe(append(append([]string{}, cur.Tags...), tags...)))
+	_, err = c.putPost(ctx, slug, merged, Dedupe(append(append([]string{}, cur.Tags...), tags...)))
 	return slug, err
 }
 
 // RetagPost replaces a post's tags, leaving the body untouched.
-func (c *feedClient) RetagPost(ctx context.Context, slug string, tags []string) error {
+func (c *FeedClient) RetagPost(ctx context.Context, slug string, tags []string) error {
 	cur, err := c.getPost(ctx, slug)
 	if err != nil {
 		return err
@@ -198,7 +221,7 @@ func (c *feedClient) RetagPost(ctx context.Context, slug string, tags []string) 
 	return err
 }
 
-func (c *feedClient) putPost(ctx context.Context, slug, body string, tags []string) ([]byte, error) {
+func (c *FeedClient) putPost(ctx context.Context, slug, body string, tags []string) ([]byte, error) {
 	buf, err := json.Marshal(map[string]any{"body": body, "tags": orEmpty(tags)})
 	if err != nil {
 		return nil, err
@@ -206,19 +229,20 @@ func (c *feedClient) putPost(ctx context.Context, slug, body string, tags []stri
 	return c.do(ctx, http.MethodPut, "/api/posts/"+slug, "application/json", bytes.NewReader(buf))
 }
 
-func (c *feedClient) DeletePost(ctx context.Context, slug string) error {
+func (c *FeedClient) DeletePost(ctx context.Context, slug string) error {
 	_, err := c.do(ctx, http.MethodDelete, "/api/posts/"+slug, "", nil)
 	return err
 }
 
 // ── bookmarks ──────────────────────────────────────────────────────────────
 
-type bookmarksClient struct {
+// BookmarksClient files links.
+type BookmarksClient struct {
 	svc
 	DefaultCategory string
 }
 
-func (c *bookmarksClient) Create(ctx context.Context, link, category string) (string, error) {
+func (c *BookmarksClient) Create(ctx context.Context, link, category string) (string, error) {
 	if category == "" {
 		category = c.DefaultCategory
 	}
@@ -240,46 +264,49 @@ func (c *bookmarksClient) Create(ctx context.Context, link, category string) (st
 	return b.ID, nil
 }
 
-func (c *bookmarksClient) Delete(ctx context.Context, id string) error {
+func (c *BookmarksClient) Delete(ctx context.Context, id string) error {
 	_, err := c.do(ctx, http.MethodDelete, "/api/bookmarks/"+id, "", nil)
 	return err
 }
 
 // ── scrap ──────────────────────────────────────────────────────────────────
 
-type scrapClient struct{ svc }
+// ScrapClient stores pastes.
+type ScrapClient struct{ svc }
 
 // Create posts a paste. scrap takes the raw body and its options as query
 // parameters, and answers with the URL as plain text rather than JSON.
-func (c *scrapClient) Create(ctx context.Context, text string) (string, string, error) {
+//
+// Unlisted by default: a paste made this way is a link to hand to someone, not a
+// thing to list publicly.
+func (c *ScrapClient) Create(ctx context.Context, text string) (string, string, error) {
 	out, err := c.do(ctx, http.MethodPost, "/api/pastes?visibility=unlisted",
 		"text/plain; charset=utf-8", strings.NewReader(text))
 	if err != nil {
 		return "", "", err
 	}
-	pasteURL := firstLine(out)
+	pasteURL := FirstLine(out)
 	if pasteURL == "" {
 		return "", "", fmt.Errorf("scrap returned no url")
 	}
-	// Unlisted by default: a texted paste is a link to hand to someone, not a
-	// thing to list publicly.
 	id := pasteURL[strings.LastIndexByte(pasteURL, '/')+1:]
 	return pasteURL, id, nil
 }
 
-func (c *scrapClient) Delete(ctx context.Context, id string) error {
+func (c *ScrapClient) Delete(ctx context.Context, id string) error {
 	_, err := c.do(ctx, http.MethodDelete, "/api/pastes/"+id, "", nil)
 	return err
 }
 
 // ── qr ─────────────────────────────────────────────────────────────────────
 
-type qrClient struct {
+// QRClient mints QR codes.
+type QRClient struct {
 	svc
 	PublicURL string
 }
 
-func (c *qrClient) Create(ctx context.Context, target, label string) (string, error) {
+func (c *QRClient) Create(ctx context.Context, target, label string) (string, error) {
 	if label == "" {
 		label = "texted"
 	}
@@ -304,126 +331,13 @@ func (c *qrClient) Create(ctx context.Context, target, label string) (string, er
 
 // PNG fetches the raster rendering, which is what can be sent inline in a
 // message — an SVG would arrive as a file attachment instead of a picture.
-func (c *qrClient) PNG(ctx context.Context, id string) ([]byte, error) {
+func (c *QRClient) PNG(ctx context.Context, id string) ([]byte, error) {
 	return c.do(ctx, http.MethodGet, "/qr/"+id+".png", "", nil)
 }
 
-func (c *qrClient) Delete(ctx context.Context, id string) error {
+func (c *QRClient) Delete(ctx context.Context, id string) error {
 	_, err := c.do(ctx, http.MethodDelete, "/api/codes/"+id, "", nil)
 	return err
-}
-
-// ── fleet status ───────────────────────────────────────────────────────────
-
-// fleetStatus probes every configured service's public /status concurrently and
-// renders a compact report. It needs no credentials: /status is public on every
-// farfield app precisely so it can be polled.
-func (s *Server) fleetStatus(ctx context.Context) string {
-	if len(s.targets) == 0 {
-		return "no targets configured"
-	}
-	ctx, cancel := context.WithTimeout(ctx, 10*time.Second)
-	defer cancel()
-
-	type result struct {
-		name string
-		ok   bool
-		note string
-	}
-	results := make([]result, len(s.targets))
-	var wg sync.WaitGroup
-	for i, t := range s.targets {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
-			results[i] = result{name: t.Name}
-			req, err := http.NewRequestWithContext(ctx, http.MethodGet,
-				strings.TrimRight(t.URL, "/")+"/status", nil)
-			if err != nil {
-				results[i].note = "bad url"
-				return
-			}
-			req.Header.Set("User-Agent", userAgent)
-			resp, err := statusClient.Do(req)
-			if err != nil {
-				results[i].note = "unreachable"
-				return
-			}
-			defer resp.Body.Close()
-			_, _ = io.Copy(io.Discard, io.LimitReader(resp.Body, 8<<10))
-			results[i].ok = resp.StatusCode == http.StatusOK
-			if !results[i].ok {
-				results[i].note = resp.Status
-			}
-		}()
-	}
-	wg.Wait()
-
-	var down []string
-	up := 0
-	for _, r := range results {
-		if r.ok {
-			up++
-			continue
-		}
-		down = append(down, r.name+" ("+r.note+")")
-	}
-	sort.Strings(down)
-	if len(down) == 0 {
-		return fmt.Sprintf("all %d services up", up)
-	}
-	return fmt.Sprintf("%d/%d up\ndown: %s", up, len(results), strings.Join(down, ", "))
-}
-
-// statusClient is separate from the sibling clients: status probes should give
-// up fast so one hung service cannot stall the whole report.
-var statusClient = &http.Client{Timeout: 5 * time.Second}
-
-// pulseSummary renders today's traffic and any open incidents.
-func (s *Server) pulseSummary(ctx context.Context) (string, error) {
-	out, err := s.pulseSvc.do(ctx, http.MethodGet, "/api/overview", "", nil)
-	if err != nil {
-		return "", err
-	}
-	var ov struct {
-		Targets []struct {
-			Name string `json:"name"`
-			Up24 string `json:"up24h"`
-			Last *struct {
-				OK        bool  `json:"ok"`
-				LatencyMS int64 `json:"latencyMs"`
-			} `json:"last"`
-			Incident *struct {
-				OpenedAt string `json:"openedAt"`
-				LastErr  string `json:"lastErr"`
-			} `json:"incident"`
-		} `json:"targets"`
-	}
-	if err := json.Unmarshal(out, &ov); err != nil {
-		return "", err
-	}
-
-	up, down := 0, 0
-	var lines []string
-	for _, t := range ov.Targets {
-		if t.Last != nil && t.Last.OK {
-			up++
-		} else {
-			down++
-		}
-		// Only open incidents get a line — a healthy fleet should answer in one.
-		if t.Incident != nil {
-			lines = append(lines, fmt.Sprintf("! %s down since %s — %s",
-				t.Name, t.Incident.OpenedAt, firstLine([]byte(t.Incident.LastErr))))
-		}
-	}
-	var b strings.Builder
-	fmt.Fprintf(&b, "%d targets · %d up · %d down", len(ov.Targets), up, down)
-	sort.Strings(lines)
-	for _, line := range lines {
-		b.WriteString("\n" + line)
-	}
-	return b.String(), nil
 }
 
 func orEmpty(in []string) []string {
