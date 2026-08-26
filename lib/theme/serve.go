@@ -16,7 +16,7 @@ import (
 // /static/styles.css?v={{.AssetVer}} with AssetVer set to this value, which
 // makes the immutable Cache-Control below safe: a theme change changes the
 // URL, so clients can cache the old one forever.
-var Version = cid.Of([]byte(CSS + EditorJS))[:16]
+var Version = cid.Of([]byte(CSS + EditorJS + BandJS))[:16]
 
 // CSSHandler serves the shared stylesheet with immutable caching and a
 // precomputed gzip variant.
@@ -27,6 +27,11 @@ func CSSHandler() http.HandlerFunc {
 // EditorJSHandler serves the shared editor script the same way.
 func EditorJSHandler() http.HandlerFunc {
 	return assetHandler("text/javascript; charset=utf-8", EditorJS, "editor.js")
+}
+
+// BandJSHandler serves the meta-band script the same way.
+func BandJSHandler() http.HandlerFunc {
+	return assetHandler("text/javascript; charset=utf-8", BandJS, "band.js")
 }
 
 func assetHandler(contentType, body, filename string) http.HandlerFunc {

@@ -209,6 +209,7 @@ func (s *Server) routes() http.Handler {
 	// Shared theme stylesheet and editor script.
 	mux.HandleFunc("GET /static/styles.css", theme.CSSHandler())
 	mux.HandleFunc("GET /static/editor.js", theme.EditorJSHandler())
+	mux.HandleFunc("GET /static/band.js", theme.BandJSHandler())
 
 	// App-local static assets. The vendored semantic-search engine is
 	// versioned by URL (?v=) and immutable; everything else revalidates.

@@ -3,170 +3,132 @@
   {{template "topbar" .}}
 
   <form method="post" action="{{.Action}}" data-async>
-    <div class="cluster">
-      <span class="label">{{if .IsNew}}New entry{{else}}Edit entry{{end}}</span>
-      {{if not .IsNew}}
-        {{if .Entry.Published}}<span class="badge live">published</span>
-        {{else}}<span class="badge draft">draft</span>{{end}}
-      {{end}}
-    </div>
     {{with .Error}}<p class="error">{{.}}</p>{{end}}
 
-    <div class="field">
-      <input class="title-input" type="text" id="title" name="title"
-        value="{{.Entry.Title}}" placeholder="Untitled" required autocomplete="off">
-    </div>
-
-    <div class="edit-layout">
-      <div class="edit-main">
-        <div class="doc-card{{if not .BodyHTML}} empty{{end}}" data-doc-open
-             role="button" tabindex="0" aria-label="Open the document editor">
-          <span class="doc-open-hint">Open editor</span>
-          {{if .BodyHTML}}
-            <div class="prose doc-card-prose">{{.BodyHTML}}</div>
-          {{else}}
-            <p>Nothing written yet — click here to start.</p>
-          {{end}}
-        </div>
-
-        <div class="field doc-fallback">
-          <label for="body">Body (markdown)</label>
-          <textarea id="body" name="body">{{.Entry.Body}}</textarea>
-          <p class="hint">Reference images as blob://&lt;cid&gt;.</p>
-        </div>
+    <div class="doc-page">
+      <div class="field">
+        <input class="title-input" type="text" id="title" name="title"
+          value="{{.Entry.Title}}" placeholder="Untitled" required autocomplete="off">
       </div>
 
-      <aside class="edit-rail">
-        {{/* The rail reads top to bottom as: where it lives, how it is
-             found, whether the world sees it. One stack of equal-weight
-             fields put the publish checkbox — the most consequential control
-             on the form — visually subordinate to a suggestion button. */}}
-        <div class="rail-panel">
-          <span class="label">Filing</span>
-          <div class="field">
-            <label for="collection">Collection</label>
-            <select id="collection" name="collection" required>
-              {{range .Collections}}
-                <option value="{{.Slug}}"
-                  {{if eq .Slug $.Entry.Collection}}selected{{end}}>{{.Name}}</option>
-              {{end}}
-            </select>
+      {{/* The meta band — the sidebar, compressed to one row of chips. Each
+           chip opens an anchored popover holding the REAL form control, so
+           there is nothing to mirror and nothing to drift: the form submits
+           the same fields it always did. */}}
+      <div class="meta-band" data-band>
+        <span class="chip-wrap">
+          <button type="button" class="chip filled" data-chip="collection">
+            {{range .Collections}}{{if eq .Slug $.Entry.Collection}}{{.Name}}{{end}}{{end}}</button>
+          <div class="chip-pop" hidden>
+            <div class="field">
+              <label for="collection">Collection</label>
+              <select id="collection" name="collection" required data-chip-value>
+                {{range .Collections}}
+                  <option value="{{.Slug}}"
+                    {{if eq .Slug $.Entry.Collection}}selected{{end}}>{{.Name}}</option>
+                {{end}}
+              </select>
+            </div>
           </div>
-          <div class="field">
-            <label for="slug">Slug</label>
-            <input type="text" id="slug" name="slug" value="{{.Entry.Slug}}"
-              placeholder="derived from the title">
-          </div>
-        </div>
+        </span>
 
-        <div class="rail-panel">
-          <span class="label">Discovery</span>
-          <div class="field">
-            <label for="tags">Tags</label>
-            <input type="text" id="tags" name="tags" value="{{.TagsText}}"
-              placeholder="comma, separated">
+        <span class="chip-wrap">
+          <button type="button" class="chip{{if .Entry.Slug}} filled{{else}} empty{{end}}" data-chip="slug">
+            {{if .Entry.Slug}}{{.Entry.Slug}}{{else}}+ slug{{end}}</button>
+          <div class="chip-pop" hidden>
+            <div class="field">
+              <label for="slug">Slug</label>
+              <input type="text" id="slug" name="slug" value="{{.Entry.Slug}}"
+                placeholder="derived from the title" data-chip-value>
+            </div>
           </div>
-          <div class="field">
-            <label for="excerpt">Excerpt</label>
-            <textarea id="excerpt" name="excerpt" rows="2">{{.Entry.Excerpt}}</textarea>
-          </div>
-          {{/* Assist proposes into the two fields above; nothing is saved
-               until the author saves. Manually invoked on purpose — metadata
-               that writes itself on every save stops being read. It lives in
-               this panel because these are the two fields it writes. */}}
-          <div class="assist-row">
-            <span class="assist-note muted" data-assist-note aria-live="polite"></span>
-            <button type="button" class="assist-btn" data-assist>Suggest tags &amp; excerpt</button>
-          </div>
-        </div>
+        </span>
 
-        {{/* Publication is a decision, so it sits with the commit: the
-             toggle, the buttons, and the document's vitals in one place. */}}
-        <div class="rail-panel rail-publish">
-          <label class="check">
-            <input type="checkbox" id="published" name="published" value="1"
-              {{if .Entry.Published}}checked{{end}}>
-            Published
-            <span class="check-hint muted">public on save; a draft stays a 404</span>
-          </label>
-          <div class="rail-actions">
-            <button type="submit">{{if .IsNew}}Create entry{{else}}Save &amp; close{{end}}</button>
-            <a href="/entries">Cancel</a>
+        <span class="chip-wrap">
+          <button type="button" class="chip{{if .TagsText}} filled{{else}} empty{{end}}" data-chip="tags">
+            {{if .TagsText}}{{.TagsText}}{{else}}+ tags{{end}}</button>
+          <div class="chip-pop" hidden>
+            <div class="field">
+              <label for="tags">Tags</label>
+              <input type="text" id="tags" name="tags" value="{{.TagsText}}"
+                placeholder="comma, separated" data-chip-value>
+            </div>
+            <div class="assist-row">
+              <span class="assist-note muted" data-assist-note aria-live="polite"></span>
+              <button type="button" class="assist-btn" data-assist>Suggest tags &amp; excerpt</button>
+            </div>
           </div>
-          <div class="rail-meta">
-            <span class="doc-words mono muted">{{.Words}} words</span>
-            <span class="save-note"></span>
-            {{if .SiteURL}}
-              <a href="{{.SiteURL}}" target="_blank" rel="noopener">View on site ↗</a>
-            {{end}}
+        </span>
+
+        <span class="chip-wrap">
+          <button type="button" class="chip{{if .Entry.Excerpt}} filled{{else}} empty{{end}}" data-chip="excerpt"
+            data-filled-label="excerpt ✓" data-empty-label="+ excerpt">
+            {{if .Entry.Excerpt}}excerpt ✓{{else}}+ excerpt{{end}}</button>
+          <div class="chip-pop" hidden>
+            <div class="field">
+              <label for="excerpt">Excerpt</label>
+              <textarea id="excerpt" name="excerpt" rows="3" data-chip-value>{{.Entry.Excerpt}}</textarea>
+            </div>
+            <div class="assist-row">
+              <button type="button" class="assist-btn" data-assist>Suggest tags &amp; excerpt</button>
+            </div>
           </div>
-        </div>
+        </span>
+
+        <span class="doc-words mono"></span>
+
+        {{/* Publication is state, not ceremony: the chip IS the checkbox,
+             and save commits it — the same semantics the form always had. */}}
+        <input type="checkbox" id="published" name="published" value="1"
+          {{if .Entry.Published}}checked{{end}}
+          style="position: absolute; width: 1px; height: 1px; opacity: 0; pointer-events: none;">
+        <button type="button" data-state-chip
+          class="chip {{if .Entry.Published}}state-live{{else}}state-draft{{end}}"
+          title="{{if .Entry.Published}}public — tap to unpublish on save{{else}}goes public on save · the site rebuilds{{end}}">
+          {{if .Entry.Published}}published{{else}}draft{{end}}</button>
 
         {{if .Revisions}}
-          <div class="rail-panel rail-history">
-            <span class="label">History</span>
-            <ul class="rev-list">
-              {{range .Revisions}}
-                <li>
-                  <span class="rev-when mono">{{.When}}</span>
-                  {{/* The delta is the story — what this save did — and the
-                       total is the context. Spelled-out units, because a bare
-                       "872w" beside a timestamp was read as 872 weeks. */}}
-                  <span class="rev-size muted">{{if .Delta}}<span class="rev-delta mono">{{.Delta}}</span> · {{end}}{{.Words}} words</span>
-                  {{if .Current}}<span class="rev-current mono">current</span>
-                  {{else}}
-                    {{/* the form itself lives outside the entry form — forms
-                         cannot nest, and a nested one would swallow the click */}}
-                    <button type="submit" form="restore-{{.ID}}" class="rev-restore">restore</button>
-                  {{end}}
-                </li>
-              {{end}}
-            </ul>
-          </div>
+          <span class="chip-wrap pop-right">
+            <button type="button" class="chip" data-chip="history">history ▾</button>
+            <div class="chip-pop" hidden>
+              <ul class="rev-list">
+                {{range .Revisions}}
+                  <li>
+                    <span class="rev-when mono">{{.When}}</span>
+                    <span class="rev-size muted">{{if .Delta}}<span class="rev-delta mono">{{.Delta}}</span> · {{end}}{{.Words}} words</span>
+                    {{if .Current}}<span class="rev-current mono">current</span>
+                    {{else}}
+                      <button type="submit" form="restore-{{.ID}}" class="rev-restore">restore</button>
+                    {{end}}
+                  </li>
+                {{end}}
+              </ul>
+            </div>
+          </span>
         {{end}}
-      </aside>
+
+        {{if .SiteURL}}
+          <a class="chip-note" href="{{.SiteURL}}" target="_blank" rel="noopener">view ↗</a>
+        {{end}}
+      </div>
+
+      {{/* The page is the editor: the writing surface mounts here. */}}
+      <div data-doc-host></div>
+
+      <div class="field doc-fallback">
+        <label for="body">Body (markdown)</label>
+        <textarea id="body" name="body">{{.Entry.Body}}</textarea>
+        <p class="hint">Reference images as blob://&lt;cid&gt;.</p>
+      </div>
+
+      <div class="doc-pill">
+        <button type="button" data-doc-save>{{if .IsNew}}Create entry{{else}}Save{{end}}</button>
+        <span class="save-note"></span>
+        <span data-pub-note></span>
+      </div>
     </div>
 
     <script>window.FARFIELD={blobs:"{{.BlobsPublic}}",content:"{{.ContentPublic}}",preview:"/preview",editdoc:"/editdoc"};</script>
-    <script>
-      // The assist button. Lives here rather than in the shared editor script
-      // because only content entries carry tags and an excerpt.
-      (function () {
-        var btn = document.querySelector("[data-assist]");
-        if (!btn) return;
-        var note = document.querySelector("[data-assist-note]");
-        btn.addEventListener("click", function () {
-          var body = document.getElementById("body").value;
-          if (!body.trim()) { note.textContent = "write something first"; return; }
-          btn.disabled = true;
-          note.textContent = "reading…";
-          fetch("/assist", {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({
-              title: document.getElementById("title").value,
-              body: body,
-            }),
-          }).then(function (r) {
-            return r.json().then(function (d) { return { ok: r.ok, d: d }; });
-          }).then(function (res) {
-            if (!res.ok) { note.textContent = res.d.error || "assist failed"; return; }
-            var tags = document.getElementById("tags");
-            var excerpt = document.getElementById("excerpt");
-            if (res.d.tags && res.d.tags.length) tags.value = res.d.tags.join(", ");
-            if (res.d.excerpt) excerpt.value = res.d.excerpt;
-            // The form's change tracking should know the fields moved.
-            tags.dispatchEvent(new Event("input", { bubbles: true }));
-            excerpt.dispatchEvent(new Event("input", { bubbles: true }));
-            note.textContent = "suggested — edit freely, then save";
-          }).catch(function () {
-            note.textContent = "assist unreachable";
-          }).finally(function () {
-            btn.disabled = false;
-          });
-        });
-      })();
-    </script>
   </form>
 
   {{range .Revisions}}{{if not .Current}}
@@ -175,4 +137,5 @@
   {{end}}{{end}}
 
   <script src="/static/editor.js?v={{.AssetVer}}" defer></script>
+  <script src="/static/band.js?v={{.AssetVer}}" defer></script>
 {{end}}

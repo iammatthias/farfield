@@ -36,10 +36,10 @@ func TestEditPageViewOnSite(t *testing.T) {
 		t.Fatalf("edit page = %d, want 200", code)
 	}
 	if !strings.Contains(page, "https://example.com/blog/"+ids.pubSlug) ||
-		!strings.Contains(page, "View on site") {
+		!strings.Contains(page, "view ↗") {
 		t.Errorf("published edit page lacks the view-on-site link")
 	}
-	if _, draftPage := adminGet(t, srv, cookie, "/entries/"+ids.draftSlug+"/edit"); strings.Contains(draftPage, "View on site") {
+	if _, draftPage := adminGet(t, srv, cookie, "/entries/"+ids.draftSlug+"/edit"); strings.Contains(draftPage, "view ↗") {
 		t.Errorf("draft edit page shows a view-on-site link, want none")
 	}
 }

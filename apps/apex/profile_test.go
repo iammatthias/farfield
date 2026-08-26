@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -17,11 +18,16 @@ import (
 // arrived — the keys staying server-side is the reason this endpoint exists.
 func newProfileTestServer(t *testing.T, feedBody, contentBody, dailyBody string, status int) (*profileServer, *[]string) {
 	t.Helper()
+	// The three sections fetch concurrently, so the stubs record under a lock —
+	// the race detector caught the bare append.
+	var mu sync.Mutex
 	var keyed []string
 	stub := func(name, body string) *httptest.Server {
 		s := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			if r.Header.Get("X-API-Key") != "" {
+				mu.Lock()
 				keyed = append(keyed, name)
+				mu.Unlock()
 			}
 			w.WriteHeader(status)
 			fmt.Fprint(w, body)

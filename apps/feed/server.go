@@ -173,6 +173,7 @@ func (s *Server) routes() http.Handler {
 	// Shared theme stylesheet and editor script.
 	mux.HandleFunc("GET /static/styles.css", theme.CSSHandler())
 	mux.HandleFunc("GET /static/editor.js", theme.EditorJSHandler())
+	mux.HandleFunc("GET /static/band.js", theme.BandJSHandler())
 
 	// Everything feed serves is text — HTML, JSON; media bytes live in the
 	// blobs service — so Gzip wraps the whole mux. Logging sits outside so

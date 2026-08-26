@@ -3,73 +3,64 @@
   {{template "topbar" .}}
 
   <form method="post" action="{{.Action}}" data-async>
-    <div class="cluster">
-      <span class="label">{{if .IsNew}}New series{{else}}Edit series{{end}}</span>
-    </div>
     {{with .Error}}<p class="error">{{.}}</p>{{end}}
 
-    <div class="field">
-      <input class="title-input" type="text" id="title" name="title"
-        value="{{.Series.Title}}" placeholder="Untitled series" autocomplete="off">
-    </div>
-
-    <div class="edit-layout">
-      <div class="edit-main">
-        <div class="doc-card{{if not .BodyHTML}} empty{{end}}" data-doc-open
-             role="button" tabindex="0" aria-label="Open the document editor">
-          <span class="doc-open-hint">Open editor</span>
-          {{if .BodyHTML}}
-            <div class="prose doc-card-prose">{{.BodyHTML}}</div>
-          {{else}}
-            <p>Nothing here yet — click here to add images.</p>
-          {{end}}
-        </div>
-
-        <div class="field doc-fallback">
-          <label for="body">Body (markdown)</label>
-          <textarea id="body" name="body">{{.Series.Body}}</textarea>
-          <p class="hint">Rendered inline wherever an entry embeds this series.
-            Images go inline as blob://&lt;cid&gt;.</p>
-        </div>
+    <div class="doc-page">
+      <div class="field">
+        <input class="title-input" type="text" id="title" name="title"
+          value="{{.Series.Title}}" placeholder="Untitled series" autocomplete="off">
       </div>
 
-      <aside class="edit-rail">
-        <div class="rail-panel">
-          {{if .IsNew}}
-            <div class="field">
-              <label for="slug">Slug</label>
-              <input type="text" id="slug" name="slug" value="{{.Series.Slug}}"
-                placeholder="derived from the title">
-              <p class="hint">The key entries reference as series://&lt;slug&gt;.
-                Immutable once set.</p>
+      <div class="meta-band" data-band>
+        {{if .IsNew}}
+          <span class="chip-wrap">
+            <button type="button" class="chip{{if .Series.Slug}} filled{{else}} empty{{end}}" data-chip="slug">
+              {{if .Series.Slug}}{{.Series.Slug}}{{else}}+ slug{{end}}</button>
+            <div class="chip-pop" hidden>
+              <div class="field">
+                <label for="slug">Slug</label>
+                <input type="text" id="slug" name="slug" value="{{.Series.Slug}}"
+                  placeholder="derived from the title" data-chip-value>
+                <p class="hint">The key entries reference as series://&lt;slug&gt;.
+                  Immutable once set.</p>
+              </div>
             </div>
-          {{else}}
-            <div class="field">
-              <label>Slug</label>
-              <p><code>{{.Series.Slug}}</code> <span class="hint">— immutable</span></p>
-            </div>
-          {{end}}
-        </div>
-        {{if not .IsNew}}
-          <div class="rail-panel rail-order">
-            <span class="label">Order</span>
-            <div data-series-tray></div>
-            <p class="hint">Drag thumbnails to reorder the gallery.</p>
-          </div>
+          </span>
+        {{else}}
+          {{/* The slug is the key entries reference — a fact, not a field. */}}
+          <span class="chip static">series://{{.Series.Slug}}</span>
+          <span class="chip-note">immutable</span>
         {{end}}
-        <div class="rail-actions">
-          <button type="submit">{{if .IsNew}}Create series{{else}}Save &amp; close{{end}}</button>
-          <a href="/series">Cancel</a>
+        <span class="doc-words mono"></span>
+      </div>
+
+      {{if not .IsNew}}
+        {{/* Dragging thumbnails IS editing a series, so the tray lives with
+             the document rather than in a sidebar. */}}
+        <div class="order-strip">
+          <span class="label">Order</span>
+          <div data-series-tray></div>
         </div>
-        <div class="rail-meta">
-          <span class="doc-words mono muted">{{.Words}} words</span>
-          <span class="save-note"></span>
-        </div>
-      </aside>
+      {{end}}
+
+      <div data-doc-host></div>
+
+      <div class="field doc-fallback">
+        <label for="body">Body (markdown)</label>
+        <textarea id="body" name="body">{{.Series.Body}}</textarea>
+        <p class="hint">Rendered inline wherever an entry embeds this series.
+          Images go inline as blob://&lt;cid&gt;.</p>
+      </div>
+
+      <div class="doc-pill">
+        <button type="button" data-doc-save>{{if .IsNew}}Create series{{else}}Save{{end}}</button>
+        <span class="save-note"></span>
+      </div>
     </div>
 
     <script>window.FARFIELD={blobs:"{{.BlobsPublic}}",content:"{{.ContentPublic}}",preview:"/preview",editdoc:"/editdoc",embeds:["blob"]};</script>
   </form>
 
   <script src="/static/editor.js?v={{.AssetVer}}" defer></script>
+  <script src="/static/band.js?v={{.AssetVer}}" defer></script>
 {{end}}

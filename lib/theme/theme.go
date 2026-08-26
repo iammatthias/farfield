@@ -16,3 +16,9 @@ var CSS string
 //
 //go:embed editor.js
 var EditorJS string
+
+// BandJS is the meta band behavior — the chip row that replaced the editor
+// sidebar. Served by the apps whose edit pages carry a [data-band].
+//
+//go:embed band.js
+var BandJS string

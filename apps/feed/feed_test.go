@@ -218,17 +218,18 @@ func TestComposerRendersDocumentFirst(t *testing.T) {
 	page := string(raw)
 	for _, want := range []string{
 		`data-async`,
-		`data-doc-open`,
-		`doc-card empty`, // new post: empty state
+		`data-doc-host`, // the page IS the editor — no dialog, no doc-card
+		`data-band`,     // the meta band replaced the sidebar
 		`doc-fallback`,
 		`<textarea id="body"`,
-		`edit-rail`,
+		`data-doc-save`, // the floating pill's save
 		`doc-words`,
 		`save-note`,
 		`preview:"/preview"`,
 		`editdoc:"/editdoc"`,
 		`hardWraps:true`,
 		`/static/editor.js`,
+		`/static/band.js`,
 	} {
 		if !strings.Contains(page, want) {
 			t.Errorf("composer page missing %q", want)
@@ -236,6 +237,11 @@ func TestComposerRendersDocumentFirst(t *testing.T) {
 	}
 	if strings.Contains(page, "embed-toolbar") {
 		t.Error("composer page still carries the old embed toolbar")
+	}
+	for _, gone := range []string{"data-doc-open", "doc-card", "edit-rail"} {
+		if strings.Contains(page, gone) {
+			t.Errorf("composer page still carries the retired %q", gone)
+		}
 	}
 }
 
