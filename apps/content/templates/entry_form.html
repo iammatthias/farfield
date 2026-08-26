@@ -61,6 +61,13 @@
             <label for="excerpt">Excerpt</label>
             <textarea id="excerpt" name="excerpt" rows="2">{{.Entry.Excerpt}}</textarea>
           </div>
+          {{/* Assist proposes into the two fields above; nothing is saved
+               until the author saves. Manually invoked on purpose — metadata
+               that writes itself on every save stops being read. */}}
+          <div class="assist-row">
+            <button type="button" class="assist-btn" data-assist>Suggest tags &amp; excerpt</button>
+            <span class="assist-note muted" data-assist-note aria-live="polite"></span>
+          </div>
           <label class="check">
             <input type="checkbox" id="published" name="published" value="1"
               {{if .Entry.Published}}checked{{end}}>
@@ -105,6 +112,45 @@
     </div>
 
     <script>window.FARFIELD={blobs:"{{.BlobsPublic}}",content:"{{.ContentPublic}}",preview:"/preview",editdoc:"/editdoc"};</script>
+    <script>
+      // The assist button. Lives here rather than in the shared editor script
+      // because only content entries carry tags and an excerpt.
+      (function () {
+        var btn = document.querySelector("[data-assist]");
+        if (!btn) return;
+        var note = document.querySelector("[data-assist-note]");
+        btn.addEventListener("click", function () {
+          var body = document.getElementById("body").value;
+          if (!body.trim()) { note.textContent = "write something first"; return; }
+          btn.disabled = true;
+          note.textContent = "reading…";
+          fetch("/assist", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              title: document.getElementById("title").value,
+              body: body,
+            }),
+          }).then(function (r) {
+            return r.json().then(function (d) { return { ok: r.ok, d: d }; });
+          }).then(function (res) {
+            if (!res.ok) { note.textContent = res.d.error || "assist failed"; return; }
+            var tags = document.getElementById("tags");
+            var excerpt = document.getElementById("excerpt");
+            if (res.d.tags && res.d.tags.length) tags.value = res.d.tags.join(", ");
+            if (res.d.excerpt) excerpt.value = res.d.excerpt;
+            // The form's change tracking should know the fields moved.
+            tags.dispatchEvent(new Event("input", { bubbles: true }));
+            excerpt.dispatchEvent(new Event("input", { bubbles: true }));
+            note.textContent = "suggested — edit freely, then save";
+          }).catch(function () {
+            note.textContent = "assist unreachable";
+          }).finally(function () {
+            btn.disabled = false;
+          });
+        });
+      })();
+    </script>
   </form>
 
   {{range .Revisions}}{{if not .Current}}

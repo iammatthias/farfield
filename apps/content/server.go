@@ -197,6 +197,10 @@ func (s *Server) routes() http.Handler {
 	// sibling APIs so the editor page never needs a read token.
 	mux.HandleFunc("POST /preview", s.auth.RequireSession(s.handlePreview))
 	mux.HandleFunc("POST /editdoc", s.auth.RequireSession(s.handleEditdoc))
+	// Assist proposes tags and an excerpt for the open draft. Session-gated
+	// like the rest of the editor: it spends model credit, so it is a thing
+	// the author does, not a thing the API offers.
+	mux.HandleFunc("POST /assist", s.auth.RequireSession(s.handleAssist))
 	mux.HandleFunc("POST /embed/blob", s.auth.RequireSession(s.handleEmbedBlob))
 	mux.HandleFunc("POST /embed/series", s.auth.RequireSession(s.handleEmbedSeries))
 	mux.HandleFunc("GET /embed/blobs", s.auth.RequireSession(s.handleEmbedBlobsList))

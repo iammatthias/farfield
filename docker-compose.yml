@@ -146,6 +146,10 @@ services:
       - FARFIELD_TRUSTED_PROXIES=${FARFIELD_TRUSTED_PROXIES:-}
       - CONTENT_PORT=8787
       - CONTENT_DB_PATH=/data/content.sqlite
+      # The editor's assist button (suggest tags + excerpt) — off when the key
+      # is unset, and the button says so instead of failing mysteriously.
+      - OPENROUTER_API_KEY=${OPENROUTER_API_KEY:-}
+      - CONTENT_ASSIST_MODEL=${CONTENT_ASSIST_MODEL:-google/gemini-2.5-flash}
       - PASSWORD=${PASSWORD:?set PASSWORD in .env — refusing to start with a default}
       - SESSION_SECRET=${SESSION_SECRET:-}
       - SESSION_COOKIE_DOMAIN=${SESSION_COOKIE_DOMAIN:-}

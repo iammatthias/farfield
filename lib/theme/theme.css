@@ -846,6 +846,19 @@ dialog.doc-keys::backdrop { background: color-mix(in srgb, var(--ink) 25%, trans
 }
 .rev-list button:hover { border-color: var(--line-strong); }
 
+/* The assist row — a quiet proposer under tags and excerpt, styled like the
+   history actions: present, never loud. */
+.assist-row { display: flex; flex-wrap: wrap; align-items: center; gap: 0.35rem 0.6rem; margin-top: -0.35rem; }
+.assist-btn {
+	white-space: nowrap; flex-shrink: 0;
+	padding: 0.22rem 0.6rem; font-size: 0.72rem;
+	background: var(--panel); color: var(--ink);
+	border-color: var(--hairline); box-shadow: none;
+}
+.assist-btn:hover { border-color: var(--line-strong); }
+.assist-btn:disabled { opacity: 0.5; }
+.assist-note { font-size: 0.72rem; }
+
 /* The document card — the full rendered body. Clicking anywhere in it opens
    the editor; the affordance is the soft hint pinned top-right. */
 .doc-card {
