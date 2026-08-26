@@ -889,20 +889,29 @@ dialog.doc-keys::backdrop { background: color-mix(in srgb, var(--ink) 25%, trans
 .doc-page { max-width: 47rem; margin-inline: auto; }
 
 [data-doc-host] { position: relative; margin-top: 1rem; }
-[data-doc-host] .doc-tools {
+/* The toolbar rail: full-bleed and sticky, so the toolbar inside it can be
+   wider than the writing column and still center on it — auto margins
+   cannot center an overflowing box, which left the toolbar hanging off the
+   column's right edge. The rail itself is invisible and un-hittable. */
+.doc-tools-rail {
 	position: sticky; top: 0; z-index: 30;
+	margin-inline: calc(50% - 50vw);
+	display: flex; justify-content: center;
+	pointer-events: none;
+}
+.doc-tools-rail .doc-tools {
+	pointer-events: auto;
+	width: fit-content; max-width: calc(100vw - 1.5rem);
 	border: 1px solid var(--hairline); border-radius: var(--r-m);
-	/* Wider than the writing column when it needs to be: clipping the tail
-	   of the toolbar hides Media/File/Gallery behind an invisible scroll. */
-	width: fit-content; max-width: calc(100vw - 2rem);
-	margin-inline: auto;
+	box-shadow: var(--shadow-s);
 }
 [data-doc-host] .doc-pop {
 	/* Sticky just under the sticky toolbar: the link and alt-text rows are
 	   visible wherever the caret is, so focusing them never moves the page. */
-	position: sticky; top: 2.45rem; z-index: 29;
-	border: 1px solid var(--hairline); border-top: 0;
-	border-radius: 0 0 var(--r-m) var(--r-m);
+	position: sticky; top: 2.6rem; z-index: 29;
+	border: 1px solid var(--hairline);
+	border-radius: var(--r-m);
+	box-shadow: var(--shadow-s);
 }
 .doc-col { padding: 1.7rem 0 30vh; }
 .doc-col .prose { max-width: none; }
@@ -935,8 +944,9 @@ dialog.doc-keys::backdrop { background: color-mix(in srgb, var(--ink) 25%, trans
 
 .meta-band {
 	display: flex; align-items: center; flex-wrap: wrap; gap: 0.45rem;
-	margin-top: 1.1rem; padding: 0.6rem 0;
-	border-top: 1px solid var(--hairline);
+	/* One rule above (the title input's own border) and one below — a
+	   border-top here doubled the divider under the title. */
+	margin-top: 0.35rem; padding: 0.6rem 0;
 	border-bottom: 1px solid var(--hairline);
 	font-family: var(--font-mono); font-size: 0.72rem;
 }
