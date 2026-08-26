@@ -86,7 +86,10 @@
               {{range .Revisions}}
                 <li>
                   <span class="rev-when mono">{{.When}}</span>
-                  <span class="rev-words muted">{{.Words}}w</span>
+                  {{/* spelled out, not "{{.Words}}w" — beside a timestamp,
+                       "872w" reads as an age (872 weeks), and it was misread
+                       exactly that way by the person who writes here */}}
+                  <span class="rev-words muted">{{.Words}} words</span>
                   {{if .Current}}<span class="badge">current</span>
                   {{else}}
                     {{/* the form itself lives outside the entry form — forms
