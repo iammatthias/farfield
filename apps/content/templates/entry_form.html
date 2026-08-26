@@ -37,7 +37,12 @@
       </div>
 
       <aside class="edit-rail">
+        {{/* The rail reads top to bottom as: where it lives, how it is
+             found, whether the world sees it. One stack of equal-weight
+             fields put the publish checkbox — the most consequential control
+             on the form — visually subordinate to a suggestion button. */}}
         <div class="rail-panel">
+          <span class="label">Filing</span>
           <div class="field">
             <label for="collection">Collection</label>
             <select id="collection" name="collection" required>
@@ -52,6 +57,10 @@
             <input type="text" id="slug" name="slug" value="{{.Entry.Slug}}"
               placeholder="derived from the title">
           </div>
+        </div>
+
+        <div class="rail-panel">
+          <span class="label">Discovery</span>
           <div class="field">
             <label for="tags">Tags</label>
             <input type="text" id="tags" name="tags" value="{{.TagsText}}"
@@ -63,27 +72,34 @@
           </div>
           {{/* Assist proposes into the two fields above; nothing is saved
                until the author saves. Manually invoked on purpose — metadata
-               that writes itself on every save stops being read. */}}
+               that writes itself on every save stops being read. It lives in
+               this panel because these are the two fields it writes. */}}
           <div class="assist-row">
-            <button type="button" class="assist-btn" data-assist>Suggest tags &amp; excerpt</button>
             <span class="assist-note muted" data-assist-note aria-live="polite"></span>
+            <button type="button" class="assist-btn" data-assist>Suggest tags &amp; excerpt</button>
           </div>
+        </div>
+
+        {{/* Publication is a decision, so it sits with the commit: the
+             toggle, the buttons, and the document's vitals in one place. */}}
+        <div class="rail-panel rail-publish">
           <label class="check">
             <input type="checkbox" id="published" name="published" value="1"
               {{if .Entry.Published}}checked{{end}}>
             Published
+            <span class="check-hint muted">public on save; a draft stays a 404</span>
           </label>
-        </div>
-        <div class="rail-actions">
-          <button type="submit">{{if .IsNew}}Create entry{{else}}Save &amp; close{{end}}</button>
-          <a href="/entries">Cancel</a>
-        </div>
-        <div class="rail-meta">
-          <span class="doc-words mono muted">{{.Words}} words</span>
-          <span class="save-note"></span>
-          {{if .SiteURL}}
-            <a href="{{.SiteURL}}" target="_blank" rel="noopener">View on site ↗</a>
-          {{end}}
+          <div class="rail-actions">
+            <button type="submit">{{if .IsNew}}Create entry{{else}}Save &amp; close{{end}}</button>
+            <a href="/entries">Cancel</a>
+          </div>
+          <div class="rail-meta">
+            <span class="doc-words mono muted">{{.Words}} words</span>
+            <span class="save-note"></span>
+            {{if .SiteURL}}
+              <a href="{{.SiteURL}}" target="_blank" rel="noopener">View on site ↗</a>
+            {{end}}
+          </div>
         </div>
 
         {{if .Revisions}}
@@ -93,15 +109,15 @@
               {{range .Revisions}}
                 <li>
                   <span class="rev-when mono">{{.When}}</span>
-                  {{/* spelled out, not "{{.Words}}w" — beside a timestamp,
-                       "872w" reads as an age (872 weeks), and it was misread
-                       exactly that way by the person who writes here */}}
-                  <span class="rev-words muted">{{.Words}} words</span>
-                  {{if .Current}}<span class="badge">current</span>
+                  {{/* The delta is the story — what this save did — and the
+                       total is the context. Spelled-out units, because a bare
+                       "872w" beside a timestamp was read as 872 weeks. */}}
+                  <span class="rev-size muted">{{if .Delta}}<span class="rev-delta mono">{{.Delta}}</span> · {{end}}{{.Words}} words</span>
+                  {{if .Current}}<span class="rev-current mono">current</span>
                   {{else}}
                     {{/* the form itself lives outside the entry form — forms
                          cannot nest, and a nested one would swallow the click */}}
-                    <button type="submit" form="restore-{{.ID}}">Restore</button>
+                    <button type="submit" form="restore-{{.ID}}" class="rev-restore">restore</button>
                   {{end}}
                 </li>
               {{end}}

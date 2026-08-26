@@ -707,6 +707,8 @@ td.nowrap, th.nowrap { white-space: nowrap; }
 	box-shadow: var(--shadow-s);
 	padding: 1.05rem 1.15rem;
 }
+.edit-rail .rail-panel + .rail-panel { margin-top: 1rem; }
+.rail-panel > .label { display: block; margin-bottom: 0.75rem; }
 .rail-panel .field { margin: 0 0 0.95rem; }
 .rail-panel .field:last-child, .rail-panel .check:last-child { margin-bottom: 0; }
 .rail-panel textarea { min-height: 4.2rem; font-family: var(--font-serif);
@@ -720,6 +722,13 @@ td.nowrap, th.nowrap { white-space: nowrap; }
 	display: flex; align-items: center; gap: 0.9rem; flex-wrap: wrap;
 	margin-top: 0.9rem;
 }
+/* Publication is a decision, so its panel holds the whole commit: state,
+   action, vitals. The hint sits under the checkbox label, quiet. */
+.rail-publish .check { align-items: baseline; }
+.check-hint { display: block; font-size: 0.72rem; margin-top: 0.1rem; }
+.rail-publish .rail-actions { margin-top: 0.8rem; }
+.rail-publish .rail-meta { margin-top: 0.7rem; padding: 0;
+	border-top: 1px solid var(--hairline); padding-top: 0.7rem; }
 @media (max-width: 64rem) {
 	.edit-layout { grid-template-columns: minmax(0, 1fr); gap: 1.4rem; }
 	.edit-rail { position: static; order: -1; }
@@ -848,7 +857,9 @@ dialog.doc-keys::backdrop { background: color-mix(in srgb, var(--ink) 25%, trans
 
 /* The assist row — a quiet proposer under tags and excerpt, styled like the
    history actions: present, never loud. */
-.assist-row { display: flex; flex-wrap: wrap; align-items: center; gap: 0.35rem 0.6rem; margin-top: -0.35rem; }
+.assist-row { display: flex; flex-wrap: wrap-reverse; justify-content: flex-end;
+	align-items: center; gap: 0.35rem 0.6rem; margin-top: -0.2rem; }
+.assist-note { flex: 1 1 100%; text-align: left; }
 .assist-btn {
 	white-space: nowrap; flex-shrink: 0;
 	padding: 0.22rem 0.6rem; font-size: 0.72rem;
@@ -858,6 +869,7 @@ dialog.doc-keys::backdrop { background: color-mix(in srgb, var(--ink) 25%, trans
 .assist-btn:hover { border-color: var(--line-strong); }
 .assist-btn:disabled { opacity: 0.5; }
 .assist-note { font-size: 0.72rem; }
+.assist-note:empty { display: none; }
 
 /* The document card — the full rendered body. Clicking anywhere in it opens
    the editor; the affordance is the soft hint pinned top-right. */

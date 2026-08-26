@@ -786,14 +786,33 @@ func (s *Server) revisionViews(e *Entry) []map[string]any {
 		return nil
 	}
 	views := make([]map[string]any, 0, len(revs))
-	for _, rv := range revs {
+	words := make([]int, len(revs))
+	for i, rv := range revs {
+		words[i] = revisionWords(rv.Body)
+	}
+	for i, rv := range revs {
 		when := rv.SavedAt
 		if t, err := time.Parse(time.RFC3339, rv.SavedAt); err == nil {
 			when = t.Local().Format("Jan 2 15:04")
 		}
+		// The delta against the next-older revision is what this save DID —
+		// the number worth scanning for. The oldest visible row has nothing
+		// to compare against, so it shows only its size.
+		delta := ""
+		if i+1 < len(revs) {
+			switch d := words[i] - words[i+1]; {
+			case d > 0:
+				delta = fmt.Sprintf("+%d", d)
+			case d < 0:
+				delta = fmt.Sprintf("−%d", -d)
+			default:
+				delta = "±0"
+			}
+		}
 		views = append(views, map[string]any{
 			"ID": rv.ID, "When": when,
-			"Words":   revisionWords(rv.Body),
+			"Words":   words[i],
+			"Delta":   delta,
 			"Current": rv.CID == e.CID,
 		})
 	}
