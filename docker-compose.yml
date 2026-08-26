@@ -149,7 +149,7 @@ services:
       # The editor's assist button (suggest tags + excerpt) — off when the key
       # is unset, and the button says so instead of failing mysteriously.
       - OPENROUTER_API_KEY=${OPENROUTER_API_KEY:-}
-      - CONTENT_ASSIST_MODEL=${CONTENT_ASSIST_MODEL:-google/gemini-2.5-flash}
+      - CONTENT_ASSIST_MODEL=${CONTENT_ASSIST_MODEL:-z-ai/glm-5.3-flash}
       - PASSWORD=${PASSWORD:?set PASSWORD in .env — refusing to start with a default}
       - SESSION_SECRET=${SESSION_SECRET:-}
       - SESSION_COOKIE_DOMAIN=${SESSION_COOKIE_DOMAIN:-}

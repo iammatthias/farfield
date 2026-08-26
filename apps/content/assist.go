@@ -29,7 +29,7 @@ import (
 // summarising errand, not an essay, and it runs while somebody waits with a
 // form open.
 func assistModel() string {
-	return store.Env("CONTENT_ASSIST_MODEL", "google/gemini-2.5-flash")
+	return store.Env("CONTENT_ASSIST_MODEL", "z-ai/glm-5.3-flash")
 }
 
 // assistTimeout bounds the upstream call. The author is watching a button.

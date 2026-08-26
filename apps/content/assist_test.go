@@ -76,7 +76,7 @@ func TestHandleAssistRoundTrip(t *testing.T) {
 	openrouterURL = stub.URL
 	defer func() { openrouterURL = prev }()
 	t.Setenv("OPENROUTER_API_KEY", "sk-test")
-	t.Setenv("CONTENT_ASSIST_MODEL", "google/gemini-2.5-flash")
+	t.Setenv("CONTENT_ASSIST_MODEL", "z-ai/glm-5.3-flash")
 
 	s := &Server{}
 	w := httptest.NewRecorder()
@@ -97,7 +97,7 @@ func TestHandleAssistRoundTrip(t *testing.T) {
 	if gotAuth != "Bearer sk-test" {
 		t.Errorf("auth = %q", gotAuth)
 	}
-	if gotModel != "google/gemini-2.5-flash" {
+	if gotModel != "z-ai/glm-5.3-flash" {
 		t.Errorf("model = %q", gotModel)
 	}
 	if !strings.Contains(gotUser, "The Fleet") || !strings.Contains(gotUser, "words about the fleet") {
@@ -121,7 +121,7 @@ func TestHandleAssistWithoutKey(t *testing.T) {
 func TestHandleAssistSurfacesModelRefusal(t *testing.T) {
 	stub := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusForbidden)
-		fmt.Fprint(w, `{"error":{"message":"Model google/gemini-2.5-flash is not enabled for this key"}}`)
+		fmt.Fprint(w, `{"error":{"message":"Model z-ai/glm-5.3-flash is not enabled for this key"}}`)
 	}))
 	defer stub.Close()
 	prev := openrouterURL
