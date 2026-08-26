@@ -905,13 +905,33 @@ dialog.doc-keys::backdrop { background: color-mix(in srgb, var(--ink) 25%, trans
 	border: 1px solid var(--hairline); border-radius: var(--r-m);
 	box-shadow: var(--shadow-s);
 }
-[data-doc-host] .doc-pop {
-	/* Sticky just under the sticky toolbar: the link and alt-text rows are
-	   visible wherever the caret is, so focusing them never moves the page. */
+[data-doc-host] > .doc-pop {
+	/* The alt-text row stays sticky under the toolbar; the link row moved
+	   into the selection bubble. */
 	position: sticky; top: 2.6rem; z-index: 29;
 	border: 1px solid var(--hairline);
 	border-radius: var(--r-m);
 	box-shadow: var(--shadow-s);
+}
+
+/* ── the selection bubble — formatting rides with the selection ────────── */
+.doc-bubble {
+	position: absolute; z-index: 46;
+	background: var(--panel);
+	border: 1px solid var(--hairline); border-radius: var(--r-m);
+	box-shadow: var(--shadow-m);
+	max-width: calc(100vw - 1rem);
+}
+.doc-bubble[hidden] { display: none; }
+.doc-bubble .doc-row {
+	display: flex; align-items: center; gap: 2px;
+	padding: 0.22rem 0.3rem;
+	overflow-x: auto;
+}
+.doc-bubble .doc-pop {
+	background: transparent;
+	border: 0; border-top: 1px solid var(--hairline);
+	padding: 0.45rem 0.5rem;
 }
 .doc-col { padding: 1.7rem 0 30vh; }
 .doc-col .prose { max-width: none; }
@@ -1036,19 +1056,19 @@ textarea.doc-text::placeholder { color: var(--ink); opacity: 0.3; }
 	border-bottom: 1px solid var(--hairline);
 	overflow-x: auto;
 }
-.doc-tools .tb {
+.doc-tools .tb, .doc-bubble .tb {
 	flex: none; border: 0; border-radius: var(--r-s); background: transparent;
 	padding: 0.42rem 0.6rem; opacity: 0.7; box-shadow: none;
 	font: 500 0.8rem/1 var(--font-mono); color: var(--ink);
 	white-space: nowrap;
 }
-.doc-tools .tb:hover { background: var(--wash); opacity: 1;
+.doc-tools .tb:hover, .doc-bubble .tb:hover { background: var(--wash); opacity: 1;
 	border-color: transparent; box-shadow: none; }
-.doc-tools .tb.on { background: var(--ink); color: var(--surface); opacity: 1; }
-.doc-tools .tb:disabled { opacity: 0.25; }
-.doc-tools .tb:disabled:hover { background: transparent; }
-.doc-tools .tb-b { font-weight: 700; }
-.doc-tools .tb-i { font-style: italic; }
+.doc-tools .tb.on, .doc-bubble .tb.on { background: var(--ink); color: var(--surface); opacity: 1; }
+.doc-tools .tb:disabled, .doc-bubble .tb:disabled { opacity: 0.25; }
+.doc-tools .tb:disabled:hover, .doc-bubble .tb:disabled:hover { background: transparent; }
+.doc-tools .tb-b, .doc-bubble .tb-b { font-weight: 700; }
+.doc-tools .tb-i, .doc-bubble .tb-i { font-style: italic; }
 .doc-tools .tb-s { text-decoration: line-through; }
 .tb-sep { flex: none; width: 1px; align-self: stretch;
 	margin: 0.25rem 0.4rem; background: var(--hairline); }
