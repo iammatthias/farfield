@@ -832,8 +832,13 @@ dialog.doc-keys::backdrop { background: color-mix(in srgb, var(--ink) 25%, trans
 }
 .rev-list li:first-child { border-top: 0; }
 .rev-when { opacity: 0.7; }
-.rev-words { margin-left: auto; font-size: 0.75rem; }
-.rev-list form { margin: 0; }
+/* The size sits WITH the date, not pushed against the action. Right-aligned
+   next to Restore it occupied the slot every other UI uses for a relative
+   age, and "872w" there was read as 872 weeks by the person whose history
+   it was. Date and size are one metadata cluster; the action stands alone. */
+.rev-words { font-size: 0.75rem; }
+.rev-list li > .badge, .rev-list li > button, .rev-list form { margin-left: auto; }
+.rev-list form { margin-top: 0; margin-bottom: 0; }
 .rev-list button {
 	padding: 0.22rem 0.6rem; font-size: 0.72rem;
 	background: var(--panel); color: var(--ink);
