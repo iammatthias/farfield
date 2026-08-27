@@ -824,3 +824,48 @@ func TestAgentDisabledStillAnswersCommands(t *testing.T) {
 		t.Errorf("refusal = %q, want it to point somewhere useful", reply)
 	}
 }
+
+// The third shape the content union has been observed wearing, verbatim from
+// the 2026-08-27 production log: a "group" whose items are full sub-MESSAGES,
+// each wrapping its payload one level down in a "content" key beside its own
+// sender/space/timestamp. The first such delivery flattened to nothing and a
+// texted "/feed" with a photo was silently ignored.
+func TestFlattenSubMessageGroup(t *testing.T) {
+	raw := `{
+	  "type": "group",
+	  "items": [
+	    {
+	      "content": {"text": "/feed", "type": "text"},
+	      "direction": "inbound",
+	      "id": "p:0/spc-msg-a2113987",
+	      "platform": "imessage",
+	      "space": {"id": "any;-;+15551234567", "type": "dm"},
+	      "sender": {"id": "+15551234567", "platform": "imessage"}
+	    },
+	    {
+	      "content": {"mimeType": "image/heic", "name": "IMG_4601.heic",
+	        "type": "attachment", "guid": "att-sub-1"},
+	      "direction": "inbound",
+	      "id": "p:0/spc-msg-b3224098",
+	      "platform": "imessage",
+	      "space": {"id": "any;-;+15551234567", "type": "dm"},
+	      "sender": {"id": "+15551234567", "platform": "imessage"}
+	    }
+	  ]
+	}`
+	var c content
+	if err := json.Unmarshal([]byte(raw), &c); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	text, atts := flatten(c)
+	if text != "/feed" {
+		t.Errorf("text = %q, want the sub-message's text recovered", text)
+	}
+	if len(atts) != 1 {
+		t.Fatalf("attachments = %d, want 1", len(atts))
+	}
+	if atts[0].ID != "att-sub-1" || atts[0].Name != "IMG_4601.heic" ||
+		atts[0].MimeType != "image/heic" {
+		t.Errorf("attachment = %+v", atts[0])
+	}
+}

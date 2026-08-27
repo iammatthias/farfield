@@ -87,6 +87,14 @@ type content struct {
 
 	Items       []content `json:"items"`
 	Attachments []content `json:"attachments"`
+
+	// Inner is the third shape this union has been observed wearing: a
+	// "group" whose items are full sub-MESSAGES, each wrapping its real
+	// payload one level down in a "content" key (alongside its own sender,
+	// space, and timestamp). The first such delivery flattened to nothing
+	// and a texted "/feed" with a photo was silently ignored — the log's
+	// raw-content diagnostic is how it was caught.
+	Inner *content `json:"content"`
 }
 
 // attachmentID returns the attachment's identifier under whichever key it came
@@ -155,6 +163,11 @@ func flatten(c content) (text string, atts []attachment) {
 	walk = func(node content, inList bool) {
 		if inertContent[node.Type] {
 			return
+		}
+		// A sub-message wrapper carries its payload one level down; the
+		// wrapper itself has no text or type of its own.
+		if node.Inner != nil {
+			walk(*node.Inner, inList)
 		}
 		if s := cleanText(node.Text); s != "" {
 			texts = append(texts, s)
