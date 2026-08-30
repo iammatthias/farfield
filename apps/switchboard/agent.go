@@ -15,6 +15,7 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
+	"syscall"
 	"time"
 
 	"github.com/iammatthias/farfield/lib/store"
@@ -220,6 +221,29 @@ func (a *agentRunner) exec(ctx context.Context, job *Job, files []namedTempFile)
 	var stdout, stderr strings.Builder
 	cmd.Stdout = &stdout
 	cmd.Stderr = &stderr
+
+	// The agent gets its own process group, and cancelling kills the group
+	// rather than the process.
+	//
+	// CommandContext's default is to signal the direct child only, and an
+	// agent harness is a wrapper that spawns the model process underneath it
+	// — so /cancel killed omp and left the actual turn running. Worse, it
+	// looked like nothing happened: the orphan inherits the pipes this
+	// function reads, Run waits for those to close, and the reply ("cancelled
+	// · id") is only sent once Run returns. Cancelling a long turn therefore
+	// hung until the orphan finished on its own. The switchboard test caught
+	// it every CI run for a week — the stub's `sleep 60` outliving the `sh`
+	// that owned it is the same bug in miniature.
+	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
+	cmd.Cancel = func() error {
+		// Negative pid means the group. Setpgid above makes the child its
+		// leader, so this reaches every descendant that has not left it.
+		return syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL)
+	}
+	// A descendant that escapes the group (its own setsid) could still hold
+	// the pipes open forever. Past this much grace, stop waiting and take
+	// whatever output arrived: a cancel that does not return is not a cancel.
+	cmd.WaitDelay = 5 * time.Second
 
 	started := time.Now()
 	err := cmd.Run()
