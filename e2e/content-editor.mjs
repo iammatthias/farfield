@@ -83,19 +83,20 @@ try {
 
   // ── round trip: open rich, flip to markdown with no edits ──
   await page.goto(`${BASE}/entries/${slug}/edit`);
-  await page.click(".doc-card");
-  await page.waitForSelector("dialog.doc-editor[open] .doc-rich");
+  // The page IS the editor: no card to click, no dialog to open. The rich
+  // surface mounts itself and appears once its render round-trip returns.
+  await page.waitForSelector("[data-doc-host] .doc-rich");
   await page.waitForTimeout(400);
   check("verbatim table block", await page.locator(".doc-rich pre.md-verbatim").count() > 0);
 
-  await page.click('dialog.doc-editor .seg button:has-text("Markdown")');
-  const roundtripped = await page.locator("dialog.doc-editor textarea#body").inputValue();
+  await page.click('.seg button:has-text("Markdown")');
+  const roundtripped = await page.locator("textarea#body").inputValue();
   check("round trip is byte-identical", roundtripped.trim() === BODY.trim(),
     JSON.stringify(roundtripped.slice(0, 120)));
 
   // ── rich edits serialize correctly ──
-  await page.click('dialog.doc-editor .seg button:has-text("Edit")');
-  await page.waitForSelector("dialog.doc-editor .doc-rich");
+  await page.click('.seg button:has-text("Edit")');
+  await page.waitForSelector("[data-doc-host] .doc-rich");
   await page.waitForTimeout(300);
 
   await page.evaluate(() => {
@@ -114,7 +115,7 @@ try {
 
   await page.keyboard.press("Meta+s");
   await page.waitForFunction(() =>
-    /^Saved/.test(document.querySelector("dialog.doc-editor .doc-state").textContent));
+    /^Saved/.test(document.querySelector(".save-note").textContent));
   const after = await (await api("/api/entries/" + slug)).json();
   check("saved markdown has the heading", after.body.includes("## Appendix"));
   check("saved markdown keeps the table", after.body.includes("| a | b |"));
@@ -130,9 +131,9 @@ try {
   });
   await page.keyboard.type(" autosaved-token");
   await page.waitForFunction(() =>
-    /Unsaved/.test(document.querySelector("dialog.doc-editor .doc-state").textContent));
+    /Unsaved/.test(document.querySelector(".save-note").textContent));
   await page.waitForFunction(() =>
-    /^Saved/.test(document.querySelector("dialog.doc-editor .doc-state").textContent),
+    /^Saved/.test(document.querySelector(".save-note").textContent),
     null, { timeout: 9000 });
   const after2 = await (await api("/api/entries/" + slug)).json();
   check("autosave persisted", after2.body.includes("autosaved-token"));
