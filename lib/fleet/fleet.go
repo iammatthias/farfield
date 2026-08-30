@@ -109,3 +109,30 @@ func (s Service) PublicURL() string {
 	}
 	return "https://" + s.Public + "/"
 }
+
+// PublicStatusURL is the service's /status probe address as the public
+// internet reaches it — the outside view, where StatusURL is the inside one.
+// It is "" for a tailnet-only service, which by definition has no outside.
+//
+// The external uptime canary derives its whole farfield target list from this
+// rather than keeping its own copy, so a service added to the registry is
+// watched from off-site on the next run with nothing else to remember. That
+// list had been hand-maintained and covered four of the thirteen public
+// services, which is the same drift this package exists to prevent.
+func (s Service) PublicStatusURL() string {
+	if s.Public == "" {
+		return ""
+	}
+	return "https://" + s.Public + "/status"
+}
+
+// PublicServices returns every service with a public face, in port order.
+func PublicServices() []Service {
+	out := []Service{}
+	for _, s := range services {
+		if s.Public != "" {
+			out = append(out, s)
+		}
+	}
+	return out
+}

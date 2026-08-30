@@ -1,12 +1,33 @@
 # The external watcher. Pulse monitors the fleet from inside the homelab and
 # the status page probes it from inside the compose network — but if the
 # tunnel, DNS, or the box itself dies, nothing off-site notices. GitHub's
-# runners are that off-site: every half hour they ask the two observability
-# surfaces whether the fleet is reachable from the public internet. A failed
-# run emails the repo owner — no third-party uptime account required.
+# runners are that off-site: every half hour they ask each public service
+# whether it is reachable from the public internet. A failed run emails the
+# repo owner — no third-party uptime account required.
 #
-# The Cloudflare edge in front of *.farfield.systems refuses bot-shaped
-# User-Agents, so the checks send a browser-shaped one.
+# The target list is derived from lib/fleet, never written down here. It was
+# written down here once, four URLs of it, and the fleet grew to thirteen
+# public services around it — nine of them watched by nothing off-site, with
+# no symptom, because a canary watching a stale subset reports green exactly
+# like a canary watching everything. Registering a service is now the whole
+# job; drift tests in lib/fleet fail CI if this file ever grows its own copy.
+#
+# Neighbours that are not farfield are listed by hand below, because they are
+# not in the registry and should not be. They are here because they share a
+# failure domain with the fleet or are simply worth knowing about.
+#
+# The Cloudflare edge in front of the fleet refuses bot-shaped User-Agents, so
+# the checks send a browser-shaped one.
+#
+# A single probe is not evidence of an outage. The homelab's WAN drops UDP for
+# a few seconds roughly three times a day, which takes every QUIC connection
+# the tunnel holds down with it — both connectors, all eight connections, the
+# same second — and the edge answers 502 until cloudflared re-registers. Fifty
+# such episodes over nine days totalled under nine minutes, none longer than
+# 66 seconds. A one-shot check that lands in one of those windows reports the
+# fleet dead when it was briefly unreachable, and an alert that cries wolf is
+# worse than no alert. So a failure is re-probed rather than believed: three
+# passes, 45 seconds apart, and only a URL that fails all three counts as down.
 name: Uptime
 
 on:
@@ -17,23 +38,100 @@ on:
 jobs:
   canary:
     runs-on: ubuntu-latest
-    timeout-minutes: 5
+    timeout-minutes: 10
     steps:
-      - name: Probe the fleet from outside
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: 1.27.x
+          cache-dependency-path: go.work.sum
+
+      # Ask the registry what farfield is right now. A canary that cannot
+      # learn its targets is a broken canary, not a dead fleet, and it says so
+      # in those words — reporting an outage here would be the same false
+      # alarm the retry logic below exists to prevent.
+      - name: Derive the fleet's public targets
+        run: |
+          if ! go run ./lib/fleet/cmd/publictargets > targets.txt; then
+            echo "CANARY BROKEN: could not derive targets from lib/fleet."
+            echo "This says nothing about whether the fleet is up."
+            exit 1
+          fi
+          count=$(grep -c . targets.txt || true)
+          if [ "${count:-0}" -lt 2 ]; then
+            echo "CANARY BROKEN: derived only ${count:-0} target(s); the registry read wrong."
+            exit 1
+          fi
+          echo "derived $count public services from lib/fleet:"
+          sed 's/^/  /' targets.txt
+
+      - name: Probe from outside
         run: |
           UA="Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0 Safari/537.36 farfield-canary"
-          fail=0
-          for url in \
-            "https://farfield.systems/status" \
-            "https://pulse.farfield.systems/status" \
-            "https://content.farfield.systems/status" \
-            "https://blobs.farfield.systems/status"; do
-            body=$(curl -sS --max-time 20 -A "$UA" "$url" || true)
-            if echo "$body" | grep -q '"ok":true'; then
-              echo "ok    $url"
-            else
-              echo "DOWN  $url — got: ${body:-no response}"
-              fail=1
+          PASSES=3
+          GAP=45
+
+          # Each entry is "group<TAB>url". Groups only shape the report; any
+          # sustained failure fails the run.
+          pending=()
+          while read -r url; do
+            [ -n "$url" ] && pending+=("fleet	$url")
+          done < targets.txt
+
+          # Not farfield, deliberately absent from the registry:
+          #   bard, dead-presidents — still on the homelab, served through the
+          #     second (pure-internet) cloudflared connector, so they share the
+          #     box and the WAN with the fleet and go dark with it.
+          #   epochs — a standalone Cloudflare Worker. It does not share the
+          #     homelab's failure domain at all, which is the point of watching
+          #     it here: if it is down while the fleet is up, the cause is
+          #     somewhere else entirely.
+          pending+=("neighbour	https://bard.pure---internet.com/status")
+          pending+=("neighbour	https://dead-presidents.pure---internet.com/status")
+          pending+=("neighbour	https://epochs.pure---internet.com/")
+
+          echo "probing ${#pending[@]} endpoints"
+          echo
+
+          for pass in $(seq 1 $PASSES); do
+            [ ${#pending[@]} -eq 0 ] && break
+            if [ "$pass" -gt 1 ]; then
+              echo "-- ${#pending[@]} still failing; re-probing in ${GAP}s (pass $pass/$PASSES)"
+              sleep "$GAP"
             fi
+
+            still=()
+            for entry in "${pending[@]}"; do
+              group=${entry%%	*}
+              url=${entry#*	}
+              body=$(curl -sS --max-time 20 -A "$UA" "$url" || true)
+
+              # A fleet service answers {"ok":true}. epochs is a rendered page
+              # with no status endpoint, so for neighbours without one, any
+              # non-empty response is the liveness signal.
+              if echo "$body" | grep -q '"ok":true' || { [ "$group" = neighbour ] && [ -n "$body" ] && ! echo "$body" | grep -qi 'error code:'; }; then
+                if [ "$pass" -gt 1 ]; then
+                  echo "ok    [$group] $url (recovered on pass $pass — transient)"
+                else
+                  echo "ok    [$group] $url"
+                fi
+              else
+                echo "fail  [$group] $url (pass $pass/$PASSES) — got: ${body:-no response}"
+                still+=("$entry")
+              fi
+            done
+            pending=("${still[@]}")
           done
-          exit $fail
+
+          if [ ${#pending[@]} -gt 0 ]; then
+            echo
+            echo "DOWN after $PASSES passes over $((GAP * (PASSES - 1)))s:"
+            for entry in "${pending[@]}"; do
+              echo "  [${entry%%	*}] ${entry#*	}"
+            done
+            exit 1
+          fi
+
+          echo
+          echo "everything reachable from outside"
