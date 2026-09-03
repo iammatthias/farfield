@@ -75,12 +75,19 @@ analytics — session-gated console, no public API beyond `/status`; see
   **CID**, a CIDv1 (sha-256) hash of its *content*. The key never
   changes; the CID changes whenever the content does. Use the CID for
   change-detection, cache validation, or verification (re-hash to confirm).
-- **Conditional GET.** Single-record endpoints send the CID as a strong
-  `ETag`. Send `If-None-Match: "<cid>"` to get `304 Not Modified` when
-  unchanged. Blob bytes are immutable and cached forever.
+- **Conditional GET.** Single-record endpoints send a strong `ETag` — the
+  CID, except for entries, where it hashes the CID together with
+  `publishedAt` (the one field that can change without the content
+  changing). Echo the `ETag` you received in `If-None-Match` to get
+  `304 Not Modified` when unchanged. Blob bytes are immutable and cached
+  forever.
 - Timestamps are RFC3339 UTC strings.
 - The read API returns **published entries only**; the **write** key additionally
   previews drafts (a draft is a `404` without it).
+- `publishedAt` is when an entry first went public: stamped on the first
+  publish, sticky through unpublish and republish, and absent from a draft
+  that has never been published. A writer may set it explicitly (RFC3339,
+  not in the future) to correct a date; an omitted field keeps the stored one.
 
 ## content — `https://content.farfield.systems`
 
@@ -258,7 +265,7 @@ by retrying); a bad signature answers `401`.
 
 // Entry — body is markdown; see "Body URIs" below
 { "collection", "slug", "cid", "title", "excerpt"?, "body",
-  "tags": [], "published", "createdAt", "updatedAt" }
+  "tags": [], "published", "publishedAt"?, "createdAt", "updatedAt" }
 
 // Series — a reusable markdown fragment
 { "slug", "cid", "title"?, "body", "createdAt", "updatedAt" }
@@ -322,7 +329,7 @@ const BLOBS   = "https://blobs.farfield.systems";
 export type Entry = {
   collection: string; slug: string; cid: string; title: string;
   excerpt?: string; body: string; tags: string[]; published: boolean;
-  createdAt: string; updatedAt: string;
+  publishedAt?: string; createdAt: string; updatedAt: string;
 };
 export type Collection = {
   slug: string; name: string; description?: string;

@@ -43,6 +43,12 @@ type Entry struct {
 	Published  bool     `json:"published"`
 	CreatedAt  string   `json:"createdAt"`
 	UpdatedAt  string   `json:"updatedAt"`
+	// PublishedAt is when the entry first went public — stamped the first
+	// time Published flips true and sticky from then on (unpublishing and
+	// republishing never moves it). Empty, and omitted from JSON, for an
+	// entry that has never been published. Metadata, not content: it is
+	// outside the CID, so setting it never churns a consumer's content cache.
+	PublishedAt string `json:"publishedAt,omitempty"`
 }
 
 // Series is a reusable markdown fragment — typically a gallery. An entry body
@@ -77,7 +83,8 @@ CREATE TABLE IF NOT EXISTS entries (
 	created_at    TEXT NOT NULL,
 	updated_at    TEXT NOT NULL,
 	cid           TEXT NOT NULL DEFAULT '',
-	deleted_at    TEXT NOT NULL DEFAULT ''
+	deleted_at    TEXT NOT NULL DEFAULT '',
+	published_at  TEXT NOT NULL DEFAULT ''
 );
 CREATE INDEX IF NOT EXISTS entries_by_collection ON entries (collection_id, created_at DESC);
 CREATE INDEX IF NOT EXISTS entries_by_created ON entries (created_at DESC);
@@ -123,7 +130,15 @@ func openDB(path string) (*sql.DB, error) {
 	if err := store.EnsureColumn(db, "entries", "deleted_at", "TEXT NOT NULL DEFAULT ''"); err != nil {
 		return nil, err
 	}
+	// Migrate pre-publish-date databases: published_at is when an entry first
+	// went public ('' = never). Added, then reconstructed for existing rows.
+	if err := store.EnsureColumn(db, "entries", "published_at", "TEXT NOT NULL DEFAULT ''"); err != nil {
+		return nil, err
+	}
 	if err := backfillCIDs(db); err != nil {
+		return nil, err
+	}
+	if err := backfillPublishedAt(db); err != nil {
 		return nil, err
 	}
 	// The trash empties itself: anything soft-deleted more than
@@ -339,19 +354,19 @@ func deleteCollection(db *sql.DB, slug string) (bool, error) {
 // ── entries ────────────────────────────────────────────────────────────────
 
 const entryCols = `e.id, c.slug, e.slug, e.cid, e.title, e.excerpt, e.body, e.tags,
-	e.published, e.created_at, e.updated_at`
+	e.published, e.created_at, e.updated_at, e.published_at`
 
 // entryListCols is the body-less projection for list views: the same shape as
 // entryCols — so scanEntry works unchanged — with ” standing in for the
 // (potentially large) markdown body.
 const entryListCols = `e.id, c.slug, e.slug, e.cid, e.title, e.excerpt, '' AS body, e.tags,
-	e.published, e.created_at, e.updated_at`
+	e.published, e.created_at, e.updated_at, e.published_at`
 
 func scanEntry(row interface{ Scan(...any) error }) (*Entry, error) {
 	var e Entry
 	var tags string
 	if err := row.Scan(&e.ID, &e.Collection, &e.Slug, &e.CID, &e.Title, &e.Excerpt,
-		&e.Body, &tags, &e.Published, &e.CreatedAt, &e.UpdatedAt); err != nil {
+		&e.Body, &tags, &e.Published, &e.CreatedAt, &e.UpdatedAt, &e.PublishedAt); err != nil {
 		return nil, err
 	}
 	e.Tags = decodeTags(tags)
@@ -462,13 +477,18 @@ func countEntries(db *sql.DB, collection string, status entryStatus) (int, error
 }
 
 // entriesFingerprint returns a cheap change fingerprint for an entry list —
-// "<count>-<max updated_at>" — used to derive a list-level ETag without loading
-// any bodies. collection filters by collection slug ("" = all); status scopes
-// the fingerprint so a draft change cannot reuse a published list's ETag.
-// Trashed entries are excluded, matching the lists the fingerprint stands
-// for; the count moves on a trash or restore, so the ETag moves with it.
+// "<count>-<max updated_at>-<max published_at>" — used to derive a list-level
+// ETag without loading any bodies. collection filters by collection slug
+// ("" = all); status scopes the fingerprint so a draft change cannot reuse a
+// published list's ETag. Trashed entries are excluded, matching the lists the
+// fingerprint stands for; the count moves on a trash or restore, so the ETag
+// moves with it. max published_at is in it because the publish-date backfill
+// writes published_at alone, on purpose — bumping updated_at would make
+// "updated" lie — and a list ETag that missed it would revalidate consumers
+// onto their stale copy forever.
 func entriesFingerprint(db *sql.DB, collection string, status entryStatus) (string, error) {
-	q := `SELECT COUNT(*) || '-' || COALESCE(MAX(e.updated_at), '') FROM entries e`
+	q := `SELECT COUNT(*) || '-' || COALESCE(MAX(e.updated_at), '') || '-' || COALESCE(MAX(e.published_at), '')
+	      FROM entries e`
 	where := []string{"e.deleted_at = ''"}
 	var args []any
 	if collection != "" {
@@ -539,13 +559,14 @@ func insertEntry(db *sql.DB, e *Entry) error {
 	}
 	e.UpdatedAt = now.Format(time.RFC3339)
 	e.Slug = stampSlug(e.Slug, now)
+	e.PublishedAt = stampPublishedAt(e.PublishedAt, "", e.Published, now)
 	e.CID = entryCID(e)
 	res, err := db.Exec(
 		`INSERT INTO entries
-		   (collection_id, slug, title, excerpt, body, tags, published, created_at, updated_at, cid)
-		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		   (collection_id, slug, title, excerpt, body, tags, published, created_at, updated_at, cid, published_at)
+		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		collID, e.Slug, e.Title, e.Excerpt, e.Body, encodeTags(e.Tags),
-		e.Published, e.CreatedAt, e.UpdatedAt, e.CID)
+		e.Published, e.CreatedAt, e.UpdatedAt, e.CID, e.PublishedAt)
 	if err != nil {
 		if isUnique(err) {
 			return errSlugTaken
@@ -566,14 +587,25 @@ func updateEntry(db *sql.DB, currentSlug string, e *Entry) error {
 	if err != nil {
 		return err
 	}
-	e.UpdatedAt = store.NowRFC3339()
+	now := time.Now().UTC()
+	e.UpdatedAt = now.Format(time.RFC3339)
 	e.CID = entryCID(e)
+	// The publish date is decided against what is stored, not what the
+	// caller sent: an omitted value keeps the existing stamp, and the first
+	// flip to published stamps now. Only an explicit, valid value overrides.
+	var prevPublishedAt string
+	if err := db.QueryRow(
+		`SELECT published_at FROM entries WHERE slug = ? AND deleted_at = ''`,
+		currentSlug).Scan(&prevPublishedAt); err != nil {
+		return err // sql.ErrNoRows for a missing or trashed entry
+	}
+	e.PublishedAt = stampPublishedAt(e.PublishedAt, prevPublishedAt, e.Published, now)
 	res, err := db.Exec(
 		`UPDATE entries SET collection_id = ?, slug = ?, title = ?, excerpt = ?,
-		   body = ?, tags = ?, published = ?, updated_at = ?, cid = ?
+		   body = ?, tags = ?, published = ?, updated_at = ?, cid = ?, published_at = ?
 		 WHERE slug = ? AND deleted_at = ''`,
 		collID, e.Slug, e.Title, e.Excerpt, e.Body, encodeTags(e.Tags),
-		e.Published, e.UpdatedAt, e.CID, currentSlug)
+		e.Published, e.UpdatedAt, e.CID, e.PublishedAt, currentSlug)
 	if err != nil {
 		if isUnique(err) {
 			return errSlugTaken
@@ -712,20 +744,33 @@ func importEntry(db *sql.DB, e *Entry) error {
 	if e.UpdatedAt == "" {
 		e.UpdatedAt = e.CreatedAt
 	}
+	// An import re-creates content that already existed elsewhere, so a
+	// published import was published when it was created. A stamp the row
+	// already carries is kept — the publish date is sticky here too.
+	if e.PublishedAt == "" && e.Published {
+		e.PublishedAt = e.CreatedAt
+	}
 	e.CID = entryCID(e)
 	_, err = db.Exec(
 		`INSERT INTO entries
-		   (collection_id, slug, title, excerpt, body, tags, published, created_at, updated_at, cid)
-		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+		   (collection_id, slug, title, excerpt, body, tags, published, created_at, updated_at, cid, published_at)
+		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 		 ON CONFLICT(slug) DO UPDATE SET
 		   collection_id=excluded.collection_id, title=excluded.title,
 		   excerpt=excluded.excerpt, body=excluded.body, tags=excluded.tags,
 		   published=excluded.published, created_at=excluded.created_at,
 		   updated_at=excluded.updated_at, cid=excluded.cid,
+		   published_at=CASE WHEN entries.published_at != '' THEN entries.published_at
+		                     ELSE excluded.published_at END,
 		   deleted_at=''`,
 		collID, e.Slug, e.Title, e.Excerpt, e.Body, encodeTags(e.Tags),
-		e.Published, e.CreatedAt, e.UpdatedAt, e.CID)
-	return err
+		e.Published, e.CreatedAt, e.UpdatedAt, e.CID, e.PublishedAt)
+	if err != nil {
+		return err
+	}
+	// Report the stamp the row actually holds — the sticky one on a
+	// re-import — so callers see the truth, not their request.
+	return db.QueryRow(`SELECT published_at FROM entries WHERE slug = ?`, e.Slug).Scan(&e.PublishedAt)
 }
 
 // collectionID resolves a collection slug to its row id.

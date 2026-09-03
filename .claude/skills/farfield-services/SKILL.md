@@ -120,7 +120,7 @@ aggregates uptime and per-app traffic.
 
 ```jsonc
 // Entry    { "collection", "slug", "cid", "title", "excerpt"?, "body",
-//            "tags": [], "published", "createdAt", "updatedAt" }
+//            "tags": [], "published", "publishedAt"?, "createdAt", "updatedAt" }
 // Series   { "slug", "cid", "title"?, "body", "createdAt", "updatedAt" }
 // Post     { "slug", "cid", "body", "tags": [], "createdAt", "updatedAt" }
 // BlobMeta { "cid", "size", "mime", "width"?, "height"?, "blurhash"?, "dominantColor"? }

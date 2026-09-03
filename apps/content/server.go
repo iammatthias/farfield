@@ -681,7 +681,9 @@ func (s *Server) handleAPIEntry(w http.ResponseWriter, r *http.Request) {
 		web.WriteError(w, http.StatusNotFound, "entry not found")
 		return
 	}
-	web.WriteRecord(w, r, e.CID, e)
+	// Not the bare CID: published_at sits outside it, and a date filled in
+	// by backfill or by hand must invalidate a cached copy too.
+	web.WriteRecord(w, r, entryETag(e), e)
 }
 
 // ── API-key-gated write API ────────────────────────────────────────────────
