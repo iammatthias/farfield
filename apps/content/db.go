@@ -485,9 +485,15 @@ func countEntries(db *sql.DB, collection string, status entryStatus) (int, error
 // moves with it. max published_at is in it because the publish-date backfill
 // writes published_at alone, on purpose — bumping updated_at would make
 // "updated" lie — and a list ETag that missed it would revalidate consumers
-// onto their stale copy forever.
+// onto their stale copy forever. The slugs are in it for the same reason:
+// reslugEntries rewrites the key without touching updated_at, and a slug is
+// a URL, so a consumer that missed the rename would keep publishing links to
+// a path that no longer resolves. Reading the slug column is not the cheap
+// aggregate the rest of this is, but slugs are a rounding error next to the
+// bodies a 304 still avoids loading.
 func entriesFingerprint(db *sql.DB, collection string, status entryStatus) (string, error) {
 	q := `SELECT COUNT(*) || '-' || COALESCE(MAX(e.updated_at), '') || '-' || COALESCE(MAX(e.published_at), '')
+	             || '-' || COALESCE(group_concat(e.slug), '')
 	      FROM entries e`
 	where := []string{"e.deleted_at = ''"}
 	var args []any
@@ -507,11 +513,14 @@ func entriesFingerprint(db *sql.DB, collection string, status entryStatus) (stri
 	return fp, err
 }
 
-// seriesFingerprint is entriesFingerprint for the series table.
+// seriesFingerprint is entriesFingerprint for the series table, slugs and
+// all — reslugSeries renames without touching updated_at too.
 func seriesFingerprint(db *sql.DB) (string, error) {
 	var fp string
 	err := db.QueryRow(
-		`SELECT COUNT(*) || '-' || COALESCE(MAX(updated_at), '') FROM series`).Scan(&fp)
+		`SELECT COUNT(*) || '-' || COALESCE(MAX(updated_at), '')
+		        || '-' || COALESCE(group_concat(slug), '')
+		 FROM series`).Scan(&fp)
 	return fp, err
 }
 

@@ -350,3 +350,32 @@ func TestPublishedAtInAPI(t *testing.T) {
 		t.Errorf("after: publishedAt=%q cid=%q (cid before %v)", after.PublishedAt, after.CID, pub["cid"])
 	}
 }
+
+// TestReslugMovesListETag: reslugEntries rewrites a slug and leaves updated_at
+// alone by design, so the list fingerprint has to see the slug itself. It did
+// not once, and every ETag-aware consumer — the site's build loader, its edge
+// cache — revalidated onto a copy holding URLs that no longer resolved.
+func TestReslugMovesListETag(t *testing.T) {
+	s, seeds := readTestServer(t)
+	srv := httptest.NewServer(s.routes())
+	defer srv.Close()
+
+	listTag := apiGetResp(t, srv, "/api/entries", "read-secret", "").Header.Get("ETag")
+	if listTag == "" {
+		t.Fatal("missing list ETag")
+	}
+	if resp := apiGetResp(t, srv, "/api/entries", "read-secret", listTag); resp.StatusCode != http.StatusNotModified {
+		t.Fatalf("matching If-None-Match: %d, want 304", resp.StatusCode)
+	}
+
+	// The reslug's write: the slug alone, updated_at untouched.
+	if _, err := s.db.Exec(
+		`UPDATE entries SET slug = ? WHERE slug = ?`,
+		"1700000000000-"+seeds.pubSlug, seeds.pubSlug); err != nil {
+		t.Fatal(err)
+	}
+	got := apiGetResp(t, srv, "/api/entries", "read-secret", listTag)
+	if got.StatusCode != http.StatusOK || got.Header.Get("ETag") == listTag {
+		t.Errorf("list ETag did not move on a slug rename: %d %s", got.StatusCode, got.Header.Get("ETag"))
+	}
+}
