@@ -3,6 +3,8 @@ package main
 import (
 	"net/http"
 	"strings"
+
+	"github.com/iammatthias/farfield/lib/web"
 )
 
 // Soft delete. An entry goes to trash, can come back, and only leaves for good
@@ -47,7 +49,7 @@ func (s *Server) handleDestroyEntry(w http.ResponseWriter, r *http.Request) {
 func entryFromForm(r *http.Request) *Entry {
 	_ = r.ParseForm()
 	title := strings.TrimSpace(r.FormValue("title"))
-	slug := firstNonEmpty(slugify(r.FormValue("slug")), slugify(title))
+	slug := web.FirstNonEmpty(slugify(r.FormValue("slug")), slugify(title))
 	return &Entry{
 		Collection: r.FormValue("collection"),
 		Slug:       slug,

@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/iammatthias/farfield/lib/store"
+	"github.com/iammatthias/farfield/lib/web"
 	"gopkg.in/yaml.v3"
 )
 
@@ -153,7 +154,7 @@ func entryFromFile(file, collection string) (*Entry, error) {
 		return nil, fmt.Errorf("parsing frontmatter: %w", err)
 	}
 
-	slug := slugify(firstNonEmpty(fm.Slug, strings.TrimSuffix(filepath.Base(file), ".md")))
+	slug := slugify(web.FirstNonEmpty(fm.Slug, strings.TrimSuffix(filepath.Base(file), ".md")))
 	if slug == "" {
 		return nil, fmt.Errorf("no usable slug")
 	}
@@ -165,7 +166,7 @@ func entryFromFile(file, collection string) (*Entry, error) {
 	return &Entry{
 		Collection: collection,
 		Slug:       slug,
-		Title:      firstNonEmpty(fm.Title, slug),
+		Title:      web.FirstNonEmpty(fm.Title, slug),
 		Excerpt:    strings.TrimSpace(fm.Excerpt),
 		Body:       strings.TrimSpace(body),
 		Tags:       fm.Tags,

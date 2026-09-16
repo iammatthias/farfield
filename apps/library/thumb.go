@@ -5,10 +5,11 @@ import (
 	"image"
 	"image/jpeg"
 
+	_ "image/gif" // register the GIF decoder for cover images
+	_ "image/png" // register the PNG decoder for cover images
+
 	"golang.org/x/image/draw"
 	_ "golang.org/x/image/webp" // register the WebP decoder for cover images
-	_ "image/gif"               // register the GIF decoder for cover images
-	_ "image/png"               // register the PNG decoder for cover images
 )
 
 const (

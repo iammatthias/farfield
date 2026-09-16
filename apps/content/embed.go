@@ -84,7 +84,7 @@ func (s *Server) handleAPICreateSeries(w http.ResponseWriter, r *http.Request) {
 		web.WriteError(w, http.StatusBadRequest, "invalid JSON")
 		return
 	}
-	se.Slug = uniqueSlug(s.db, firstNonEmpty(slugify(se.Slug), slugify(se.Title)))
+	se.Slug = uniqueSlug(s.db, web.FirstNonEmpty(slugify(se.Slug), slugify(se.Title)))
 	se.Title = strings.TrimSpace(se.Title)
 	now := store.NowRFC3339()
 	se.CreatedAt, se.UpdatedAt = now, now

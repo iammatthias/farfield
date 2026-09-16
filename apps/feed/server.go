@@ -286,7 +286,7 @@ func (s *Server) handleUpdatePost(w http.ResponseWriter, r *http.Request) {
 // which is not a confirmation that anything was published. `created` and
 // `viewURL` let the editor say "Posted" and offer the way to go look.
 func (s *Server) postSaved(w http.ResponseWriter, r *http.Request, p *Post, created bool) {
-	if wantsJSON(r) {
+	if web.WantsJSON(r) {
 		web.WriteJSON(w, http.StatusOK, map[string]any{
 			"slug":    p.Slug,
 			"action":  "/posts/" + p.Slug,
@@ -302,7 +302,7 @@ func (s *Server) postSaved(w http.ResponseWriter, r *http.Request, p *Post, crea
 // postSaveError answers a failed create or update: a JSON error for the
 // editor's async saves, the re-rendered form for a plain post.
 func (s *Server) postSaveError(w http.ResponseWriter, r *http.Request, p *Post, isNew bool, action, msg string) {
-	if wantsJSON(r) {
+	if web.WantsJSON(r) {
 		web.WriteError(w, http.StatusBadRequest, msg)
 		return
 	}
@@ -508,12 +508,6 @@ func (s *Server) bodyHTML(r *http.Request, body string) template.HTML {
 // wordCount is the edit page's initial word count; the editor recounts live.
 func wordCount(body string) int {
 	return len(strings.Fields(body))
-}
-
-// wantsJSON reports whether the client asked for a JSON response — the
-// editor's async saves do, browser form posts don't.
-func wantsJSON(r *http.Request) bool {
-	return strings.Contains(r.Header.Get("Accept"), "application/json")
 }
 
 func (s *Server) renderPostForm(w http.ResponseWriter, r *http.Request, p *Post, isNew bool, action, errMsg string) {

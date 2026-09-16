@@ -4,6 +4,8 @@ import (
 	"errors"
 	"net/http"
 	"strings"
+
+	"github.com/iammatthias/farfield/lib/web"
 )
 
 // Collections as the author manages them — create, rename, delete. A
@@ -20,7 +22,7 @@ func (s *Server) handleCreateCollection(w http.ResponseWriter, r *http.Request) 
 	_ = r.ParseForm()
 	c := &Collection{
 		Name:        strings.TrimSpace(r.FormValue("name")),
-		Slug:        firstNonEmpty(slugify(r.FormValue("slug")), slugify(r.FormValue("name"))),
+		Slug:        web.FirstNonEmpty(slugify(r.FormValue("slug")), slugify(r.FormValue("name"))),
 		Description: strings.TrimSpace(r.FormValue("description")),
 	}
 	if c.Name == "" || c.Slug == "" {

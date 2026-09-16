@@ -97,8 +97,8 @@ func newServer(db *sql.DB, blobs *blobStore, password, apiKey string, cookieSecu
 
 func (s *Server) parseTemplates() error {
 	funcs := template.FuncMap{
-		"relAge":   relAge,
-		"sizeText": sizeText,
+		"relAge":   web.RelAge,
+		"sizeText": web.HumanSize,
 		"markdown": renderMarkdown,
 	}
 	tmpl, err := web.ParseTemplates(assets, funcs)

@@ -5,10 +5,11 @@ import (
 
 	"encoding/json"
 	"fmt"
-	"github.com/iammatthias/farfield/lib/bytestore"
 	"log/slog"
 	"strings"
 	"time"
+
+	"github.com/iammatthias/farfield/lib/bytestore"
 )
 
 // importSidecars copies every `<cid>.json` sidecar from the byte store into

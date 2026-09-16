@@ -122,7 +122,7 @@ func (s *Server) handleUpdateEntry(w http.ResponseWriter, r *http.Request) {
 // canonical URLs for the editor's async saves (the slug may have changed),
 // a redirect to the list for a plain form post.
 func (s *Server) entrySaved(w http.ResponseWriter, r *http.Request, e *Entry) {
-	if wantsJSON(r) {
+	if web.WantsJSON(r) {
 		web.WriteJSON(w, http.StatusOK, map[string]any{
 			"slug":    e.Slug,
 			"action":  "/entries/" + e.Slug,
@@ -136,7 +136,7 @@ func (s *Server) entrySaved(w http.ResponseWriter, r *http.Request, e *Entry) {
 // entrySaveError answers a failed create or update: a JSON error for the
 // editor's async saves, the re-rendered form for a plain post.
 func (s *Server) entrySaveError(w http.ResponseWriter, r *http.Request, e *Entry, isNew bool, action, msg string) {
-	if wantsJSON(r) {
+	if web.WantsJSON(r) {
 		web.WriteError(w, http.StatusBadRequest, msg)
 		return
 	}

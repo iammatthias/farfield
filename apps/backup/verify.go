@@ -9,6 +9,7 @@ import (
 
 	"github.com/iammatthias/farfield/lib/backup"
 	"github.com/iammatthias/farfield/lib/store"
+	"github.com/iammatthias/farfield/lib/web"
 )
 
 // The restore drill, minus the restore. A backup that has never been read
@@ -105,7 +106,7 @@ func runVerify(app string) error {
 			var tables int
 			if tables, err = verifySnapshot(tmpName); err == nil {
 				slog.Info("verified", "app", b.App, "cid", b.CID,
-					"size", humanSize(b.Size), "tables", tables, "taken", b.CreatedAt)
+					"size", web.HumanSize(b.Size), "tables", tables, "taken", b.CreatedAt)
 			}
 		}
 		if err != nil {

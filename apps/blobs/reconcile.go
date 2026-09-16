@@ -10,6 +10,7 @@ import (
 
 	"github.com/iammatthias/farfield/lib/bytestore"
 	"github.com/iammatthias/farfield/lib/store"
+	"github.com/iammatthias/farfield/lib/web"
 )
 
 // `blobs reconcile` closes the byte-store's one open loop: deletes whose
@@ -144,10 +145,10 @@ func runReconcile(confirm bool) error {
 	}
 
 	slog.Info("reconcile census", "objects", len(objects), "referenced", len(refs),
-		"orphans", len(orphans), "orphan_bytes", humanSize(orphanBytes),
+		"orphans", len(orphans), "orphan_bytes", web.HumanSize(orphanBytes),
 		"in_grace_window", fresh)
 	for _, o := range orphans {
-		slog.Info("orphan", "cid", o.Key, "size", humanSize(o.Size),
+		slog.Info("orphan", "cid", o.Key, "size", web.HumanSize(o.Size),
 			"modified", o.LastModified.UTC().Format(time.RFC3339))
 	}
 
@@ -167,6 +168,6 @@ func runReconcile(confirm bool) error {
 	if failed > 0 {
 		return fmt.Errorf("%d orphan(s) could not be deleted", failed)
 	}
-	slog.Info("reconcile complete", "deleted", len(orphans), "freed", humanSize(orphanBytes))
+	slog.Info("reconcile complete", "deleted", len(orphans), "freed", web.HumanSize(orphanBytes))
 	return nil
 }

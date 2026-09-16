@@ -101,10 +101,3 @@ func (s *Server) fail(w http.ResponseWriter, what string, err error) {
 	slog.Error(what, "err", err)
 	http.Error(w, "internal error", http.StatusInternalServerError)
 }
-
-func firstNonEmpty(a, b string) string {
-	if a != "" {
-		return a
-	}
-	return b
-}

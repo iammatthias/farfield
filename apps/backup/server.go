@@ -116,7 +116,7 @@ func (s *Server) runScheduledSnapshot() {
 	// scheduler to configure or forget.
 	if removed, freed := pruneAll(s.db); removed > 0 {
 		slog.Info("pruned snapshots past retention",
-			"snapshots", removed, "freed", humanSize(freed))
+			"snapshots", removed, "freed", web.HumanSize(freed))
 	}
 }
 
@@ -237,19 +237,7 @@ func (s *Server) handleLoginForm(w http.ResponseWriter, r *http.Request) {
 func blobsURL() string { return store.Env("BLOBS_URL", "http://127.0.0.1:8789") }
 func blobsKey() string { return store.Env("BLOBS_API_KEY", "") }
 
-var tmplFuncs = template.FuncMap{"humanSize": humanSize}
-
-// humanSize formats a byte count as B / KB / MB.
-func humanSize(n int64) string {
-	switch {
-	case n >= 1<<20:
-		return fmt.Sprintf("%.1f MB", float64(n)/(1<<20))
-	case n >= 1<<10:
-		return fmt.Sprintf("%.1f KB", float64(n)/(1<<10))
-	default:
-		return fmt.Sprintf("%d B", n)
-	}
-}
+var tmplFuncs = template.FuncMap{"humanSize": web.HumanSize}
 
 func (s *Server) fail(w http.ResponseWriter, what string, err error) {
 	slog.Error(what, "err", err)

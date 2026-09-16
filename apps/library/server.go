@@ -851,20 +851,8 @@ func downloadName(b *Book) string {
 
 // tmplFuncs are helpers available to every template.
 var tmplFuncs = template.FuncMap{
-	"humanSize": humanSize,
+	"humanSize": web.HumanSize,
 	"shortDate": shortDate,
-}
-
-// humanSize formats a byte count as B / KB / MB.
-func humanSize(n int64) string {
-	switch {
-	case n >= 1<<20:
-		return fmt.Sprintf("%.1f MB", float64(n)/(1<<20))
-	case n >= 1<<10:
-		return fmt.Sprintf("%.1f KB", float64(n)/(1<<10))
-	default:
-		return fmt.Sprintf("%d B", n)
-	}
 }
 
 // shortDate trims an RFC3339 timestamp to its YYYY-MM-DD date portion.

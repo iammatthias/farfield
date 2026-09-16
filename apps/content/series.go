@@ -30,7 +30,7 @@ func (s *Server) handleCreateSeries(w http.ResponseWriter, r *http.Request) {
 	_ = r.ParseForm()
 	title := strings.TrimSpace(r.FormValue("title"))
 	se := &Series{
-		Slug:  slugify(firstNonEmpty(r.FormValue("slug"), title)),
+		Slug:  slugify(web.FirstNonEmpty(r.FormValue("slug"), title)),
 		Title: title,
 		Body:  r.FormValue("body"),
 	}
@@ -88,7 +88,7 @@ func (s *Server) handleUpdateSeries(w http.ResponseWriter, r *http.Request) {
 // seriesSaved and seriesSaveError mirror the entry save responses for the
 // series form's async saves.
 func (s *Server) seriesSaved(w http.ResponseWriter, r *http.Request, se *Series) {
-	if wantsJSON(r) {
+	if web.WantsJSON(r) {
 		web.WriteJSON(w, http.StatusOK, map[string]any{
 			"slug":    se.Slug,
 			"action":  "/series/" + se.Slug,
@@ -100,7 +100,7 @@ func (s *Server) seriesSaved(w http.ResponseWriter, r *http.Request, se *Series)
 }
 
 func (s *Server) seriesSaveError(w http.ResponseWriter, r *http.Request, se *Series, isNew bool, action, msg string) {
-	if wantsJSON(r) {
+	if web.WantsJSON(r) {
 		web.WriteError(w, http.StatusBadRequest, msg)
 		return
 	}

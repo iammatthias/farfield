@@ -106,9 +106,11 @@ func newServer(db *sql.DB, password, apiKey string, cookieSecure bool, publicURL
 
 func (s *Server) parseTemplates() error {
 	funcs := template.FuncMap{
-		"relAge":   relAge,
-		"ttl":      ttlText,
-		"sizeText": sizeText,
+		"relAge": web.RelAge,
+		"ttl":    ttlText,
+		// Paste.Size() is an int (a body is capped well under 2 GiB), and a
+		// template func's arguments are matched by exact type.
+		"sizeText": func(n int) string { return web.HumanSize(int64(n)) },
 	}
 	tmpl, err := web.ParseTemplates(assets, funcs)
 	if err != nil {
