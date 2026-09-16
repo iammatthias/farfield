@@ -19,6 +19,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/iammatthias/farfield/lib/bytestore"
 	"github.com/iammatthias/farfield/lib/cid"
 	"github.com/iammatthias/farfield/lib/keys"
 	"github.com/iammatthias/farfield/lib/pulse"
@@ -55,7 +56,7 @@ func maxUploadLimit() int64 {
 // Server holds the running OPDS service.
 type Server struct {
 	db    *sql.DB
-	store ByteStore
+	store bytestore.Store
 	auth  *web.Auth
 	rd    *web.Renderer
 	// uploadKey is an optional second credential (LIBRARY_UPLOAD_KEY) accepted
@@ -72,11 +73,11 @@ type Server struct {
 }
 
 // openStore selects the byte-store backend from the environment.
-func openStore() (ByteStore, string, error) {
+func openStore() (bytestore.Store, string, error) {
 	switch store.Env("LIBRARY_BACKEND", "local") {
 	case "local":
 		dir := store.Env("LIBRARY_DIR", "library-data")
-		bs, err := OpenLocalDir(dir)
+		bs, err := bytestore.OpenLocalDir(dir)
 		return bs, "local:" + dir, err
 	case "r2":
 		bucket := os.Getenv("R2_BUCKET")

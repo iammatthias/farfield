@@ -1,33 +1,53 @@
-package main
+// Package bytestore is the byte-storage contract the fleet's media services
+// share, plus the local-directory backend that satisfies it in development.
+//
+// Metadata lives in SQLite; this holds only bytes, keyed by a string the
+// caller chooses (blobs and library both key by CID). The other backend is
+// lib/r2, which is what runs on the server.
+//
+// blobs and library each declared this interface and this LocalDir
+// separately, with each one carrying a method the other's copy lacked —
+// blobs had List, library had PutSeeker, and neither could use the other's.
+// One interface, both methods, one implementation.
+package bytestore
 
 import (
 	"errors"
 	"io"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
+	"time"
 )
 
-// ByteStore stores raw object bytes, keyed by string. Metadata lives in
-// SQLite, not here. The backend is a local directory (dev) or Cloudflare R2
-// (server). library keys EPUB files, cover images, and thumbnails by their CID.
-type ByteStore interface {
+// ObjectInfo describes one stored object, as List reports it.
+type ObjectInfo struct {
+	Key          string
+	Size         int64
+	LastModified time.Time
+}
+
+// Store holds raw bytes keyed by string.
+type Store interface {
 	Put(key string, data []byte, contentType string) error
-	// PutFile streams the file at path into the store — for payloads too
-	// large to hold in memory.
+	// PutFile streams the file at path into the store — for payloads too large
+	// to hold in memory (media, books, backup snapshots).
 	PutFile(key, path, contentType string) error
-	// PutSeeker streams an already-open, seekable source into the store. It
-	// is how an upload reaches storage without ever being buffered: the
-	// multipart temp file and the tus staging file are both seekable.
+	// PutSeeker streams an already-open, seekable source. It is how an upload
+	// reaches storage without ever being buffered: a multipart temp file and a
+	// tus staging file are both seekable.
 	PutSeeker(key string, rs io.ReadSeeker, contentType string) error
-	Get(key string) ([]byte, error) // returns (nil, nil) when absent
+	Get(key string) ([]byte, error) // (nil, nil) when absent
 	// GetStream returns the object's bytes as a stream plus its size, or
 	// (nil, 0, nil) when absent. The caller closes the reader.
 	GetStream(key string) (io.ReadCloser, int64, error)
 	Delete(key string) error
+	// List enumerates the store — used by migration and reconciliation tooling.
+	List() ([]ObjectInfo, error)
 }
 
-// LocalDir is a ByteStore backed by a directory on disk.
+// LocalDir is a Store backed by a directory on disk.
 type LocalDir struct{ root string }
 
 // OpenLocalDir opens (creating if absent) an object directory at root.
@@ -38,6 +58,8 @@ func OpenLocalDir(root string) (*LocalDir, error) {
 	return &LocalDir{root: root}, nil
 }
 
+// keyPath rejects any key that could escape the root. Keys are flat by
+// design: a separator or a parent reference is a caller bug, not a subpath.
 func (d *LocalDir) keyPath(key string) (string, error) {
 	if key == "" || strings.ContainsAny(key, `/\`) || strings.Contains(key, "..") {
 		return "", errors.New("invalid object key")
@@ -122,4 +144,28 @@ func (d *LocalDir) Delete(key string) error {
 		return err
 	}
 	return nil
+}
+
+func (d *LocalDir) List() ([]ObjectInfo, error) {
+	entries, err := os.ReadDir(d.root)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]ObjectInfo, 0, len(entries))
+	for _, e := range entries {
+		if e.IsDir() {
+			continue
+		}
+		info, err := e.Info()
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, ObjectInfo{
+			Key:          e.Name(),
+			Size:         info.Size(),
+			LastModified: info.ModTime(),
+		})
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].Key < out[j].Key })
+	return out, nil
 }

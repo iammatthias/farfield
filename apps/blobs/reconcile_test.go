@@ -6,6 +6,8 @@ import (
 	"path/filepath"
 	"testing"
 	"time"
+
+	"github.com/iammatthias/farfield/lib/bytestore"
 )
 
 // TestReferencedCIDsRefusesPartialSet: a missing sibling database aborts —
@@ -84,7 +86,7 @@ func TestReconcileFindsOrphans(t *testing.T) {
 
 	// A store holding everything referenced plus one stale orphan and one
 	// fresh (in-grace) unreferenced object.
-	bs, err := OpenLocalDir(filepath.Join(dir, "store"))
+	bs, err := bytestore.OpenLocalDir(filepath.Join(dir, "store"))
 	if err != nil {
 		t.Fatal(err)
 	}

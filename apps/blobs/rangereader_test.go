@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"testing"
 
+	"github.com/iammatthias/farfield/lib/bytestore"
 	"github.com/iammatthias/farfield/lib/r2"
 	"github.com/iammatthias/farfield/lib/web"
 )
@@ -37,7 +38,17 @@ func (s *rangedStubStore) Put(key string, data []byte, _ string) error {
 func (s *rangedStubStore) PutFile(key, path, ct string) error { return fmt.Errorf("unused") }
 func (s *rangedStubStore) Get(key string) ([]byte, error)     { return s.data[key], nil }
 func (s *rangedStubStore) Delete(key string) error            { delete(s.data, key); return nil }
-func (s *rangedStubStore) List() ([]r2.ObjectInfo, error)     { return nil, nil }
+func (s *rangedStubStore) List() ([]bytestore.ObjectInfo, error) {
+	return nil, nil
+}
+func (s *rangedStubStore) PutSeeker(key string, rs io.ReadSeeker, _ string) error {
+	b, err := io.ReadAll(rs)
+	if err != nil {
+		return err
+	}
+	s.data[key] = b
+	return nil
+}
 func (s *rangedStubStore) GetStream(key string) (io.ReadCloser, int64, error) {
 	data, ok := s.data[key]
 	if !ok {

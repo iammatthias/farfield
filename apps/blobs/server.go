@@ -16,6 +16,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/iammatthias/farfield/lib/bytestore"
 	"github.com/iammatthias/farfield/lib/cid"
 	"github.com/iammatthias/farfield/lib/keys"
 	"github.com/iammatthias/farfield/lib/pulse"
@@ -50,7 +51,7 @@ const publicBytesPerMin = 600
 // Server holds the running blob service.
 type Server struct {
 	db        *sql.DB
-	store     ByteStore
+	store     bytestore.Store
 	auth      *web.Auth
 	rd        *web.Renderer
 	maxUpload int64
@@ -68,11 +69,11 @@ type Server struct {
 }
 
 // openStore selects the byte-store backend from the environment.
-func openStore() (ByteStore, string, error) {
+func openStore() (bytestore.Store, string, error) {
 	switch store.Env("BLOBS_BACKEND", "local") {
 	case "local":
 		dir := store.Env("BLOBS_DIR", "blobs-data")
-		bs, err := OpenLocalDir(dir)
+		bs, err := bytestore.OpenLocalDir(dir)
 		return bs, "local:" + dir, err
 	case "r2":
 		bucket := os.Getenv("R2_BUCKET")

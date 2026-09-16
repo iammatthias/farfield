@@ -24,6 +24,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/iammatthias/farfield/lib/bytestore"
 )
 
 // Config configures the byte store. The four credential fields are required;
@@ -52,12 +54,9 @@ type Config struct {
 	Endpoint string
 }
 
-// ObjectInfo describes one stored object, as List reports it.
-type ObjectInfo struct {
-	Key          string
-	Size         int64
-	LastModified time.Time
-}
+// ObjectInfo is bytestore.ObjectInfo — re-exported so a caller holding only
+// this package does not need the other import to name a List result.
+type ObjectInfo = bytestore.ObjectInfo
 
 // Store is an R2 bucket. It is safe for concurrent use.
 type Store struct {

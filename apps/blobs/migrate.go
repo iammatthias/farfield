@@ -2,8 +2,10 @@ package main
 
 import (
 	"database/sql"
+
 	"encoding/json"
 	"fmt"
+	"github.com/iammatthias/farfield/lib/bytestore"
 	"log/slog"
 	"strings"
 	"time"
@@ -13,7 +15,7 @@ import (
 // the SQLite metadata index. It is non-destructive — nothing in the store is
 // modified. Existing rows are overwritten (the sidecar is the source of
 // truth during migration).
-func importSidecars(db *sql.DB, bs ByteStore) error {
+func importSidecars(db *sql.DB, bs bytestore.Store) error {
 	objects, err := bs.List()
 	if err != nil {
 		return fmt.Errorf("listing store: %w", err)
@@ -63,7 +65,7 @@ func importSidecars(db *sql.DB, bs ByteStore) error {
 // deletes a sidecar whose metadata is already present in SQLite, so it can
 // never orphan data. With confirm=false it is a dry run: it reports what it
 // would delete and deletes nothing.
-func pruneSidecars(db *sql.DB, bs ByteStore, confirm bool) error {
+func pruneSidecars(db *sql.DB, bs bytestore.Store, confirm bool) error {
 	objects, err := bs.List()
 	if err != nil {
 		return fmt.Errorf("listing store: %w", err)
