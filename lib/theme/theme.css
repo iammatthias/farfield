@@ -877,6 +877,11 @@ dialog.doc-keys::backdrop { background: color-mix(in srgb, var(--ink) 25%, trans
 .save-note { font-size: 0.8rem; opacity: 0.6; }
 .save-note.err { color: var(--alarm); opacity: 1; }
 .save-note.dirty { opacity: 0.85; }
+/* A create confirmed. Full strength and the accent, because "this is now
+   live" is exactly the rare event the accent is reserved for — an ordinary
+   resave stays the quiet timestamp above. */
+.save-note.ok { opacity: 1; color: var(--accent); }
+.save-note.ok a { color: inherit; text-underline-offset: 2px; }
 
 /* ── document editor — the page is the editor ──────────────────────────────
 

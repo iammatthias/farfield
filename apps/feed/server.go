@@ -236,7 +236,7 @@ func (s *Server) handleCreatePost(w http.ResponseWriter, r *http.Request) {
 		s.fail(w, "create post", err)
 		return
 	}
-	s.postSaved(w, r, p)
+	s.postSaved(w, r, p, true)
 }
 
 func (s *Server) handleEditPost(w http.ResponseWriter, r *http.Request) {
@@ -273,18 +273,26 @@ func (s *Server) handleUpdatePost(w http.ResponseWriter, r *http.Request) {
 		http.NotFound(w, r)
 		return
 	}
-	s.postSaved(w, r, p)
+	s.postSaved(w, r, p, false)
 }
 
 // postSaved answers a successful create or update: JSON with the post's
 // canonical URLs for the editor's async saves, a redirect to the feed for a
 // plain form post.
-func (s *Server) postSaved(w http.ResponseWriter, r *http.Request, p *Post) {
+//
+// A feed post is live the moment it saves, so a create needs to say so. The
+// plain form post has always confirmed by landing on the feed; the async save
+// stayed on the editor and said "Saved 14:32" in 60%-opacity 0.72rem type,
+// which is not a confirmation that anything was published. `created` and
+// `viewURL` let the editor say "Posted" and offer the way to go look.
+func (s *Server) postSaved(w http.ResponseWriter, r *http.Request, p *Post, created bool) {
 	if wantsJSON(r) {
 		web.WriteJSON(w, http.StatusOK, map[string]any{
 			"slug":    p.Slug,
 			"action":  "/posts/" + p.Slug,
 			"editURL": "/posts/" + p.Slug + "/edit",
+			"created": created,
+			"viewURL": "/",
 		})
 		return
 	}
