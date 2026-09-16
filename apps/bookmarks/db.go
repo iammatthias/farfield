@@ -68,39 +68,31 @@ const bookmarkCols = `id, url, title, description, category, public, admin_notes
 // old, to the current schema on every startup. See the self-migrating-sqlite
 // skill.
 func openDB(path string) (*sql.DB, error) {
-	db, err := store.OpenDB(path)
+	db, err := store.OpenWithSchema(path, schema)
 	if err != nil {
 		return nil, err
 	}
 	// The original index collated category case-sensitively, so the public
 	// listing's ORDER BY category COLLATE NOCASE could not use it and SQLite
-	// fell back to a sort. Drop it; the schema above creates the NOCASE
-	// replacement. Both statements are idempotent.
+	// fell back to a sort. The schema above creates the NOCASE replacement
+	// under a new name, so dropping the old one after is safe and idempotent.
 	if _, err := db.Exec(`DROP INDEX IF EXISTS bookmarks_by_public_category`); err != nil {
-		return nil, err
-	}
-	if _, err := db.Exec(schema); err != nil {
-		return nil, err
-	}
-	if _, err := db.Exec(store.SessionSchema); err != nil {
 		return nil, err
 	}
 	// Columns added after the first release — CREATE TABLE IF NOT EXISTS will
 	// not add these to a table that already exists.
-	for _, c := range []struct{ col, decl string }{
-		{"og_title", "TEXT NOT NULL DEFAULT ''"},
-		{"og_description", "TEXT NOT NULL DEFAULT ''"},
-		{"og_image", "TEXT NOT NULL DEFAULT ''"},
-		{"og_site_name", "TEXT NOT NULL DEFAULT ''"},
-		{"og_type", "TEXT NOT NULL DEFAULT ''"},
-		{"meta_author", "TEXT NOT NULL DEFAULT ''"},
-		{"favicon", "TEXT NOT NULL DEFAULT ''"},
-		{"cid", "TEXT NOT NULL DEFAULT ''"},
-		{"admin_notes", "TEXT NOT NULL DEFAULT ''"},
-	} {
-		if err := store.EnsureColumn(db, "bookmarks", c.col, c.decl); err != nil {
-			return nil, err
-		}
+	if err := store.EnsureColumns(db, "bookmarks",
+		store.Col("og_title", "TEXT NOT NULL DEFAULT ''"),
+		store.Col("og_description", "TEXT NOT NULL DEFAULT ''"),
+		store.Col("og_image", "TEXT NOT NULL DEFAULT ''"),
+		store.Col("og_site_name", "TEXT NOT NULL DEFAULT ''"),
+		store.Col("og_type", "TEXT NOT NULL DEFAULT ''"),
+		store.Col("meta_author", "TEXT NOT NULL DEFAULT ''"),
+		store.Col("favicon", "TEXT NOT NULL DEFAULT ''"),
+		store.Col("cid", "TEXT NOT NULL DEFAULT ''"),
+		store.Col("admin_notes", "TEXT NOT NULL DEFAULT ''"),
+	); err != nil {
+		return nil, err
 	}
 	if err := backfillCIDs(db); err != nil {
 		return nil, err

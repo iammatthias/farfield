@@ -77,17 +77,15 @@ func openDB(path string) (*sql.DB, error) {
 	}
 	// 2. Columns added after the first release — CREATE TABLE IF NOT EXISTS
 	//    will not add these to a table that already exists.
-	for _, c := range []struct{ col, decl string }{
-		{"cid", "TEXT NOT NULL DEFAULT ''"},
-		{"thumb_url", "TEXT NOT NULL DEFAULT ''"},
-		{"media_type", "TEXT NOT NULL DEFAULT 'image'"},
-		{"credit", "TEXT NOT NULL DEFAULT ''"},
-		{"source_url", "TEXT NOT NULL DEFAULT ''"},
-		{"placeholder", "INTEGER NOT NULL DEFAULT 0"},
-	} {
-		if err := store.EnsureColumn(db, "photos", c.col, c.decl); err != nil {
-			return nil, err
-		}
+	if err := store.EnsureColumns(db, "photos",
+		store.Col("cid", "TEXT NOT NULL DEFAULT ''"),
+		store.Col("thumb_url", "TEXT NOT NULL DEFAULT ''"),
+		store.Col("media_type", "TEXT NOT NULL DEFAULT 'image'"),
+		store.Col("credit", "TEXT NOT NULL DEFAULT ''"),
+		store.Col("source_url", "TEXT NOT NULL DEFAULT ''"),
+		store.Col("placeholder", "INTEGER NOT NULL DEFAULT 0"),
+	); err != nil {
+		return nil, err
 	}
 	// 3. Drop the redundant photos_by_date index — it duplicated the
 	//    (source, date) primary key, costing a second write per upsert.

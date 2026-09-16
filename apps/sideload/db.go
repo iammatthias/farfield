@@ -187,24 +187,16 @@ CREATE TABLE IF NOT EXISTS app_registration (
 // performs idempotent column-add migrations — every step safe on every startup
 // (see the self-migrating-sqlite skill).
 func openDB(path string) (*sql.DB, error) {
-	db, err := store.OpenDB(path)
+	db, err := store.OpenWithSchema(path, schema)
 	if err != nil {
 		return nil, err
 	}
-	if _, err := db.Exec(schema); err != nil {
+	if err := store.EnsureColumns(db, "builds",
+		store.Col("git_commit", "TEXT NOT NULL DEFAULT ''"),
+		store.Col("notes", "TEXT NOT NULL DEFAULT ''"),
+		store.Col("filename", "TEXT NOT NULL DEFAULT ''"),
+	); err != nil {
 		return nil, err
-	}
-	if _, err := db.Exec(store.SessionSchema); err != nil {
-		return nil, err
-	}
-	for _, c := range []struct{ col, decl string }{
-		{"git_commit", "TEXT NOT NULL DEFAULT ''"},
-		{"notes", "TEXT NOT NULL DEFAULT ''"},
-		{"filename", "TEXT NOT NULL DEFAULT ''"},
-	} {
-		if err := store.EnsureColumn(db, "builds", c.col, c.decl); err != nil {
-			return nil, err
-		}
 	}
 	return db, nil
 }

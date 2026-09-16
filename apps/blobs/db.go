@@ -35,11 +35,8 @@ const blobCols = `cid, size, mime, width, height, blurhash, dominant_color, thum
 // the blob metadata index and admin login sessions; blob bytes live in the
 // ByteStore.
 func openDB(path string) (*sql.DB, error) {
-	db, err := store.OpenDB(path)
+	db, err := store.OpenWithSchema(path, schema)
 	if err != nil {
-		return nil, err
-	}
-	if _, err := db.Exec(schema); err != nil {
 		return nil, err
 	}
 	// thumb_cid arrived after the first deployments — bring old databases
@@ -48,9 +45,6 @@ func openDB(path string) (*sql.DB, error) {
 		return nil, err
 	}
 	if _, err := db.Exec(thumbIndex); err != nil {
-		return nil, err
-	}
-	if _, err := db.Exec(store.SessionSchema); err != nil {
 		return nil, err
 	}
 	return db, nil

@@ -33,14 +33,8 @@ const backupCols = `id, app, cid, size, created_at`
 // openDB opens the SQLite database, applies pragmas, and migrates. It holds
 // the backup registry and admin login sessions.
 func openDB(path string) (*sql.DB, error) {
-	db, err := store.OpenDB(path)
+	db, err := store.OpenWithSchema(path, schema)
 	if err != nil {
-		return nil, err
-	}
-	if _, err := db.Exec(schema); err != nil {
-		return nil, err
-	}
-	if _, err := db.Exec(store.SessionSchema); err != nil {
 		return nil, err
 	}
 	return db, nil

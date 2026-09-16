@@ -72,3 +72,57 @@ func RenameColumn(db *sql.DB, table, oldName, newName string) error {
 func NowRFC3339() string {
 	return time.Now().UTC().Format(time.RFC3339)
 }
+
+// Column is one column an app expects to exist, for EnsureColumns.
+type Column struct {
+	Name string
+	Decl string // the SQL type and constraints, e.g. "TEXT NOT NULL DEFAULT ''"
+}
+
+// Col builds a Column. It exists so a migration list reads as a list of pairs
+// rather than a column of keyed struct literals — and because an unkeyed
+// cross-package literal is a vet complaint, correctly.
+func Col(name, decl string) Column { return Column{Name: name, Decl: decl} }
+
+// EnsureColumns adds every column that is missing, in order.
+//
+// The loop it replaces was written out longhand in half the fleet: a slice of
+// {col, decl} pairs and a range that bailed on the first error. Same thing,
+// named once.
+func EnsureColumns(db *sql.DB, table string, cols ...Column) error {
+	for _, c := range cols {
+		if err := EnsureColumn(db, table, c.Name, c.Decl); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// OpenWithSchema opens the database at path, applies the app's schema, and
+// adds the shared session table.
+//
+// Every app began its openDB with these same three steps and the same three
+// error checks before getting to its own migrations. The app-specific part —
+// added columns, renames, backfills — stays in the app, where it belongs: it
+// is the one part that differs, and burying it in a shared helper would hide
+// the history each database carries.
+func OpenWithSchema(path string, schema ...string) (*sql.DB, error) {
+	db, err := OpenDB(path)
+	if err != nil {
+		return nil, err
+	}
+	// SessionSchema last and appended by iteration, not append() — a
+	// variadic slice belongs to the caller, and growing it in place is the
+	// kind of aliasing bug that only shows up once someone reuses the slice.
+	for _, s := range schema {
+		if _, err := db.Exec(s); err != nil {
+			db.Close()
+			return nil, err
+		}
+	}
+	if _, err := db.Exec(SessionSchema); err != nil {
+		db.Close()
+		return nil, err
+	}
+	return db, nil
+}

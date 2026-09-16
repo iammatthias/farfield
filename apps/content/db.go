@@ -101,14 +101,8 @@ CREATE TABLE IF NOT EXISTS series (
 // openDB opens the SQLite database, applies pragmas, and migrates. Foreign
 // keys are on so deleting a collection cascades to its entries.
 func openDB(path string) (*sql.DB, error) {
-	db, err := store.OpenDB(path)
+	db, err := store.OpenWithSchema(path, schema)
 	if err != nil {
-		return nil, err
-	}
-	if _, err := db.Exec(schema); err != nil {
-		return nil, err
-	}
-	if _, err := db.Exec(store.SessionSchema); err != nil {
 		return nil, err
 	}
 	if _, err := db.Exec(revisionSchema); err != nil {
