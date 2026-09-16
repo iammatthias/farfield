@@ -25,6 +25,7 @@ use (
 	./lib/markdown
 	./lib/pulse
 	./lib/qrenc
+	./lib/r2
 	./lib/recipe
 	./lib/store
 	./lib/theme

@@ -7,15 +7,9 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
-	"time"
-)
 
-// ObjectInfo describes one object in a ByteStore — used by migration tooling.
-type ObjectInfo struct {
-	Key          string
-	Size         int64
-	LastModified time.Time
-}
+	"github.com/iammatthias/farfield/lib/r2"
+)
 
 // ByteStore stores raw blob bytes, keyed by string. Metadata lives in SQLite,
 // not here. The backend is a local directory (dev) or Cloudflare R2 (server).
@@ -29,7 +23,7 @@ type ByteStore interface {
 	// (nil, 0, nil) when absent. The caller closes the reader.
 	GetStream(key string) (io.ReadCloser, int64, error)
 	Delete(key string) error
-	List() ([]ObjectInfo, error)
+	List() ([]r2.ObjectInfo, error)
 }
 
 // LocalDir is a ByteStore backed by a directory on disk.
@@ -122,12 +116,12 @@ func (d *LocalDir) Delete(key string) error {
 	return nil
 }
 
-func (d *LocalDir) List() ([]ObjectInfo, error) {
+func (d *LocalDir) List() ([]r2.ObjectInfo, error) {
 	entries, err := os.ReadDir(d.root)
 	if err != nil {
 		return nil, err
 	}
-	var out []ObjectInfo
+	var out []r2.ObjectInfo
 	for _, e := range entries {
 		if e.IsDir() {
 			continue
@@ -136,7 +130,7 @@ func (d *LocalDir) List() ([]ObjectInfo, error) {
 		if err != nil {
 			return nil, err
 		}
-		out = append(out, ObjectInfo{
+		out = append(out, r2.ObjectInfo{
 			Key:          e.Name(),
 			Size:         info.Size(),
 			LastModified: info.ModTime(),

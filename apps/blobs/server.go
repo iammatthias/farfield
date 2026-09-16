@@ -19,6 +19,7 @@ import (
 	"github.com/iammatthias/farfield/lib/cid"
 	"github.com/iammatthias/farfield/lib/keys"
 	"github.com/iammatthias/farfield/lib/pulse"
+	"github.com/iammatthias/farfield/lib/r2"
 	"github.com/iammatthias/farfield/lib/store"
 	"github.com/iammatthias/farfield/lib/theme"
 	"github.com/iammatthias/farfield/lib/web"
@@ -75,7 +76,7 @@ func openStore() (ByteStore, string, error) {
 		return bs, "local:" + dir, err
 	case "r2":
 		bucket := os.Getenv("R2_BUCKET")
-		bs, err := NewR2(R2Config{
+		bs, err := r2.New(r2.Config{
 			AccountID:       os.Getenv("R2_ACCOUNT_ID"),
 			AccessKeyID:     os.Getenv("R2_ACCESS_KEY_ID"),
 			SecretAccessKey: os.Getenv("R2_SECRET_ACCESS_KEY"),

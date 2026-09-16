@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 
+	"github.com/iammatthias/farfield/lib/r2"
 	"github.com/iammatthias/farfield/lib/store"
 )
 
@@ -17,7 +18,7 @@ func openBlobStore() (*blobStore, error) {
 	case "local":
 		return newBlobStore(dir, nil)
 	case "r2":
-		r2, err := NewR2(R2Config{
+		remote, err := r2.New(r2.Config{
 			AccountID:       os.Getenv("R2_ACCOUNT_ID"),
 			AccessKeyID:     os.Getenv("R2_ACCESS_KEY_ID"),
 			SecretAccessKey: os.Getenv("R2_SECRET_ACCESS_KEY"),
@@ -26,7 +27,7 @@ func openBlobStore() (*blobStore, error) {
 		if err != nil {
 			return nil, err
 		}
-		return newBlobStore(dir, r2)
+		return newBlobStore(dir, remote)
 	default:
 		return nil, fmt.Errorf(`SIDELOAD_BACKEND must be "local" or "r2"`)
 	}

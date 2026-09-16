@@ -1,4 +1,14 @@
-package main
+// Package r2 is the Cloudflare R2 byte store, spoken over the S3 API and
+// signed with AWS Signature V4 by hand — no S3 SDK dependency, in keeping with
+// the standard-library-first stack.
+//
+// blobs, library, and sideload each carried their own copy of this file.
+// blobs' and sideload's were byte-identical; library's had forked only in its
+// HTTP client, because a multi-minute EPUB transfer cannot live under a
+// wall-clock timeout sized for images. That difference is now configuration
+// (Config.Client) rather than a third copy of the signing code, so a fix to
+// the signer reaches every caller instead of one of three.
+package r2
 
 import (
 	"bytes"
@@ -16,29 +26,54 @@ import (
 	"time"
 )
 
-// R2Config configures the Cloudflare R2 (S3-compatible) byte store.
-type R2Config struct {
+// Config configures the byte store. The four credential fields are required;
+// the rest have defaults sized for images and small files.
+type Config struct {
 	AccountID       string
 	AccessKeyID     string
 	SecretAccessKey string
 	Bucket          string
+
+	// Client performs ordinary operations. nil gets a 60s overall timeout,
+	// which is right for images and wrong for anything that legitimately runs
+	// for minutes — library passes a client that bounds connection setup and
+	// time-to-first-byte instead, so a dead peer still fails fast without
+	// severing a healthy large transfer.
+	Client *http.Client
+
+	// Stream serves GetStream bodies. An overall client timeout covers the
+	// whole response body, which is fatal for a viewer scrubbing through a
+	// long video, so the default bounds only the wait for headers and lets the
+	// body take as long as the reader needs.
+	Stream *http.Client
+
+	// Endpoint overrides the derived <account>.r2.cloudflarestorage.com host.
+	// Tests point it at an httptest server; production leaves it empty.
+	Endpoint string
 }
 
-// R2 is a ByteStore backed by Cloudflare R2 over the S3 API. Requests are
-// signed with AWS Signature V4 — hand-rolled, no S3 SDK dependency.
-type R2 struct {
-	cfg    R2Config
+// ObjectInfo describes one stored object, as List reports it.
+type ObjectInfo struct {
+	Key          string
+	Size         int64
+	LastModified time.Time
+}
+
+// Store is an R2 bucket. It is safe for concurrent use.
+type Store struct {
+	cfg    Config
 	host   string
+	scheme string
 	client *http.Client
-	// stream serves GetStream bodies. client's 60s Timeout covers the whole
-	// response body — fatal for a viewer scrubbing through a long video — so
-	// streams bound only the wait for headers and let the body take as long
-	// as the reader needs.
 	stream *http.Client
+
+	// now supplies the signing timestamp. nil means time.Now; a test pins it
+	// so a signature is reproducible.
+	now func() time.Time
 }
 
-// NewR2 builds an R2 byte store. It does not contact R2.
-func NewR2(cfg R2Config) (*R2, error) {
+// New builds a store. It does not contact R2.
+func New(cfg Config) (*Store, error) {
 	for name, v := range map[string]string{
 		"R2_ACCOUNT_ID": cfg.AccountID, "R2_ACCESS_KEY_ID": cfg.AccessKeyID,
 		"R2_SECRET_ACCESS_KEY": cfg.SecretAccessKey, "R2_BUCKET": cfg.Bucket,
@@ -47,69 +82,86 @@ func NewR2(cfg R2Config) (*R2, error) {
 			return nil, fmt.Errorf("R2 config: %s is required", name)
 		}
 	}
-	streamTr := http.DefaultTransport.(*http.Transport).Clone()
-	streamTr.ResponseHeaderTimeout = 30 * time.Second
-	return &R2{
+
+	s := &Store{
 		cfg:    cfg,
 		host:   cfg.AccountID + ".r2.cloudflarestorage.com",
-		client: &http.Client{Timeout: 60 * time.Second},
-		stream: &http.Client{Transport: streamTr},
-	}, nil
+		scheme: "https",
+		client: cfg.Client,
+		stream: cfg.Stream,
+	}
+	if cfg.Endpoint != "" {
+		u, err := url.Parse(cfg.Endpoint)
+		if err != nil {
+			return nil, fmt.Errorf("R2 config: bad Endpoint: %w", err)
+		}
+		s.host, s.scheme = u.Host, u.Scheme
+	}
+	if s.client == nil {
+		s.client = &http.Client{Timeout: 60 * time.Second}
+	}
+	if s.stream == nil {
+		tr := http.DefaultTransport.(*http.Transport).Clone()
+		tr.ResponseHeaderTimeout = 30 * time.Second
+		s.stream = &http.Client{Transport: tr}
+	}
+	return s, nil
 }
 
-func (r *R2) objectURL(key string) string {
-	return "https://" + r.host + "/" + r.cfg.Bucket + "/" + key
+func (s *Store) objectURL(key string) string {
+	return s.scheme + "://" + s.host + "/" + s.cfg.Bucket + "/" + key
 }
 
-func (r *R2) Put(key string, data []byte, contentType string) error {
-	req, err := http.NewRequest(http.MethodPut, r.objectURL(key), bytes.NewReader(data))
+// Put stores bytes already in memory.
+func (s *Store) Put(key string, data []byte, contentType string) error {
+	req, err := http.NewRequest(http.MethodPut, s.objectURL(key), bytes.NewReader(data))
 	if err != nil {
 		return err
 	}
-	if contentType != "" {
-		req.Header.Set("Content-Type", contentType) // sent unsigned — allowed
-	}
-	r.sign(req, data)
-	resp, err := r.client.Do(req)
-	if err != nil {
-		return err
-	}
-	defer resp.Body.Close()
-	if resp.StatusCode != http.StatusOK {
-		body, _ := io.ReadAll(resp.Body)
-		return fmt.Errorf("R2 put %s: HTTP %d: %s", key, resp.StatusCode, body)
-	}
-	return nil
+	return s.doPut(req, key, contentType, hex.EncodeToString(sha256sum(data)))
 }
 
-// PutFile streams the file at path to R2 without buffering it. SigV4 signs
-// the payload hash, so the file is read twice: one pass to hash, one as the
-// request body — both sequential disk reads, never a whole-file buffer.
-func (r *R2) PutFile(key, path, contentType string) error {
+// PutFile streams the file at path without buffering it.
+func (s *Store) PutFile(key, path, contentType string) error {
 	f, err := os.Open(path)
 	if err != nil {
 		return err
 	}
 	defer f.Close()
+	return s.PutSeeker(key, f, contentType)
+}
+
+// PutSeeker streams a seekable reader without buffering it. SigV4 signs the
+// payload hash, so the content is read twice: one pass to hash, one as the
+// request body — both sequential, never a whole-file buffer in memory.
+func (s *Store) PutSeeker(key string, rs io.ReadSeeker, contentType string) error {
+	if _, err := rs.Seek(0, io.SeekStart); err != nil {
+		return err
+	}
 	h := sha256.New()
-	size, err := io.Copy(h, f)
+	size, err := io.Copy(h, rs)
 	if err != nil {
 		return err
 	}
-	if _, err := f.Seek(0, io.SeekStart); err != nil {
+	if _, err := rs.Seek(0, io.SeekStart); err != nil {
 		return err
 	}
 
-	req, err := http.NewRequest(http.MethodPut, r.objectURL(key), f)
+	req, err := http.NewRequest(http.MethodPut, s.objectURL(key), rs)
 	if err != nil {
 		return err
 	}
 	req.ContentLength = size
+	return s.doPut(req, key, contentType, hex.EncodeToString(h.Sum(nil)))
+}
+
+// doPut signs and sends a prepared PUT, reporting a non-200 as an error.
+func (s *Store) doPut(req *http.Request, key, contentType, payloadHash string) error {
 	if contentType != "" {
 		req.Header.Set("Content-Type", contentType) // sent unsigned — allowed
 	}
-	r.signWithHash(req, hex.EncodeToString(h.Sum(nil)))
-	resp, err := r.client.Do(req)
+	s.signWithHash(req, payloadHash)
+	resp, err := s.client.Do(req)
 	if err != nil {
 		return err
 	}
@@ -121,13 +173,14 @@ func (r *R2) PutFile(key, path, contentType string) error {
 	return nil
 }
 
-func (r *R2) Get(key string) ([]byte, error) {
-	req, err := http.NewRequest(http.MethodGet, r.objectURL(key), nil)
+// Get reads an object whole. A missing object is (nil, nil), not an error.
+func (s *Store) Get(key string) ([]byte, error) {
+	req, err := http.NewRequest(http.MethodGet, s.objectURL(key), nil)
 	if err != nil {
 		return nil, err
 	}
-	r.sign(req, nil)
-	resp, err := r.client.Do(req)
+	s.sign(req, nil)
+	resp, err := s.client.Do(req)
 	if err != nil {
 		return nil, err
 	}
@@ -142,13 +195,13 @@ func (r *R2) Get(key string) ([]byte, error) {
 	return body, nil
 }
 
-// GetStream returns the object's body as a stream. GET requests sign an
-// empty payload, so streaming the response is compatible with SigV4. When
-// the object's size is known (it always is, short of a proxy mangling the
-// response) the stream is a seekable rangeReader, so the byte handler can
-// answer Range requests with 206s — video seeking over R2.
-func (r *R2) GetStream(key string) (io.ReadCloser, int64, error) {
-	body, size, err := r.getRange(key, 0)
+// GetStream returns the object's body as a stream. GET signs an empty payload,
+// so streaming the response is compatible with SigV4. When the size is known
+// (it always is, short of a proxy mangling the response) the stream seeks by
+// refetching with a Range header, so a byte handler can answer 206s — video
+// seeking over R2.
+func (s *Store) GetStream(key string) (io.ReadCloser, int64, error) {
+	body, size, err := s.getRange(key, 0)
 	if err != nil || body == nil {
 		return nil, 0, err
 	}
@@ -159,7 +212,7 @@ func (r *R2) GetStream(key string) (io.ReadCloser, int64, error) {
 		size: size,
 		body: body,
 		fetch: func(off int64) (io.ReadCloser, error) {
-			b, _, err := r.getRange(key, off)
+			b, _, err := s.getRange(key, off)
 			if err == nil && b == nil {
 				err = fmt.Errorf("R2 get %s: object vanished mid-read", key)
 			}
@@ -169,21 +222,21 @@ func (r *R2) GetStream(key string) (io.ReadCloser, int64, error) {
 	return rr, size, nil
 }
 
-// getRange GETs the object starting at byte offset off, returning the body
-// and the response's Content-Length ((nil, 0, nil) when absent). The Range
-// header is not in the SigV4 signed set, so adding it does not disturb the
-// signature; should a middlebox strip it, the ignored prefix is discarded to
-// keep the caller's offset honest.
-func (r *R2) getRange(key string, off int64) (io.ReadCloser, int64, error) {
-	req, err := http.NewRequest(http.MethodGet, r.objectURL(key), nil)
+// getRange GETs the object from byte offset off, returning the body and the
+// response's Content-Length ((nil, 0, nil) when absent). Range is not in the
+// SigV4 signed set, so adding it does not disturb the signature; should a
+// middlebox strip it, the ignored prefix is discarded to keep the caller's
+// offset honest.
+func (s *Store) getRange(key string, off int64) (io.ReadCloser, int64, error) {
+	req, err := http.NewRequest(http.MethodGet, s.objectURL(key), nil)
 	if err != nil {
 		return nil, 0, err
 	}
 	if off > 0 {
 		req.Header.Set("Range", "bytes="+strconv.FormatInt(off, 10)+"-")
 	}
-	r.sign(req, nil)
-	resp, err := r.stream.Do(req)
+	s.sign(req, nil)
+	resp, err := s.stream.Do(req)
 	if err != nil {
 		return nil, 0, err
 	}
@@ -208,13 +261,14 @@ func (r *R2) getRange(key string, off int64) (io.ReadCloser, int64, error) {
 	}
 }
 
-func (r *R2) Delete(key string) error {
-	req, err := http.NewRequest(http.MethodDelete, r.objectURL(key), nil)
+// Delete removes an object. Already gone counts as deleted.
+func (s *Store) Delete(key string) error {
+	req, err := http.NewRequest(http.MethodDelete, s.objectURL(key), nil)
 	if err != nil {
 		return err
 	}
-	r.sign(req, nil)
-	resp, err := r.client.Do(req)
+	s.sign(req, nil)
+	resp, err := s.client.Do(req)
 	if err != nil {
 		return err
 	}
@@ -227,24 +281,23 @@ func (r *R2) Delete(key string) error {
 }
 
 // List returns every object in the bucket, following ListObjectsV2 pagination.
-func (r *R2) List() ([]ObjectInfo, error) {
+func (s *Store) List() ([]ObjectInfo, error) {
 	var out []ObjectInfo
 	token := ""
 	for {
-		page, next, err := r.listPage(token)
+		page, next, err := s.listPage(token)
 		if err != nil {
 			return nil, err
 		}
 		out = append(out, page...)
 		if next == "" {
-			break
+			return out, nil
 		}
 		token = next
 	}
-	return out, nil
 }
 
-func (r *R2) listPage(continuationToken string) ([]ObjectInfo, string, error) {
+func (s *Store) listPage(continuationToken string) ([]ObjectInfo, string, error) {
 	// SigV4 needs the query string in canonical (key-sorted) order:
 	// continuation-token sorts before list-type.
 	query := "list-type=2"
@@ -252,12 +305,12 @@ func (r *R2) listPage(continuationToken string) ([]ObjectInfo, string, error) {
 		query = "continuation-token=" + url.QueryEscape(continuationToken) + "&" + query
 	}
 	req, err := http.NewRequest(http.MethodGet,
-		"https://"+r.host+"/"+r.cfg.Bucket+"?"+query, nil)
+		s.scheme+"://"+s.host+"/"+s.cfg.Bucket+"?"+query, nil)
 	if err != nil {
 		return nil, "", err
 	}
-	r.sign(req, nil)
-	resp, err := r.client.Do(req)
+	s.sign(req, nil)
+	resp, err := s.client.Do(req)
 	if err != nil {
 		return nil, "", err
 	}
@@ -293,14 +346,18 @@ func (r *R2) listPage(continuationToken string) ([]ObjectInfo, string, error) {
 
 // sign adds an AWS SigV4 Authorization header for the S3 service. payload is
 // nil for bodyless requests (GET/HEAD/DELETE).
-func (r *R2) sign(req *http.Request, payload []byte) {
-	r.signWithHash(req, hex.EncodeToString(sha256sum(payload)))
+func (s *Store) sign(req *http.Request, payload []byte) {
+	s.signWithHash(req, hex.EncodeToString(sha256sum(payload)))
 }
 
-// signWithHash signs with a precomputed hex SHA-256 payload hash — SigV4
-// needs only the hash, so callers can stream bodies they never buffer.
-func (r *R2) signWithHash(req *http.Request, payloadHash string) {
-	now := time.Now().UTC()
+// signWithHash signs with a precomputed hex SHA-256 payload hash — SigV4 needs
+// only the hash, so callers can stream bodies they never buffer.
+func (s *Store) signWithHash(req *http.Request, payloadHash string) {
+	clock := s.now
+	if clock == nil {
+		clock = time.Now
+	}
+	now := clock().UTC()
 	amzDate := now.Format("20060102T150405Z")
 	dateStamp := now.Format("20060102")
 
@@ -329,11 +386,11 @@ func (r *R2) signWithHash(req *http.Request, payloadHash string) {
 		hex.EncodeToString(sha256sum([]byte(canonicalRequest))),
 	}, "\n")
 
-	key := signingKey(r.cfg.SecretAccessKey, dateStamp, "auto", "s3")
+	key := signingKey(s.cfg.SecretAccessKey, dateStamp, "auto", "s3")
 	signature := hex.EncodeToString(hmacSHA256(key, []byte(stringToSign)))
 
 	req.Header.Set("Authorization", "AWS4-HMAC-SHA256 "+
-		"Credential="+r.cfg.AccessKeyID+"/"+scope+", "+
+		"Credential="+s.cfg.AccessKeyID+"/"+scope+", "+
 		"SignedHeaders="+signedHeaders+", "+
 		"Signature="+signature)
 }

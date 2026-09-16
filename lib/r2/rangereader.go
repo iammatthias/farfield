@@ -1,4 +1,4 @@
-package main
+package r2
 
 import (
 	"errors"
@@ -20,6 +20,17 @@ type rangeReader struct {
 	off     int64         // logical position
 	body    io.ReadCloser // open stream positioned at bodyOff; nil when none
 	bodyOff int64
+}
+
+// NewRangeReader wraps a ranged-GET backend as an io.ReadSeekCloser. body is
+// the already-open stream at offset 0 — the response GetStream has in hand —
+// and fetch reopens the object at an arbitrary offset.
+//
+// Exported because it is what any ranged backend needs to satisfy
+// http.ServeContent, and because a caller testing a store of its own has to be
+// able to build a stream that is seekable without being a file.
+func NewRangeReader(size int64, body io.ReadCloser, fetch func(off int64) (io.ReadCloser, error)) io.ReadSeekCloser {
+	return &rangeReader{size: size, body: body, fetch: fetch}
 }
 
 func (rr *rangeReader) Read(p []byte) (int, error) {

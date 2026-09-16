@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"time"
 
+	"github.com/iammatthias/farfield/lib/r2"
 	"github.com/iammatthias/farfield/lib/store"
 )
 
@@ -126,7 +127,7 @@ func runReconcile(confirm bool) error {
 		return err
 	}
 
-	var orphans []ObjectInfo
+	var orphans []r2.ObjectInfo
 	var orphanBytes int64
 	var fresh int
 	cutoff := time.Now().Add(-reconcileGrace)
