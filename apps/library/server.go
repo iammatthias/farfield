@@ -215,6 +215,7 @@ func (s *Server) routes() http.Handler {
 
 	// Public health + shared theme stylesheet.
 	mux.HandleFunc("GET /status", s.handleStatus)
+	mux.HandleFunc("GET /static/fonts.css", theme.FontsHandler())
 	mux.HandleFunc("GET /static/styles.css", theme.CSSHandler())
 
 	// Gzip everything but the raw-byte routes. EPUB downloads and cover images

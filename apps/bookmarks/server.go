@@ -104,6 +104,7 @@ func (s *Server) routes() http.Handler {
 	mux.HandleFunc("DELETE /api/bookmarks/{id}", s.auth.RequireAPIKey(s.handleAPIDelete))
 
 	// Shared theme stylesheet.
+	mux.HandleFunc("GET /static/fonts.css", theme.FontsHandler())
 	mux.HandleFunc("GET /static/styles.css", theme.CSSHandler())
 
 	// Everything bookmarks serves is text — HTML, JSON — so Gzip wraps the

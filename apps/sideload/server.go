@@ -177,6 +177,7 @@ func (s *Server) routes() http.Handler {
 	mux.HandleFunc("DELETE /api/apps/{bundle}", s.auth.RequireAPIKey(s.handleAPIAppDelete))
 
 	mux.HandleFunc("GET /status", s.handleStatus)
+	mux.HandleFunc("GET /static/fonts.css", theme.FontsHandler())
 	mux.HandleFunc("GET /static/styles.css", theme.CSSHandler())
 
 	// Gzip self-skips octet-stream and Range, so wrapping the whole mux leaves

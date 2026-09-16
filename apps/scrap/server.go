@@ -166,6 +166,7 @@ func (s *Server) routes() http.Handler {
 	mux.HandleFunc("DELETE /api/pastes/{id}/token", s.auth.RequireAPIKey(s.handleAPITokenRemove))
 
 	mux.HandleFunc("GET /status", s.handleStatus)
+	mux.HandleFunc("GET /static/fonts.css", theme.FontsHandler())
 	mux.HandleFunc("GET /static/styles.css", theme.CSSHandler())
 
 	// Everything scrap serves is text, so Gzip wraps the whole mux. Logging

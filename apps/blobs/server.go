@@ -186,6 +186,7 @@ func (s *Server) routes() http.Handler {
 	mux.HandleFunc("DELETE /backups/{cid}", s.auth.RequireAPIKey(s.handleBackupDelete))
 
 	// Shared theme stylesheet.
+	mux.HandleFunc("GET /static/fonts.css", theme.FontsHandler())
 	mux.HandleFunc("GET /static/styles.css", theme.CSSHandler())
 
 	// Gzip everywhere except the raw-byte routes: the admin HTML and the JSON

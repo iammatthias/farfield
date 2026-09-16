@@ -134,6 +134,7 @@ func (s *Server) routes() http.Handler {
 	mux.HandleFunc("GET /logout", s.auth.HandleLogout)
 
 	mux.HandleFunc("GET /status", s.handleStatus)
+	mux.HandleFunc("GET /static/fonts.css", theme.FontsHandler())
 	mux.HandleFunc("GET /static/styles.css", theme.CSSHandler())
 
 	// Everything backup serves is text — HTML, JSON — so Gzip wraps the

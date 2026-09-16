@@ -171,6 +171,7 @@ func (s *Server) routes() http.Handler {
 	mux.HandleFunc("GET /embed/series", s.auth.RequireSession(s.handleEmbedSeriesList))
 
 	// Shared theme stylesheet and editor script.
+	mux.HandleFunc("GET /static/fonts.css", theme.FontsHandler())
 	mux.HandleFunc("GET /static/styles.css", theme.CSSHandler())
 	mux.HandleFunc("GET /static/editor.js", theme.EditorJSHandler())
 	mux.HandleFunc("GET /static/band.js", theme.BandJSHandler())

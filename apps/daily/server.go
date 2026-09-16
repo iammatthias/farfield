@@ -190,6 +190,7 @@ func (s *Server) routes() http.Handler {
 	// Shared theme stylesheet, plus the app-local game grid scripts and the
 	// art viewers (scene scripts, the shared terrain module, vendored
 	// three.js — all immutable).
+	mux.HandleFunc("GET /static/fonts.css", theme.FontsHandler())
 	mux.HandleFunc("GET /static/styles.css", theme.CSSHandler())
 	mux.HandleFunc("GET /static/sudoku.js", sudokuJSHandler())
 	mux.HandleFunc("GET /static/wordle.js", wordleJSHandler())
