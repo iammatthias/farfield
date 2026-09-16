@@ -310,11 +310,19 @@ blocks, and everything around them is ordinary markdown.
 Lift the blocks out **before** the markdown renderer sees the body, the same
 way `blob://` and `series://` are resolved; otherwise they render as code.
 
-`lib/recipe` is the implementation: `recipe.go` is the schema and its
+`lib/recipe` is farfield's implementation: `recipe.go` is the schema and its
 validation rules, `layout.go` turns the step tree into table cells, and
 `render.go` emits the markup. Its layout is pinned by test against the
 published Cooking for Engineers table, filler cells and rotated labels
 included.
+
+A consumer that renders recipes itself is reimplementing that layout, not
+just calling it — iammatthias.com carries its own copy in `src/lib/recipe.ts`.
+The two can disagree about spans, filler cells, or label rotation and nothing
+fails: the output is still a valid table, just a wrong one. Only farfield's
+side is pinned by test. Treat `lib/recipe/recipe_test.go` as the reference
+when changing either — `TestLayoutMatchesCookingForEngineers` fixes the span
+arithmetic and `TestVerticalHeuristic` fixes when a label rotates.
 
 ## Client module
 
@@ -325,6 +333,17 @@ Drop this into the Astro project as `src/lib/farfield.ts`:
 const CONTENT = "https://content.farfield.systems";
 const FEED    = "https://feed.farfield.systems";
 const BLOBS   = "https://blobs.farfield.systems";
+
+// Read keys. The enumerating reads — collections, the entry list, the post
+// list, and series by slug — are token-gated in prod, so a client without
+// these gets 401s. Series matter most: resolveBody() below splices fragments
+// by slug, and an unauthenticated getSeries returns null, which silently
+// renders the entry with every series:// embed replaced by nothing.
+const CONTENT_KEY = import.meta.env.CONTENT_READ_KEY ?? "";
+const FEED_KEY    = import.meta.env.FEED_READ_KEY ?? "";
+
+const keyed = (key: string): RequestInit =>
+  key ? { headers: { "X-API-Key": key } } : {};
 
 export type Entry = {
   collection: string; slug: string; cid: string; title: string;
@@ -352,25 +371,29 @@ const json = async (r: Response) => (r.ok ? r.json() : Promise.reject(r.status))
 
 // ── content ────────────────────────────────────────────────────────────────
 export const getCollections = (): Promise<Collection[]> =>
-  fetch(`${CONTENT}/api/collections`).then(json).then(d => d.collections);
+  fetch(`${CONTENT}/api/collections`, keyed(CONTENT_KEY))
+    .then(json).then(d => d.collections);
 
 export const getEntries = (collection?: string): Promise<Entry[]> =>
-  fetch(`${CONTENT}/api/entries${collection ? `?collection=${collection}` : ""}`)
+  fetch(`${CONTENT}/api/entries${collection ? `?collection=${collection}` : ""}`,
+        keyed(CONTENT_KEY))
     .then(json).then(d => d.entries);
 
+// Public (drafts 404 regardless), but keyed callers skip the per-IP rate
+// limit — worth sending on a build that fetches every entry in a loop.
 export const getEntry = async (slug: string): Promise<Entry | null> => {
-  const r = await fetch(`${CONTENT}/api/entries/${slug}`);
+  const r = await fetch(`${CONTENT}/api/entries/${slug}`, keyed(CONTENT_KEY));
   return r.ok ? r.json() : null;          // 404 (draft/missing) → null
 };
 
 export const getSeries = async (slug: string): Promise<Series | null> => {
-  const r = await fetch(`${CONTENT}/api/series/${slug}`);
+  const r = await fetch(`${CONTENT}/api/series/${slug}`, keyed(CONTENT_KEY));
   return r.ok ? r.json() : null;
 };
 
 // ── feed ───────────────────────────────────────────────────────────────────
 export const getPosts = (): Promise<Post[]> =>
-  fetch(`${FEED}/api/posts`).then(json).then(d => d.posts);
+  fetch(`${FEED}/api/posts`, keyed(FEED_KEY)).then(json).then(d => d.posts);
 
 // ── blobs ──────────────────────────────────────────────────────────────────
 export const blobURL = (cid: string) => `${BLOBS}/blobs/${cid}`;
@@ -394,9 +417,16 @@ async function replaceAsync(
 
 export async function resolveBody(markdown: string): Promise<string> {
   // 1. splice series fragments in (the whole ![](series://slug) → the fragment)
+  //    An unresolvable slug throws rather than splicing "" — a missing key or
+  //    a renamed series would otherwise drop a whole gallery from the page
+  //    and still build green.
   const spliced = await replaceAsync(
     markdown, /!\[[^\]]*\]\(series:\/\/([a-z0-9-]+)\)/g,
-    async (_m, slug) => (await getSeries(slug))?.body ?? "",
+    async (_m, slug) => {
+      const se = await getSeries(slug);
+      if (!se) throw new Error(`series://${slug} did not resolve`);
+      return se.body;
+    },
   );
   // 2. rewrite blob:// image URLs (in the entry and the spliced-in fragments)
   return spliced.replace(/blob:\/\/([a-z0-9]+)/g, (_m, cid) => blobURL(cid));
@@ -407,6 +437,10 @@ export async function resolveBody(markdown: string): Promise<string> {
 gives `width`/`height`/`blurhash` for blur-up placeholders. The per-record
 `cid` is a content fingerprint — use it as a cache key, send it as
 `If-None-Match`, or compare across builds to detect what changed.
+
+`resolveBody` covers two of the three body constructs. Recipe blocks are the
+third and it deliberately leaves them alone — lift them out before the
+markdown renderer runs, per the section above.
 
 ## Migrating from the old records API
 
