@@ -21,6 +21,7 @@ import (
 	"time"
 
 	"github.com/iammatthias/farfield/lib/auth"
+	"github.com/iammatthias/farfield/lib/bytestore"
 	"github.com/iammatthias/farfield/lib/cid"
 	"github.com/iammatthias/farfield/lib/store"
 	"github.com/iammatthias/farfield/lib/web"
@@ -104,7 +105,7 @@ func newTestServer(t *testing.T) *Server {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { db.Close() })
-	bs, err := OpenLocalDir(t.TempDir())
+	bs, err := bytestore.OpenLocalDir(t.TempDir())
 	if err != nil {
 		t.Fatal(err)
 	}

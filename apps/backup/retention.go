@@ -8,6 +8,7 @@ import (
 
 	"github.com/iammatthias/farfield/lib/backup"
 	"github.com/iammatthias/farfield/lib/store"
+	"github.com/iammatthias/farfield/lib/web"
 )
 
 // Snapshot retention is a grandfather-father-son ladder. Without one the
@@ -122,7 +123,7 @@ func runPrune(confirm bool) error {
 
 	if confirm {
 		removed, freed := pruneAll(db)
-		slog.Info("prune complete", "snapshots", removed, "freed", humanSize(freed))
+		slog.Info("prune complete", "snapshots", removed, "freed", web.HumanSize(freed))
 		return nil
 	}
 
@@ -141,6 +142,6 @@ func runPrune(confirm bool) error {
 		slog.Info("would prune", "app", app, "snapshots", n)
 	}
 	slog.Info("prune DRY RUN — pass --confirm to apply",
-		"snapshots", len(drop), "size", humanSize(total))
+		"snapshots", len(drop), "size", web.HumanSize(total))
 	return nil
 }

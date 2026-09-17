@@ -11,6 +11,8 @@ import (
 	"os"
 	"path"
 	"strings"
+
+	"github.com/iammatthias/farfield/lib/theme"
 )
 
 // shared holds the fleet-wide page shell — the layout, masthead, login body,
@@ -156,6 +158,9 @@ func (rd *Renderer) Render(w http.ResponseWriter, page string, data map[string]a
 		data = map[string]any{}
 	}
 	data["AssetVer"] = rd.AssetVer
+	// The faces carry their own version — they are most of the theme's bytes
+	// and change almost never, so they must not ride the stylesheet's URL.
+	data["FontsVer"] = theme.FontsVersion
 	data["FleetNav"] = fleetNav()
 	data["App"] = rd.App
 	data["Mark"] = rd.mark()

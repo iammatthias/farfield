@@ -4,9 +4,11 @@ go 1.27.0
 
 require (
 	github.com/iammatthias/farfield/lib/auth v0.0.0
+	github.com/iammatthias/farfield/lib/bytestore v0.0.0
 	github.com/iammatthias/farfield/lib/cid v0.0.0
 	github.com/iammatthias/farfield/lib/keys v0.0.0
 	github.com/iammatthias/farfield/lib/pulse v0.0.0
+	github.com/iammatthias/farfield/lib/r2 v0.0.0
 	github.com/iammatthias/farfield/lib/store v0.0.0
 	github.com/iammatthias/farfield/lib/theme v0.0.0
 	github.com/iammatthias/farfield/lib/web v0.0.0
@@ -29,9 +31,11 @@ require (
 // The lib/* modules are never published — resolve them from the local tree.
 replace (
 	github.com/iammatthias/farfield/lib/auth => ../../lib/auth
+	github.com/iammatthias/farfield/lib/bytestore => ../../lib/bytestore
 	github.com/iammatthias/farfield/lib/cid => ../../lib/cid
 	github.com/iammatthias/farfield/lib/keys => ../../lib/keys
 	github.com/iammatthias/farfield/lib/pulse => ../../lib/pulse
+	github.com/iammatthias/farfield/lib/r2 => ../../lib/r2
 	github.com/iammatthias/farfield/lib/store => ../../lib/store
 	github.com/iammatthias/farfield/lib/theme => ../../lib/theme
 	github.com/iammatthias/farfield/lib/web => ../../lib/web

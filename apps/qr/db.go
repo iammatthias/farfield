@@ -68,29 +68,21 @@ const codeCols = `id, label, mode, target, ec, public, enabled, admin_notes, ` +
 // performs idempotent column-add migrations. See the self-migrating-sqlite
 // skill — every step is safe to run on every startup.
 func openDB(path string) (*sql.DB, error) {
-	db, err := store.OpenDB(path)
+	db, err := store.OpenWithSchema(path, schema)
 	if err != nil {
 		return nil, err
 	}
-	if _, err := db.Exec(schema); err != nil {
+	if err := store.EnsureColumns(db, "codes",
+		store.Col("label", "TEXT NOT NULL DEFAULT ''"),
+		store.Col("mode", "TEXT NOT NULL DEFAULT 'direct'"),
+		store.Col("target", "TEXT NOT NULL DEFAULT ''"),
+		store.Col("ec", "TEXT NOT NULL DEFAULT 'M'"),
+		store.Col("public", "INTEGER NOT NULL DEFAULT 0"),
+		store.Col("enabled", "INTEGER NOT NULL DEFAULT 1"),
+		store.Col("admin_notes", "TEXT NOT NULL DEFAULT ''"),
+		store.Col("cid", "TEXT NOT NULL DEFAULT ''"),
+	); err != nil {
 		return nil, err
-	}
-	if _, err := db.Exec(store.SessionSchema); err != nil {
-		return nil, err
-	}
-	for _, c := range []struct{ col, decl string }{
-		{"label", "TEXT NOT NULL DEFAULT ''"},
-		{"mode", "TEXT NOT NULL DEFAULT 'direct'"},
-		{"target", "TEXT NOT NULL DEFAULT ''"},
-		{"ec", "TEXT NOT NULL DEFAULT 'M'"},
-		{"public", "INTEGER NOT NULL DEFAULT 0"},
-		{"enabled", "INTEGER NOT NULL DEFAULT 1"},
-		{"admin_notes", "TEXT NOT NULL DEFAULT ''"},
-		{"cid", "TEXT NOT NULL DEFAULT ''"},
-	} {
-		if err := store.EnsureColumn(db, "codes", c.col, c.decl); err != nil {
-			return nil, err
-		}
 	}
 	if err := backfillCIDs(db); err != nil {
 		return nil, err

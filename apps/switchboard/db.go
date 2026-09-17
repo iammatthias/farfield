@@ -55,20 +55,7 @@ const messageCols = `id, webhook_id, sender, chat_guid, body, route, ref, reply,
 
 // openDB opens the SQLite database, applies pragmas, and migrates.
 func openDB(path string) (*sql.DB, error) {
-	db, err := store.OpenDB(path)
-	if err != nil {
-		return nil, err
-	}
-	if _, err := db.Exec(schema); err != nil {
-		return nil, err
-	}
-	if _, err := db.Exec(jobSchema); err != nil {
-		return nil, err
-	}
-	if _, err := db.Exec(store.SessionSchema); err != nil {
-		return nil, err
-	}
-	return db, nil
+	return store.OpenWithSchema(path, schema, jobSchema)
 }
 
 func scanMessage(row interface{ Scan(...any) error }) (*Message, error) {

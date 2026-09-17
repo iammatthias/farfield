@@ -9,6 +9,8 @@ import (
 
 	"time"
 
+	"github.com/iammatthias/farfield/lib/bytestore"
+
 	_ "modernc.org/sqlite"
 )
 
@@ -23,7 +25,7 @@ func uploadServer(t *testing.T) *Server {
 	}
 	t.Cleanup(func() { db.Close() })
 
-	bs, err := OpenLocalDir(filepath.Join(dir, "bytes"))
+	bs, err := bytestore.OpenLocalDir(filepath.Join(dir, "bytes"))
 	if err != nil {
 		t.Fatalf("OpenLocalDir: %v", err)
 	}

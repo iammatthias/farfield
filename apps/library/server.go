@@ -10,6 +10,7 @@ import (
 	"io"
 	"log/slog"
 	"mime/multipart"
+	"net"
 	"net/http"
 	"net/url"
 	"os"
@@ -18,9 +19,11 @@ import (
 	"strings"
 	"time"
 
+	"github.com/iammatthias/farfield/lib/bytestore"
 	"github.com/iammatthias/farfield/lib/cid"
 	"github.com/iammatthias/farfield/lib/keys"
 	"github.com/iammatthias/farfield/lib/pulse"
+	"github.com/iammatthias/farfield/lib/r2"
 	"github.com/iammatthias/farfield/lib/store"
 	"github.com/iammatthias/farfield/lib/theme"
 	"github.com/iammatthias/farfield/lib/web"
@@ -53,7 +56,7 @@ func maxUploadLimit() int64 {
 // Server holds the running OPDS service.
 type Server struct {
 	db    *sql.DB
-	store ByteStore
+	store bytestore.Store
 	auth  *web.Auth
 	rd    *web.Renderer
 	// uploadKey is an optional second credential (LIBRARY_UPLOAD_KEY) accepted
@@ -70,19 +73,38 @@ type Server struct {
 }
 
 // openStore selects the byte-store backend from the environment.
-func openStore() (ByteStore, string, error) {
+func openStore() (bytestore.Store, string, error) {
 	switch store.Env("LIBRARY_BACKEND", "local") {
 	case "local":
 		dir := store.Env("LIBRARY_DIR", "library-data")
-		bs, err := OpenLocalDir(dir)
+		bs, err := bytestore.OpenLocalDir(dir)
 		return bs, "local:" + dir, err
 	case "r2":
 		bucket := os.Getenv("R2_BUCKET")
-		bs, err := NewR2(R2Config{
+		// No overall client timeout: a large EPUB upload or download legitimately
+		// runs for minutes, and a wall-clock cap would sever a healthy transfer
+		// mid-stream (the original 60s cap was what killed big tus finalizes).
+		// Bound connection setup and time-to-first-byte instead, so a dead peer
+		// still fails fast without limiting a working large transfer. This is
+		// why library configures its own client rather than taking the default
+		// one sized for images.
+		slow := &http.Client{
+			Transport: &http.Transport{
+				DialContext:           (&net.Dialer{Timeout: 10 * time.Second}).DialContext,
+				TLSHandshakeTimeout:   10 * time.Second,
+				ResponseHeaderTimeout: 60 * time.Second,
+				ExpectContinueTimeout: 1 * time.Second,
+				IdleConnTimeout:       90 * time.Second,
+				MaxIdleConns:          100,
+			},
+		}
+		bs, err := r2.New(r2.Config{
 			AccountID:       os.Getenv("R2_ACCOUNT_ID"),
 			AccessKeyID:     os.Getenv("R2_ACCESS_KEY_ID"),
 			SecretAccessKey: os.Getenv("R2_SECRET_ACCESS_KEY"),
 			Bucket:          bucket,
+			Client:          slow,
+			Stream:          slow,
 		})
 		return bs, "r2:" + bucket, err
 	default:
@@ -193,6 +215,7 @@ func (s *Server) routes() http.Handler {
 
 	// Public health + shared theme stylesheet.
 	mux.HandleFunc("GET /status", s.handleStatus)
+	mux.HandleFunc("GET /static/fonts.css", theme.FontsHandler())
 	mux.HandleFunc("GET /static/styles.css", theme.CSSHandler())
 
 	// Gzip everything but the raw-byte routes. EPUB downloads and cover images
@@ -829,20 +852,8 @@ func downloadName(b *Book) string {
 
 // tmplFuncs are helpers available to every template.
 var tmplFuncs = template.FuncMap{
-	"humanSize": humanSize,
+	"humanSize": web.HumanSize,
 	"shortDate": shortDate,
-}
-
-// humanSize formats a byte count as B / KB / MB.
-func humanSize(n int64) string {
-	switch {
-	case n >= 1<<20:
-		return fmt.Sprintf("%.1f MB", float64(n)/(1<<20))
-	case n >= 1<<10:
-		return fmt.Sprintf("%.1f KB", float64(n)/(1<<10))
-	default:
-		return fmt.Sprintf("%d B", n)
-	}
 }
 
 // shortDate trims an RFC3339 timestamp to its YYYY-MM-DD date portion.

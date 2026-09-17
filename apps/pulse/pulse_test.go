@@ -2,7 +2,6 @@ package main
 
 import (
 	"database/sql"
-	"github.com/iammatthias/farfield/lib/fleet"
 	"io"
 	"net/http"
 	"net/http/cookiejar"
@@ -14,6 +13,8 @@ import (
 	"sync/atomic"
 	"testing"
 	"time"
+
+	"github.com/iammatthias/farfield/lib/fleet"
 
 	"github.com/iammatthias/farfield/lib/web"
 )

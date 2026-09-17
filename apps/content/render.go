@@ -80,12 +80,6 @@ func wordCount(body string) int {
 	return len(strings.Fields(body))
 }
 
-// wantsJSON reports whether the client asked for a JSON response — the
-// editor's async saves do, browser form posts don't.
-func wantsJSON(r *http.Request) bool {
-	return strings.Contains(r.Header.Get("Accept"), "application/json")
-}
-
 // staticHandler serves the app's embedded static assets. The vendored
 // ternlight engine never changes for a given URL (?v=…), so it caches
 // immutably; other assets revalidate.

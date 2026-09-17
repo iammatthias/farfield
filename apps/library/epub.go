@@ -98,11 +98,11 @@ func parseEPUBAt(ra io.ReaderAt, size int64) (meta EpubMeta, coverBytes []byte, 
 	}
 
 	meta = EpubMeta{
-		Title:       firstNonEmpty(pkg.Metadata.Title),
-		Author:      firstNonEmpty(pkg.Metadata.Creator),
-		Language:    firstNonEmpty(pkg.Metadata.Language),
-		Identifier:  firstNonEmpty(pkg.Metadata.Identifier),
-		Description: firstNonEmpty(pkg.Metadata.Description),
+		Title:       firstNonBlank(pkg.Metadata.Title),
+		Author:      firstNonBlank(pkg.Metadata.Creator),
+		Language:    firstNonBlank(pkg.Metadata.Language),
+		Identifier:  firstNonBlank(pkg.Metadata.Identifier),
+		Description: firstNonBlank(pkg.Metadata.Description),
 	}
 
 	if href, mime := findCover(pkg); href != "" {
@@ -179,8 +179,12 @@ func readZip(zr *zip.Reader, name string) ([]byte, error) {
 	return nil, fmt.Errorf("zip entry %q not found", name)
 }
 
-// firstNonEmpty returns the first trimmed, non-empty string in xs.
-func firstNonEmpty(xs []string) string {
+// firstNonBlank returns the first non-whitespace string in xs, trimmed.
+//
+// Distinct from web.FirstNonEmpty, which does not trim: EPUB metadata comes
+// from XML, where an element's text is routinely newline-and-indent padded,
+// so "empty" here has to mean "blank".
+func firstNonBlank(xs []string) string {
 	for _, x := range xs {
 		if t := strings.TrimSpace(x); t != "" {
 			return t

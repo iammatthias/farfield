@@ -39,14 +39,8 @@ const postCols = `slug, cid, body, tags, created_at, updated_at`
 
 // openDB opens the SQLite database, applies pragmas, and migrates.
 func openDB(path string) (*sql.DB, error) {
-	db, err := store.OpenDB(path)
+	db, err := store.OpenWithSchema(path, schema)
 	if err != nil {
-		return nil, err
-	}
-	if _, err := db.Exec(schema); err != nil {
-		return nil, err
-	}
-	if _, err := db.Exec(store.SessionSchema); err != nil {
 		return nil, err
 	}
 	// Migrate pre-rename databases: the post stable key went id -> slug.

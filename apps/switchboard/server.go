@@ -262,6 +262,7 @@ func (s *Server) routes() http.Handler {
 	mux.HandleFunc("POST /hooks/photon", s.handleWebhook)
 
 	mux.HandleFunc("GET /status", s.handleStatus)
+	mux.HandleFunc("GET /static/fonts.css", theme.FontsHandler())
 	mux.HandleFunc("GET /static/styles.css", theme.CSSHandler())
 
 	return web.CORS(web.LogRequests(web.Gzip(s.pulse.Wrap(mux))),

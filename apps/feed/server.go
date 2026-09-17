@@ -171,6 +171,7 @@ func (s *Server) routes() http.Handler {
 	mux.HandleFunc("GET /embed/series", s.auth.RequireSession(s.handleEmbedSeriesList))
 
 	// Shared theme stylesheet and editor script.
+	mux.HandleFunc("GET /static/fonts.css", theme.FontsHandler())
 	mux.HandleFunc("GET /static/styles.css", theme.CSSHandler())
 	mux.HandleFunc("GET /static/editor.js", theme.EditorJSHandler())
 	mux.HandleFunc("GET /static/band.js", theme.BandJSHandler())
@@ -236,7 +237,7 @@ func (s *Server) handleCreatePost(w http.ResponseWriter, r *http.Request) {
 		s.fail(w, "create post", err)
 		return
 	}
-	s.postSaved(w, r, p)
+	s.postSaved(w, r, p, true)
 }
 
 func (s *Server) handleEditPost(w http.ResponseWriter, r *http.Request) {
@@ -273,18 +274,26 @@ func (s *Server) handleUpdatePost(w http.ResponseWriter, r *http.Request) {
 		http.NotFound(w, r)
 		return
 	}
-	s.postSaved(w, r, p)
+	s.postSaved(w, r, p, false)
 }
 
 // postSaved answers a successful create or update: JSON with the post's
 // canonical URLs for the editor's async saves, a redirect to the feed for a
 // plain form post.
-func (s *Server) postSaved(w http.ResponseWriter, r *http.Request, p *Post) {
-	if wantsJSON(r) {
+//
+// A feed post is live the moment it saves, so a create needs to say so. The
+// plain form post has always confirmed by landing on the feed; the async save
+// stayed on the editor and said "Saved 14:32" in 60%-opacity 0.72rem type,
+// which is not a confirmation that anything was published. `created` and
+// `viewURL` let the editor say "Posted" and offer the way to go look.
+func (s *Server) postSaved(w http.ResponseWriter, r *http.Request, p *Post, created bool) {
+	if web.WantsJSON(r) {
 		web.WriteJSON(w, http.StatusOK, map[string]any{
 			"slug":    p.Slug,
 			"action":  "/posts/" + p.Slug,
 			"editURL": "/posts/" + p.Slug + "/edit",
+			"created": created,
+			"viewURL": "/",
 		})
 		return
 	}
@@ -294,7 +303,7 @@ func (s *Server) postSaved(w http.ResponseWriter, r *http.Request, p *Post) {
 // postSaveError answers a failed create or update: a JSON error for the
 // editor's async saves, the re-rendered form for a plain post.
 func (s *Server) postSaveError(w http.ResponseWriter, r *http.Request, p *Post, isNew bool, action, msg string) {
-	if wantsJSON(r) {
+	if web.WantsJSON(r) {
 		web.WriteError(w, http.StatusBadRequest, msg)
 		return
 	}
@@ -500,12 +509,6 @@ func (s *Server) bodyHTML(r *http.Request, body string) template.HTML {
 // wordCount is the edit page's initial word count; the editor recounts live.
 func wordCount(body string) int {
 	return len(strings.Fields(body))
-}
-
-// wantsJSON reports whether the client asked for a JSON response — the
-// editor's async saves do, browser form posts don't.
-func wantsJSON(r *http.Request) bool {
-	return strings.Contains(r.Header.Get("Accept"), "application/json")
 }
 
 func (s *Server) renderPostForm(w http.ResponseWriter, r *http.Request, p *Post, isNew bool, action, errMsg string) {

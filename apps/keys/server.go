@@ -118,6 +118,7 @@ func (s *Server) routes() http.Handler {
 	mux.HandleFunc("GET /logout", s.auth.HandleLogout)
 
 	mux.HandleFunc("GET /status", s.handleStatus)
+	mux.HandleFunc("GET /static/fonts.css", theme.FontsHandler())
 	mux.HandleFunc("GET /static/styles.css", theme.CSSHandler())
 
 	return web.LogRequests(web.Gzip(s.pulse.Wrap(mux)))

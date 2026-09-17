@@ -92,6 +92,14 @@ func TestRoutes(t *testing.T) {
 // TestStatusNegotiation: browsers get the branded fleet observation, every
 // other client keeps the JSON contract the healthcheck and pulse rely on.
 func TestStatusNegotiation(t *testing.T) {
+	// Pin the probe target somewhere nothing can answer. The sweep hits real
+	// ports, so against the default 127.0.0.1 this test reported whether the
+	// developer happened to have `make dev` running rather than anything about
+	// the code — green on a clean laptop, red the moment the fleet was up.
+	// .invalid is reserved by RFC 2606 and can never resolve, so every probe
+	// fails the same way on every machine, in DNS rather than on a timeout.
+	t.Setenv("FARFIELD_BIND_IP", "invalid.invalid")
+
 	h, err := routes()
 	if err != nil {
 		t.Fatalf("routes: %v", err)

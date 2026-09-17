@@ -9,6 +9,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/iammatthias/farfield/lib/r2"
 )
 
 // fakeRemote is a map-backed objectStore.
@@ -52,10 +54,10 @@ func (f *fakeRemote) Delete(key string) error {
 	return nil
 }
 
-func (f *fakeRemote) List() ([]ObjectInfo, error) {
-	var out []ObjectInfo
+func (f *fakeRemote) List() ([]r2.ObjectInfo, error) {
+	var out []r2.ObjectInfo
 	for k, v := range f.objects {
-		out = append(out, ObjectInfo{Key: k, Size: int64(len(v)), LastModified: time.Now()})
+		out = append(out, r2.ObjectInfo{Key: k, Size: int64(len(v)), LastModified: time.Now()})
 	}
 	return out, nil
 }

@@ -111,6 +111,7 @@ func (s *Server) routes() http.Handler {
 	mux.HandleFunc("GET /status", s.handleStatus)
 
 	// Shared theme stylesheet.
+	mux.HandleFunc("GET /static/fonts.css", theme.FontsHandler())
 	mux.HandleFunc("GET /static/styles.css", theme.CSSHandler())
 
 	// Everything pulse serves is text, so Gzip wraps the whole mux; logging

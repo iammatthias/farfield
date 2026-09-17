@@ -19,12 +19,14 @@ use (
 	./lib/auth
 	./lib/backup
 	./lib/capability
+	./lib/bytestore
 	./lib/cid
 	./lib/fleet
 	./lib/keys
 	./lib/markdown
 	./lib/pulse
 	./lib/qrenc
+	./lib/r2
 	./lib/recipe
 	./lib/store
 	./lib/theme

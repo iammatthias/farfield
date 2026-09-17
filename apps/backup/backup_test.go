@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	"github.com/iammatthias/farfield/lib/store"
+	"github.com/iammatthias/farfield/lib/web"
 )
 
 func TestHumanSize(t *testing.T) {
@@ -16,8 +17,8 @@ func TestHumanSize(t *testing.T) {
 		5 << 20: "5.0 MB",
 	}
 	for n, want := range cases {
-		if got := humanSize(n); got != want {
-			t.Errorf("humanSize(%d) = %q, want %q", n, got, want)
+		if got := web.HumanSize(n); got != want {
+			t.Errorf("web.HumanSize(%d) = %q, want %q", n, got, want)
 		}
 	}
 }

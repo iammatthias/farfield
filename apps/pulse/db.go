@@ -99,19 +99,7 @@ CREATE TABLE IF NOT EXISTS seeded_targets (
 // store.EnsureColumn / store.RenameColumn here, in rename → add → backfill
 // order.
 func openDB(path string) (*sql.DB, error) {
-	db, err := store.OpenDB(path)
-	if err != nil {
-		return nil, err
-	}
-	if _, err := db.Exec(schema); err != nil {
-		db.Close()
-		return nil, err
-	}
-	if _, err := db.Exec(store.SessionSchema); err != nil {
-		db.Close()
-		return nil, err
-	}
-	return db, nil
+	return store.OpenWithSchema(path, schema)
 }
 
 // ── targets ────────────────────────────────────────────────────────────────

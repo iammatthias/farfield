@@ -16,6 +16,7 @@ import (
 	"time"
 
 	"github.com/iammatthias/farfield/lib/store"
+	"github.com/iammatthias/farfield/lib/web"
 	"gopkg.in/yaml.v3"
 )
 
@@ -470,7 +471,7 @@ func syncVault(c *syncClient, dir string, dryRun bool, prefer string, migrateRef
 			// The server stamps updatedAt — reflect it in the vault file so
 			// the frontmatter stays truthful.
 			lf.entry.UpdatedAt = saved.UpdatedAt
-			lf.entry.CreatedAt = firstNonEmpty(saved.CreatedAt, lf.entry.CreatedAt)
+			lf.entry.CreatedAt = web.FirstNonEmpty(saved.CreatedAt, lf.entry.CreatedAt)
 			if err := writeVaultFile(lf.path, lf.entry); err != nil {
 				return err
 			}

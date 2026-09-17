@@ -85,28 +85,20 @@ CREATE TABLE IF NOT EXISTS tokens (
 // performs idempotent column-add migrations — every step is safe to run on
 // every startup (see the self-migrating-sqlite skill).
 func openDB(path string) (*sql.DB, error) {
-	db, err := store.OpenDB(path)
+	db, err := store.OpenWithSchema(path, schema)
 	if err != nil {
 		return nil, err
 	}
-	if _, err := db.Exec(schema); err != nil {
+	if err := store.EnsureColumns(db, "pastes",
+		store.Col("cid", "TEXT NOT NULL DEFAULT ''"),
+		store.Col("title", "TEXT NOT NULL DEFAULT ''"),
+		store.Col("lang", "TEXT NOT NULL DEFAULT ''"),
+		store.Col("visibility", "TEXT NOT NULL DEFAULT 'unlisted'"),
+		store.Col("expires_at", "TEXT NOT NULL DEFAULT ''"),
+		store.Col("views", "INTEGER NOT NULL DEFAULT 0"),
+		store.Col("alias", "TEXT NOT NULL DEFAULT ''"),
+	); err != nil {
 		return nil, err
-	}
-	if _, err := db.Exec(store.SessionSchema); err != nil {
-		return nil, err
-	}
-	for _, c := range []struct{ col, decl string }{
-		{"cid", "TEXT NOT NULL DEFAULT ''"},
-		{"title", "TEXT NOT NULL DEFAULT ''"},
-		{"lang", "TEXT NOT NULL DEFAULT ''"},
-		{"visibility", "TEXT NOT NULL DEFAULT 'unlisted'"},
-		{"expires_at", "TEXT NOT NULL DEFAULT ''"},
-		{"views", "INTEGER NOT NULL DEFAULT 0"},
-		{"alias", "TEXT NOT NULL DEFAULT ''"},
-	} {
-		if err := store.EnsureColumn(db, "pastes", c.col, c.decl); err != nil {
-			return nil, err
-		}
 	}
 	return db, nil
 }

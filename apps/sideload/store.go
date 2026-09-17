@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/iammatthias/farfield/lib/cid"
+	"github.com/iammatthias/farfield/lib/r2"
 )
 
 // objectStore is the durable remote half of the blob store — the subset of
@@ -19,7 +20,7 @@ type objectStore interface {
 	Put(key string, data []byte, contentType string) error
 	GetStream(key string) (io.ReadCloser, int64, error)
 	Delete(key string) error
-	List() ([]ObjectInfo, error)
+	List() ([]r2.ObjectInfo, error)
 }
 
 // blobStore is the content-addressed store for builds (<cid>.ipa) and

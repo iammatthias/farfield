@@ -42,6 +42,9 @@
   {{if .PublicURL}}<meta property="og:url" content="{{.PublicURL}}/">
   <link rel="canonical" href="{{.PublicURL}}/">{{end}}
   {{end}}{{end}}
+  {{/* Faces first, and versioned separately: they are 82% of the theme's
+       bytes and change almost never, so a colour tweak must not evict them. */}}
+  <link rel="stylesheet" href="/static/fonts.css?v={{.FontsVer}}">
   <link rel="stylesheet" href="/static/styles.css?v={{.AssetVer}}">
   {{/* "styles" is the app's own CSS, from its base.html; "head" is a
        per-page slot for scripts or one-page styles. */}}

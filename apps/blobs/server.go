@@ -16,9 +16,11 @@ import (
 	"strings"
 	"time"
 
+	"github.com/iammatthias/farfield/lib/bytestore"
 	"github.com/iammatthias/farfield/lib/cid"
 	"github.com/iammatthias/farfield/lib/keys"
 	"github.com/iammatthias/farfield/lib/pulse"
+	"github.com/iammatthias/farfield/lib/r2"
 	"github.com/iammatthias/farfield/lib/store"
 	"github.com/iammatthias/farfield/lib/theme"
 	"github.com/iammatthias/farfield/lib/web"
@@ -49,7 +51,7 @@ const publicBytesPerMin = 600
 // Server holds the running blob service.
 type Server struct {
 	db        *sql.DB
-	store     ByteStore
+	store     bytestore.Store
 	auth      *web.Auth
 	rd        *web.Renderer
 	maxUpload int64
@@ -67,15 +69,15 @@ type Server struct {
 }
 
 // openStore selects the byte-store backend from the environment.
-func openStore() (ByteStore, string, error) {
+func openStore() (bytestore.Store, string, error) {
 	switch store.Env("BLOBS_BACKEND", "local") {
 	case "local":
 		dir := store.Env("BLOBS_DIR", "blobs-data")
-		bs, err := OpenLocalDir(dir)
+		bs, err := bytestore.OpenLocalDir(dir)
 		return bs, "local:" + dir, err
 	case "r2":
 		bucket := os.Getenv("R2_BUCKET")
-		bs, err := NewR2(R2Config{
+		bs, err := r2.New(r2.Config{
 			AccountID:       os.Getenv("R2_ACCOUNT_ID"),
 			AccessKeyID:     os.Getenv("R2_ACCESS_KEY_ID"),
 			SecretAccessKey: os.Getenv("R2_SECRET_ACCESS_KEY"),
@@ -184,6 +186,7 @@ func (s *Server) routes() http.Handler {
 	mux.HandleFunc("DELETE /backups/{cid}", s.auth.RequireAPIKey(s.handleBackupDelete))
 
 	// Shared theme stylesheet.
+	mux.HandleFunc("GET /static/fonts.css", theme.FontsHandler())
 	mux.HandleFunc("GET /static/styles.css", theme.CSSHandler())
 
 	// Gzip everywhere except the raw-byte routes: the admin HTML and the JSON
@@ -656,7 +659,7 @@ func (s *Server) handleAPIDelete(w http.ResponseWriter, r *http.Request) {
 
 // tmplFuncs are helpers available to every template.
 var tmplFuncs = template.FuncMap{
-	"humanSize": humanSize,
+	"humanSize": web.HumanSize,
 	"shortDate": shortDate,
 	"mediaKind": mediaKind,
 }
@@ -673,18 +676,6 @@ func mediaKind(mime string) string {
 		return "audio"
 	}
 	return "file"
-}
-
-// humanSize formats a byte count as B / KB / MB.
-func humanSize(n int64) string {
-	switch {
-	case n >= 1<<20:
-		return fmt.Sprintf("%.1f MB", float64(n)/(1<<20))
-	case n >= 1<<10:
-		return fmt.Sprintf("%.1f KB", float64(n)/(1<<10))
-	default:
-		return fmt.Sprintf("%d B", n)
-	}
 }
 
 // shortDate trims an RFC3339 timestamp to its YYYY-MM-DD date portion.

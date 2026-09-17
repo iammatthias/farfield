@@ -56,14 +56,8 @@ const bookCols = `cid, title, author, language, identifier, description, collect
 // book metadata index and admin login sessions; book and cover bytes live in
 // the ByteStore.
 func openDB(path string) (*sql.DB, error) {
-	db, err := store.OpenDB(path)
+	db, err := store.OpenWithSchema(path, schema)
 	if err != nil {
-		return nil, err
-	}
-	if _, err := db.Exec(schema); err != nil {
-		return nil, err
-	}
-	if _, err := db.Exec(store.SessionSchema); err != nil {
 		return nil, err
 	}
 	if _, err := db.Exec(uploadsSchema); err != nil {
