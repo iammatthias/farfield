@@ -592,6 +592,11 @@ func updateEntry(db *sql.DB, currentSlug string, e *Entry) error {
 	}
 	now := time.Now().UTC()
 	e.UpdatedAt = now.Format(time.RFC3339)
+	// The key keeps its stamp: a bare replacement slug is re-prefixed with
+	// the current one's, so a save never quietly renames the entry out of
+	// the "<unixMillis>-…" scheme. The CID is computed after, on the slug
+	// that is actually stored.
+	e.Slug = keepStamp(e.Slug, currentSlug)
 	e.CID = entryCID(e)
 	// The publish date is decided against what is stored, not what the
 	// caller sent: an omitted value keeps the existing stamp, and the first

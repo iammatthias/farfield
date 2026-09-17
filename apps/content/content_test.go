@@ -66,3 +66,52 @@ func TestEncodeDecodeTags(t *testing.T) {
 		t.Errorf("round-trip = %v, want [a b]", round)
 	}
 }
+
+func TestKeepStamp(t *testing.T) {
+	cases := []struct{ slug, current, want string }{
+		{"buddydex", "1789660275538-buddydex", "1789660275538-buddydex"},          // bare replacement inherits the stamp
+		{"new-name", "1789660275538-buddydex", "1789660275538-new-name"},          // a deliberate rename keeps the key's stamp
+		{"1789660275538-x", "1789660275538-buddydex", "1789660275538-x"},          // already stamped: verbatim
+		{"1700000000000-x", "1789660275538-buddydex", "1700000000000-x"},          // a different stamp is the caller's call
+		{"buddydex", "buddydex", "buddydex"},                                      // nothing to preserve
+		{"", "1789660275538-buddydex", ""},                                        // empty stays empty for validation
+		{"100-days-of-code", "1789660275538-x", "1789660275538-100-days-of-code"}, // a short numeric run is not a stamp
+	}
+	for _, c := range cases {
+		if got := keepStamp(c.slug, c.current); got != c.want {
+			t.Errorf("keepStamp(%q, %q) = %q, want %q", c.slug, c.current, got, c.want)
+		}
+	}
+}
+
+// TestUpdateKeepsSlugStamp is the editor's second save: the create stamped
+// the derived slug, the slug field is still blank, so the update arrives
+// with a bare title-derived slug. The stored key must not lose its prefix.
+func TestUpdateKeepsSlugStamp(t *testing.T) {
+	db := openTestDB(t)
+	e := &Entry{Collection: "blog", Slug: slugify("Buddydex"), Title: "Buddydex", Body: "x"}
+	if err := insertEntry(db, e); err != nil {
+		t.Fatal(err)
+	}
+	stamped := e.Slug
+	if !stampedSlug.MatchString(stamped) {
+		t.Fatalf("insert did not stamp: %q", stamped)
+	}
+	again := &Entry{Collection: "blog", Slug: slugify("Buddydex"), Title: "Buddydex", Body: "xy"}
+	if err := updateEntry(db, stamped, again); err != nil {
+		t.Fatal(err)
+	}
+	if again.Slug != stamped {
+		t.Fatalf("update renamed %q to %q", stamped, again.Slug)
+	}
+	got, err := getEntry(db, stamped)
+	if err != nil || got == nil {
+		t.Fatalf("entry gone from its stamped key: %v, %v", got, err)
+	}
+	if got.Body != "xy" || got.CID != again.CID {
+		t.Fatalf("stored body/cid %q/%q, want %q/%q", got.Body, got.CID, "xy", again.CID)
+	}
+	if bare, _ := getEntry(db, "buddydex"); bare != nil {
+		t.Fatalf("bare slug %q resolves; the key was rewritten", "buddydex")
+	}
+}

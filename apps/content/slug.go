@@ -35,6 +35,24 @@ func stampSlug(slug string, t time.Time) string {
 	return strconv.FormatInt(t.UnixMilli(), 10) + "-" + slug
 }
 
+// keepStamp carries the current key's stamp onto a replacement slug that
+// arrived without one. An update is handed whatever the caller derived —
+// the editor re-slugifies the title when its slug field is blank, an API
+// caller may send a bare slug — and writing that verbatim would strip the
+// prefix insertEntry put there. A slug that already carries a stamp (the
+// same or a deliberately different one) passes through; so does one whose
+// current key has none to preserve.
+func keepStamp(slug, current string) string {
+	if slug == "" || stampedSlug.MatchString(slug) {
+		return slug
+	}
+	prefix := stampedSlug.FindString(current)
+	if prefix == "" {
+		return slug
+	}
+	return prefix + slug
+}
+
 // splitTags parses a comma-separated tag input into a trimmed, de-duplicated
 // slice. Empty input yields an empty slice.
 func splitTags(s string) []string {
