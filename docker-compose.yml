@@ -112,6 +112,11 @@ services:
       - LIBRARY_PORT=8797
       - LIBRARY_DB_PATH=/data/library.sqlite
       - LIBRARY_BACKEND=${LIBRARY_BACKEND:-r2}
+      # Book downloads 302 to presigned R2 URLs (off the home uplink). Agents is a
+      # comma list of User-Agent prefixes, "*" for every reader.
+      - LIBRARY_DOWNLOAD_REDIRECT=${LIBRARY_DOWNLOAD_REDIRECT:-on}
+      - LIBRARY_PRESIGN_TTL=${LIBRARY_PRESIGN_TTL:-10m}
+      - LIBRARY_REDIRECT_AGENTS=${LIBRARY_REDIRECT_AGENTS:-*}
       - LIBRARY_DIR=/data/library
       - PASSWORD=${PASSWORD:?set PASSWORD in .env — refusing to start with a default}
       - SESSION_SECRET=${SESSION_SECRET:-}

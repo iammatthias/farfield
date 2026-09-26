@@ -1056,3 +1056,156 @@ func TestCatalogCredentials(t *testing.T) {
 		}
 	}
 }
+
+// presigningStore is a local store that can also presign, standing in for R2.
+type presigningStore struct {
+	bytestore.Store
+	calls  int
+	params url.Values
+}
+
+func (p *presigningStore) PresignGet(key string, ttl time.Duration, params url.Values) (string, error) {
+	p.calls++
+	p.params = params
+	return "https://acct.r2.cloudflarestorage.com/books/" + key + "?X-Amz-Expires=" +
+		strconv.Itoa(int(ttl/time.Second)) + "&X-Amz-Signature=sig" + strconv.Itoa(p.calls), nil
+}
+
+// TestDownloadRedirect: an authorized download is a fresh, uncacheable 302 to
+// the presigned object; an unauthorized one never reaches the signer; ?proxy=1
+// and a disabled TTL both keep streaming.
+func TestDownloadRedirect(t *testing.T) {
+	s := newTestServer(t)
+	ps := &presigningStore{Store: s.store}
+	s.store, s.presignTTL, s.redirectAgents = ps, 10*time.Minute, []string{"Marea/"}
+	h := s.routes()
+
+	data := buildEPUB(t, "Redirected", "Author", nil)
+	req := httptest.NewRequest(http.MethodPost, "/api/books?filename=r.epub", bytes.NewReader(data))
+	req.Header.Set("X-API-Key", "secret")
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, req)
+	if rec.Code != http.StatusCreated {
+		t.Fatalf("upload: %d", rec.Code)
+	}
+	var book Book
+	if err := json.Unmarshal(rec.Body.Bytes(), &book); err != nil {
+		t.Fatal(err)
+	}
+	path := "/opds/download/" + book.CID
+
+	get := func(method, target string, auth bool) *httptest.ResponseRecorder {
+		req := httptest.NewRequest(method, target, nil)
+		req.Header.Set("User-Agent", "Marea/42 CFNetwork/1.0 Darwin/25.0")
+		if auth {
+			req.SetBasicAuth("reader", "secret")
+		}
+		rec := httptest.NewRecorder()
+		h.ServeHTTP(rec, req)
+		return rec
+	}
+
+	// No credentials: the Basic challenge, and no URL is ever signed.
+	if rec := get(http.MethodGet, path, false); rec.Code != http.StatusUnauthorized ||
+		rec.Header().Get("WWW-Authenticate") == "" || rec.Header().Get("Location") != "" {
+		t.Fatalf("unauth download = %d loc=%q", rec.Code, rec.Header().Get("Location"))
+	}
+	if ps.calls != 0 {
+		t.Fatalf("signed %d URLs for an unauthorized request", ps.calls)
+	}
+
+	first := get(http.MethodGet, path, true)
+	if first.Code != http.StatusFound {
+		t.Fatalf("download = %d, want 302", first.Code)
+	}
+	loc := first.Header().Get("Location")
+	if !strings.HasPrefix(loc, "https://acct.r2.cloudflarestorage.com/books/"+book.CID+"?") ||
+		!strings.Contains(loc, "X-Amz-Expires=600") {
+		t.Errorf("Location = %q", loc)
+	}
+	if cc := first.Header().Get("Cache-Control"); cc != "private, no-store" {
+		t.Errorf("redirect Cache-Control = %q, want private, no-store", cc)
+	}
+	if ps.params.Get("response-content-type") != epubMime ||
+		!strings.HasPrefix(ps.params.Get("response-content-disposition"), "attachment; filename=") {
+		t.Errorf("presign params = %v", ps.params)
+	}
+	// Minted per request, never reused.
+	if again := get(http.MethodGet, path, true).Header().Get("Location"); again == loc {
+		t.Error("second download reused the first presigned URL")
+	}
+	if rec := get(http.MethodHead, path, true); rec.Code != http.StatusFound {
+		t.Errorf("HEAD download = %d, want 302", rec.Code)
+	}
+
+	// ?proxy=1 streams the bytes, as does turning redirects off.
+	if rec := get(http.MethodGet, path+"?proxy=1", true); rec.Code != http.StatusOK || !bytes.Equal(rec.Body.Bytes(), data) {
+		t.Errorf("proxy download = %d, %d bytes", rec.Code, rec.Body.Len())
+	}
+	s.presignTTL = 0
+	if rec := get(http.MethodGet, path, true); rec.Code != http.StatusOK || !bytes.Equal(rec.Body.Bytes(), data) {
+		t.Errorf("redirect-off download = %d, %d bytes", rec.Code, rec.Body.Len())
+	}
+}
+
+func TestPresignTTL(t *testing.T) {
+	for _, tc := range []struct {
+		redirect, ttl string
+		want          time.Duration
+	}{
+		{"", "", defaultPresignTTL},
+		{"on", "90s", 90 * time.Second},
+		{"on", "junk", defaultPresignTTL},
+		{"on", "48h", defaultPresignTTL},
+		{"off", "90s", 0},
+	} {
+		t.Setenv("LIBRARY_DOWNLOAD_REDIRECT", tc.redirect)
+		t.Setenv("LIBRARY_PRESIGN_TTL", tc.ttl)
+		if got := presignTTL(); got != tc.want {
+			t.Errorf("redirect=%q ttl=%q -> %v, want %v", tc.redirect, tc.ttl, got, tc.want)
+		}
+	}
+}
+
+// TestDownloadRedirectAgents: only listed agents are redirected; other OPDS
+// readers keep streaming, and "*" opens it to everyone.
+func TestDownloadRedirectAgents(t *testing.T) {
+	s := newTestServer(t)
+	s.store, s.presignTTL = &presigningStore{Store: s.store}, 10*time.Minute
+	s.redirectAgents = []string{"Marea/"}
+	h := s.routes()
+
+	data := buildEPUB(t, "Agents", "Author", nil)
+	req := httptest.NewRequest(http.MethodPost, "/api/books", bytes.NewReader(data))
+	req.Header.Set("X-API-Key", "secret")
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, req)
+	var book Book
+	if err := json.Unmarshal(rec.Body.Bytes(), &book); err != nil {
+		t.Fatal(err)
+	}
+
+	code := func(ua string) int {
+		req := httptest.NewRequest(http.MethodGet, "/opds/download/"+book.CID, nil)
+		req.SetBasicAuth("reader", "secret")
+		req.Header.Set("User-Agent", ua)
+		rec := httptest.NewRecorder()
+		h.ServeHTTP(rec, req)
+		return rec.Code
+	}
+	if got := code("Marea/7 CFNetwork/1 Darwin/25"); got != http.StatusFound {
+		t.Errorf("Marea = %d, want 302", got)
+	}
+	if got := code("KOReader/2026.09"); got != http.StatusOK {
+		t.Errorf("KOReader = %d, want 200 (streamed)", got)
+	}
+	s.redirectAgents = []string{"*"}
+	if got := code("KOReader/2026.09"); got != http.StatusFound {
+		t.Errorf(`"*" KOReader = %d, want 302`, got)
+	}
+
+	t.Setenv("LIBRARY_REDIRECT_AGENTS", " Marea/ , Thorium/ ,")
+	if got := redirectAgents(); len(got) != 2 || got[0] != "Marea/" || got[1] != "Thorium/" {
+		t.Errorf("redirectAgents() = %q", got)
+	}
+}

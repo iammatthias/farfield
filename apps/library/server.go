@@ -53,6 +53,62 @@ func maxUploadLimit() int64 {
 	return defaultMaxUpload
 }
 
+// defaultPresignTTL is how long a download redirect's presigned URL stays
+// valid. Expiry is checked when a request starts, so it only needs to cover
+// the gap between the redirect and the client following it — plus a paused
+// download resuming, which a reader handles by asking for a fresh redirect.
+const defaultPresignTTL = 10 * time.Minute
+
+// presignTTL resolves the download-redirect lifetime. LIBRARY_DOWNLOAD_REDIRECT
+// =off returns 0, which keeps every download streaming through the origin;
+// LIBRARY_PRESIGN_TTL takes a Go duration ("10m"), anything unusable falling
+// back to the default.
+func presignTTL() time.Duration {
+	if store.Env("LIBRARY_DOWNLOAD_REDIRECT", "on") == "off" {
+		return 0
+	}
+	if v := store.Env("LIBRARY_PRESIGN_TTL", ""); v != "" {
+		if d, err := time.ParseDuration(v); err == nil && d > 0 && d <= 24*time.Hour {
+			return d
+		}
+		slog.Warn("invalid LIBRARY_PRESIGN_TTL (want a duration up to 24h); using default",
+			"value", v, "default", defaultPresignTTL)
+	}
+	return defaultPresignTTL
+}
+
+// redirectAgents resolves which clients get download redirects, from
+// LIBRARY_REDIRECT_AGENTS: comma-separated User-Agent prefixes, default
+// "Marea/". "*" redirects every client. This is routing, not a security
+// boundary — a client spoofing the agent only gets a redirect it may not
+// follow. It exists because many OPDS readers send Basic auth preemptively
+// and would carry it across the redirect, which R2 refuses outright.
+func redirectAgents() []string {
+	var out []string
+	for _, p := range strings.Split(store.Env("LIBRARY_REDIRECT_AGENTS", "Marea/"), ",") {
+		if p = strings.TrimSpace(p); p != "" {
+			out = append(out, p)
+		}
+	}
+	return out
+}
+
+// agentAllowed reports whether ua matches one of the redirect prefixes.
+func agentAllowed(ua string, prefixes []string) bool {
+	for _, p := range prefixes {
+		if p == "*" || strings.HasPrefix(ua, p) {
+			return true
+		}
+	}
+	return false
+}
+
+// presigner is a byte store that can mint a short-lived direct URL for one
+// object. R2 can; the local-disk store cannot, so it always streams.
+type presigner interface {
+	PresignGet(key string, ttl time.Duration, params url.Values) (string, error)
+}
+
 // Server holds the running OPDS service.
 type Server struct {
 	db    *sql.DB
@@ -68,6 +124,13 @@ type Server struct {
 	// tusDir is the on-disk staging area for in-progress resumable uploads.
 	tusDir    string
 	maxUpload int64
+	// presignTTL, when positive and the store can presign, sends book
+	// downloads to R2 by redirect instead of streaming them through the
+	// homelab's uplink. Zero streams everything.
+	presignTTL time.Duration
+	// redirectAgents are the User-Agent prefixes that get redirects ("*" for
+	// all); every other client streams.
+	redirectAgents []string
 	// pulse records request telemetry; nil disables it (tests never start it).
 	pulse *pulse.Recorder
 }
@@ -150,9 +213,11 @@ func run(host, port string) error {
 				{Label: "Log out", URL: "/logout"},
 			},
 		},
-		uploadKey: store.Env("LIBRARY_UPLOAD_KEY", ""),
-		tusDir:    store.Env("LIBRARY_TUS_DIR", "tus-staging"),
-		maxUpload: maxUploadLimit(),
+		uploadKey:      store.Env("LIBRARY_UPLOAD_KEY", ""),
+		tusDir:         store.Env("LIBRARY_TUS_DIR", "tus-staging"),
+		maxUpload:      maxUploadLimit(),
+		presignTTL:     presignTTL(),
+		redirectAgents: redirectAgents(),
 	}
 	// The staging directory holds both tus partials and the temp files the
 	// single-shot upload spools through, so it has to exist before any
@@ -645,6 +710,9 @@ func (s *Server) handleDownload(w http.ResponseWriter, r *http.Request) {
 		web.WriteError(w, http.StatusNotFound, "book not found")
 		return
 	}
+	if s.redirectDownload(w, r, b) {
+		return
+	}
 	rc, size, err := s.store.GetStream(id)
 	if err != nil {
 		slog.Error("get epub bytes", "cid", id, "err", err)
@@ -665,6 +733,38 @@ func (s *Server) handleDownload(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Cache-Control", "private, max-age=31536000, immutable, no-transform")
 	w.Header().Set("Content-Disposition", `attachment; filename="`+downloadName(b)+`"`)
 	serveObject(w, r, rc, size)
+}
+
+// redirectDownload answers an authorized download with a 302 to a presigned R2
+// URL, so the bytes flow from Cloudflare's network rather than up the
+// homelab's residential uplink. It reports whether it answered; false means
+// stream as before — the store cannot presign, redirects are off, the client
+// is not on the redirect agent list, it asked for ?proxy=1 (an OPDS reader
+// that will not follow a redirect, or that would carry its Basic credentials
+// to R2 and be refused), or signing failed.
+//
+// The URL is minted fresh per request, only after catalog auth and the book
+// lookup pass, and is a bearer credential until it expires: no-store keeps
+// every cache off it, and it is never logged.
+func (s *Server) redirectDownload(w http.ResponseWriter, r *http.Request, b *Book) bool {
+	p, ok := s.store.(presigner)
+	if !ok || s.presignTTL <= 0 || r.URL.Query().Get("proxy") != "" ||
+		!agentAllowed(r.UserAgent(), s.redirectAgents) {
+		return false
+	}
+	loc, err := p.PresignGet(b.CID, s.presignTTL, url.Values{
+		// Signed into the URL, so R2 answers with the same headers the
+		// origin would, and a holder cannot change them.
+		"response-content-type":        {epubMime},
+		"response-content-disposition": {`attachment; filename="` + downloadName(b) + `"`},
+	})
+	if err != nil {
+		slog.Error("presign download; streaming instead", "cid", b.CID, "err", err)
+		return false
+	}
+	w.Header().Set("Cache-Control", "private, no-store")
+	http.Redirect(w, r, loc, http.StatusFound)
+	return true
 }
 
 func (s *Server) handleCover(w http.ResponseWriter, r *http.Request) {
