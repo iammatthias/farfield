@@ -31,6 +31,10 @@ type opdsLink struct {
 	Rel  string `xml:"rel,attr"`
 	Href string `xml:"href,attr"`
 	Type string `xml:"type,attr"`
+	// Length is the byte size of an acquisition link's target (Atom allows it on any
+	// link); readers fall back to it for download progress when a response
+	// arrives without a Content-Length.
+	Length int64 `xml:"length,attr,omitempty"`
 }
 
 // opdsAuthor is an Atom <author> element.
@@ -101,7 +105,7 @@ func catalogXML(books []Book, title, selfHref, updated string) ([]byte, error) {
 			Identifier: b.Identifier,
 			Summary:    b.Description,
 			Links: []opdsLink{
-				{Rel: relAcquisition, Href: "/opds/download/" + b.CID, Type: epubMime},
+				{Rel: relAcquisition, Href: "/opds/download/" + b.CID, Type: epubMime, Length: b.Size},
 			},
 		}
 		if b.Author != "" {

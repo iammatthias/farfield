@@ -929,6 +929,7 @@ func TestCatalogFlow(t *testing.T) {
 		"<dc:language>en</dc:language>",
 		`rel="http://opds-spec.org/acquisition"`,
 		"/opds/download/" + book.CID,
+		`length="` + strconv.FormatInt(book.Size, 10) + `"`,
 		"/opds/cover/" + book.CoverCID,
 	} {
 		if !strings.Contains(body, want) {
@@ -946,6 +947,13 @@ func TestCatalogFlow(t *testing.T) {
 	}
 	if ct := rec.Header().Get("Content-Type"); ct != epubMime {
 		t.Errorf("download content-type = %q, want %q", ct, epubMime)
+	}
+	// Readers draw progress from Content-Length; the edge must not re-encode.
+	if cl := rec.Header().Get("Content-Length"); cl != strconv.Itoa(len(data)) {
+		t.Errorf("download content-length = %q, want %d", cl, len(data))
+	}
+	if cc := rec.Header().Get("Cache-Control"); !strings.Contains(cc, "private") || !strings.Contains(cc, "no-transform") {
+		t.Errorf("download cache-control = %q, want private + no-transform", cc)
 	}
 	if !bytes.Equal(rec.Body.Bytes(), data) {
 		t.Errorf("downloaded bytes differ from upload (%d vs %d)", rec.Body.Len(), len(data))

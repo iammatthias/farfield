@@ -658,8 +658,11 @@ func (s *Server) handleDownload(w http.ResponseWriter, r *http.Request) {
 	defer rc.Close()
 	w.Header().Set("Content-Type", epubMime)
 	w.Header().Set("ETag", `"`+id+`"`)
-	// Content-addressed: the bytes for a CID never change.
-	w.Header().Set("Cache-Control", "public, max-age=31536000, immutable")
+	// Content-addressed: the bytes for a CID never change. Private because the
+	// catalog is behind auth, so no shared cache may keep a copy; no-transform
+	// so the edge never re-encodes the EPUB and drops the Content-Length a
+	// reader's progress bar needs.
+	w.Header().Set("Cache-Control", "private, max-age=31536000, immutable, no-transform")
 	w.Header().Set("Content-Disposition", `attachment; filename="`+downloadName(b)+`"`)
 	serveObject(w, r, rc, size)
 }
