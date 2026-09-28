@@ -322,6 +322,9 @@ func (s *Server) storeUpload(data []byte) (*Meta, error) {
 	if len(data) == 0 {
 		return nil, errors.New("empty upload")
 	}
+	// Strip location and convert HEIC before anything is hashed: the CID
+	// and every byte served under it are the clean version. See sanitize.go.
+	data = sanitizeImage(data)
 	// Content-addressed: re-uploading known bytes is a no-op. Short-circuit
 	// before the image decode and the backend PUT.
 	if existing, err := getMeta(s.db, BlobCID(data)); err != nil {
