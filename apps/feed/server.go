@@ -467,6 +467,16 @@ func (s *Server) handleAPIUpdate(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleAPIDelete(w http.ResponseWriter, r *http.Request) {
+	// ?media=release also lets go of the post's photos when nothing else
+	// embeds them — what taking a photo post back (/undo) means. Without it
+	// only the post goes: deleting blob bytes is permanent, so it is asked for
+	// explicitly, never implied.
+	var release []string
+	if r.URL.Query().Get("media") == "release" {
+		if p, err := getPost(s.db, r.PathValue("slug")); err == nil && p != nil {
+			release = blobCIDs(p.Body)
+		}
+	}
 	existed, err := deletePost(s.db, r.PathValue("slug"))
 	if err != nil {
 		web.WriteError(w, http.StatusInternalServerError, "could not delete post")
@@ -476,6 +486,7 @@ func (s *Server) handleAPIDelete(w http.ResponseWriter, r *http.Request) {
 		web.WriteError(w, http.StatusNotFound, "post not found")
 		return
 	}
+	s.releaseMedia(release)
 	web.WriteJSON(w, http.StatusOK, map[string]any{"deleted": r.PathValue("slug")})
 }
 

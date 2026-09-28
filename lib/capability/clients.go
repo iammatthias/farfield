@@ -211,7 +211,13 @@ func (c *FeedClient) CreatePost(ctx context.Context, body string, tags []string,
 	if err := mw.Close(); err != nil {
 		return "", err
 	}
-	out, err := c.do(ctx, http.MethodPost, "/api/posts/media", mw.FormDataContentType(), &buf)
+	// Photos travel over whatever uplink the caller has, and feed stores them
+	// one after another; a flat 90s made a slow multi-photo post fail on the
+	// caller's side while feed went on to publish it. The deadline scales with
+	// the bytes instead (a floor of 90s, plus a second per 128 KiB).
+	ctx, cancel := context.WithTimeout(ctx, mediaTimeout(buf.Len()))
+	defer cancel()
+	out, err := c.media().do(ctx, http.MethodPost, "/api/posts/media", mw.FormDataContentType(), &buf)
 	if err != nil {
 		return "", err
 	}
@@ -293,6 +299,14 @@ func (c *FeedClient) putPost(ctx context.Context, slug, body string, tags []stri
 
 func (c *FeedClient) DeletePost(ctx context.Context, slug string) error {
 	_, err := c.do(ctx, http.MethodDelete, "/api/posts/"+slug, "", nil)
+	return err
+}
+
+// DeletePostAndMedia deletes a post and lets go of its photos when nothing
+// else embeds them — taking a photo post back, not just hiding it. feed and
+// blobs do the reference check; a photo used elsewhere is kept.
+func (c *FeedClient) DeletePostAndMedia(ctx context.Context, slug string) error {
+	_, err := c.do(ctx, http.MethodDelete, "/api/posts/"+slug+"?media=release", "", nil)
 	return err
 }
 
@@ -407,4 +421,19 @@ func orEmpty(in []string) []string {
 		return []string{}
 	}
 	return in
+}
+
+// mediaTimeout is the deadline for uploading n bytes of photos.
+func mediaTimeout(n int) time.Duration {
+	return 90*time.Second + time.Duration(n/(128<<10))*time.Second
+}
+
+// media is this client with no fixed overall timeout — the upload's own
+// context deadline, sized to its bytes, bounds it instead.
+func (c *FeedClient) media() svc {
+	s := c.svc
+	hc := *s.hc
+	hc.Timeout = 0
+	s.hc = &hc
+	return s
 }

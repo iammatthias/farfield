@@ -23,7 +23,7 @@ import (
 // dispatchTimeout bounds one slash command, detached from the webhook request
 // so a hung-up delivery cannot cut it short. Generous: a command may pull
 // several photos off the line and post them.
-const dispatchTimeout = 2 * time.Minute
+const dispatchTimeout = 5 * time.Minute
 
 const (
 	hdrSignature = "X-Spectrum-Signature"

@@ -228,7 +228,9 @@ func (s *Server) restoreAppend(ctx context.Context, c *capability.Clients, sende
 func deleteRef(ctx context.Context, c *capability.Clients, route, ref string) error {
 	switch route {
 	case "feed":
-		return c.Feed.DeletePost(ctx, ref)
+		// Undoing a photo post takes its photos back too, unless something
+		// else embeds them — deleting only the post left them public.
+		return c.Feed.DeletePostAndMedia(ctx, ref)
 	case "bm":
 		return c.Bookmarks.Delete(ctx, ref)
 	case "scrap":

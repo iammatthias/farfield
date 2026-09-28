@@ -447,6 +447,7 @@ func (s *Server) handleAdminDelete(w http.ResponseWriter, r *http.Request) {
 				return
 			}
 			s.deleteThumbBytes(thumb)
+			s.purgeEdge(cid, thumb)
 		}
 	}
 	// The hygiene page deletes orphans in place — send its deletes back to
@@ -640,6 +641,25 @@ func (s *Server) handleAPIDelete(w http.ResponseWriter, r *http.Request) {
 		web.WriteError(w, http.StatusBadRequest, "malformed cid")
 		return
 	}
+	// ?unlessReferenced=1 is the delete a caller makes on behalf of a post it
+	// just removed (or failed to create): take the bytes only if nothing else
+	// embeds them. Blobs are content-addressed and deduped, so the same photo
+	// can sit in another post or an essay; and a blob has no backup, so when
+	// the reference scan cannot see every source, it refuses rather than
+	// guesses.
+	if r.URL.Query().Get("unlessReferenced") != "" {
+		refs, draftsSkipped, errs := s.collectRefs(r.Context())
+		if len(errs) > 0 || draftsSkipped {
+			web.WriteError(w, http.StatusConflict, "cannot confirm the blob is unreferenced; kept")
+			return
+		}
+		if n := len(refs[cid]); n > 0 {
+			web.WriteJSON(w, http.StatusConflict, map[string]any{
+				"error": "blob is still referenced; kept", "references": n,
+			})
+			return
+		}
+	}
 	existed, thumb, err := deleteMeta(s.db, cid)
 	if err != nil {
 		web.WriteError(w, http.StatusInternalServerError, "could not delete blob")
@@ -655,6 +675,7 @@ func (s *Server) handleAPIDelete(w http.ResponseWriter, r *http.Request) {
 		slog.Error("delete bytes", "cid", cid, "err", err)
 	}
 	s.deleteThumbBytes(thumb)
+	s.purgeEdge(cid, thumb)
 	web.WriteJSON(w, http.StatusOK, map[string]any{"deleted": cid})
 }
 

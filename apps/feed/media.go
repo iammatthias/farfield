@@ -44,7 +44,17 @@ func (s *Server) handleAPICreateMedia(w http.ResponseWriter, r *http.Request) {
 		body string
 		tags []string
 		cids []string
+		made bool
 	)
+	// Photos are stored one by one as their parts arrive, before the post
+	// exists. If anything after the first upload fails — a later photo, the
+	// size cap, the insert — those stored photos would stay public with
+	// nothing referencing them. Release them unless the post was made.
+	defer func() {
+		if !made {
+			s.releaseMedia(cids)
+		}
+	}()
 	for {
 		part, err := mr.NextPart()
 		if errors.Is(err, io.EOF) {
@@ -91,6 +101,7 @@ func (s *Server) handleAPICreateMedia(w http.ResponseWriter, r *http.Request) {
 		web.WriteError(w, http.StatusInternalServerError, "could not create post")
 		return
 	}
+	made = true
 	web.WriteJSON(w, http.StatusCreated, p)
 }
 

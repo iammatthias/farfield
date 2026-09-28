@@ -85,6 +85,10 @@ services:
       - CONTENT_API_KEY=${CONTENT_API_KEY:-}
       - FEED_URL=http://feed:8788
       - FEED_READ_KEY=${FEED_READ_KEY:-}
+      # Optional: purge Cloudflare's cached copy when a blob is deleted. Needs a
+      # token with Zone → Cache Purge on farfield.systems, and that zone's id.
+      - CF_PURGE_TOKEN=${CF_PURGE_TOKEN:-}
+      - CF_ZONE_ID=${CF_ZONE_ID:-}
       - KEYS_DB_PATH=/data/keys.sqlite
       - R2_ACCOUNT_ID=${R2_ACCOUNT_ID:-}
       - R2_BUCKET=${R2_BUCKET:-}
