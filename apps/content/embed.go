@@ -95,6 +95,45 @@ func (s *Server) handleAPICreateSeries(w http.ResponseWriter, r *http.Request) {
 	web.WriteJSON(w, http.StatusCreated, se)
 }
 
+// handleAPIUpdateSeries replaces an existing series fragment's title and body,
+// keeping its slug — the entries that embed it by series:// never change.
+// It is the scripted twin of the admin form's save: without it a fragment
+// could only be edited through a browser session, so a bulk rewrite of media
+// refs (swapping one blob for another across every gallery) had no path.
+func (s *Server) handleAPIUpdateSeries(w http.ResponseWriter, r *http.Request) {
+	se, err := getSeries(s.db, r.PathValue("slug"))
+	if err != nil {
+		web.WriteError(w, http.StatusInternalServerError, "could not read series")
+		return
+	}
+	if se == nil {
+		web.WriteError(w, http.StatusNotFound, "series not found")
+		return
+	}
+	var in struct {
+		Title *string `json:"title"`
+		Body  *string `json:"body"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&in); err != nil {
+		web.WriteError(w, http.StatusBadRequest, "invalid JSON")
+		return
+	}
+	if in.Body == nil {
+		web.WriteError(w, http.StatusBadRequest, "body is required")
+		return
+	}
+	if in.Title != nil {
+		se.Title = strings.TrimSpace(*in.Title)
+	}
+	se.Body = *in.Body
+	se.UpdatedAt = store.NowRFC3339()
+	if err := upsertSeries(s.db, se); err != nil {
+		web.WriteError(w, http.StatusInternalServerError, "could not update series")
+		return
+	}
+	web.WriteJSON(w, http.StatusOK, se)
+}
+
 // uniqueSlug returns a slug based on candidate that no series uses yet — the
 // candidate itself when free, a random key when empty, else a suffixed key.
 func uniqueSlug(db *sql.DB, candidate string) string {

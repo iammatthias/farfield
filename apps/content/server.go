@@ -185,6 +185,7 @@ func (s *Server) routes() http.Handler {
 	mux.HandleFunc("PUT /api/entries/{slug}", s.auth.RequireAPIKey(s.handleAPIUpdateEntry))
 	mux.HandleFunc("DELETE /api/entries/{slug}", s.auth.RequireAPIKey(s.handleAPIDeleteEntry))
 	mux.HandleFunc("POST /api/series", s.auth.RequireAPIKey(s.handleAPICreateSeries))
+	mux.HandleFunc("PUT /api/series/{slug}", s.auth.RequireAPIKey(s.handleAPIUpdateSeries))
 
 	// Editor embedding — session-gated proxy so service keys stay server-side.
 	// The list reads (blob gallery, series picker) proxy the now-token-gated
