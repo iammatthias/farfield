@@ -9,9 +9,13 @@ FROM golang:1.27-bookworm AS build
 ARG APP
 WORKDIR /src
 COPY . .
+# -tags nodynamic: gen2brain/heic (blobs) otherwise dlopens a system libheif
+# through purego, which silently makes the binary need a dynamic loader —
+# and distroless/static has none, so the container dies with "exec /app: no
+# such file or directory". The tag keeps its bundled WebAssembly decoder.
 RUN --mount=type=cache,target=/root/.cache/go-build \
     --mount=type=cache,target=/go/pkg/mod \
-    CGO_ENABLED=0 GOOS=linux go build -trimpath -o /bin/app ./apps/${APP}
+    CGO_ENABLED=0 GOOS=linux go build -tags nodynamic -trimpath -o /bin/app ./apps/${APP}
 
 # The :nonroot variant runs as uid/gid 65532 instead of root. The apps bind
 # ./data from the host, so a root container would write host files as root —
