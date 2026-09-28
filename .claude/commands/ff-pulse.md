@@ -1,5 +1,5 @@
 ---
-description: traffic and open incidents
+description: uptime and open incidents
 ---
 
 Run exactly this, substituting the arguments given:

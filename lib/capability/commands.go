@@ -157,9 +157,10 @@ func Fleet() []*Spec {
 	return []*Spec{
 		{
 			Name: "feed", Aliases: []string{"post"},
-			Summary: "post to the feed; trailing #hashtags become tags",
-			Args:    []Arg{{Name: "text", Rest: true}},
-			Run:     runFeed,
+			Summary:    "post to the feed; trailing #hashtags become tags",
+			Args:       []Arg{{Name: "text", Rest: true}},
+			TakesFiles: true,
+			Run:        runFeed,
 		},
 		{
 			Name: "bm", Aliases: []string{"bookmark", "link"},
@@ -186,7 +187,7 @@ func Fleet() []*Spec {
 		},
 		{
 			Name:    "pulse",
-			Summary: "traffic and open incidents",
+			Summary: "uptime and open incidents",
 			Run:     runPulse,
 		},
 	}
@@ -335,7 +336,7 @@ func (c *Clients) FleetStatus(ctx context.Context) string {
 	return fmt.Sprintf("%d/%d up\ndown: %s", up, len(results), strings.Join(down, ", "))
 }
 
-// PulseSummary renders today's traffic and any open incidents.
+// PulseSummary renders uptime across the enabled checks and any open incidents.
 func (c *Clients) PulseSummary(ctx context.Context) (string, error) {
 	out, err := c.Pulse.do(ctx, http.MethodGet, "/api/overview", "", nil)
 	if err != nil {
@@ -343,9 +344,10 @@ func (c *Clients) PulseSummary(ctx context.Context) (string, error) {
 	}
 	var ov struct {
 		Targets []struct {
-			Name string `json:"name"`
-			Up24 string `json:"up24h"`
-			Last *struct {
+			Name    string `json:"name"`
+			Enabled bool   `json:"enabled"`
+			Up24    string `json:"up24h"`
+			Last    *struct {
 				OK        bool  `json:"ok"`
 				LatencyMS int64 `json:"latencyMs"`
 			} `json:"last"`
@@ -359,12 +361,21 @@ func (c *Clients) PulseSummary(ctx context.Context) (string, error) {
 		return "", err
 	}
 
-	up, down := 0, 0
+	up, down, unchecked, active := 0, 0, 0, 0
 	var lines []string
 	for _, t := range ov.Targets {
-		if t.Last != nil && t.Last.OK {
+		// A disabled check is not watching anything; its last failure would
+		// otherwise read as "down" forever.
+		if !t.Enabled {
+			continue
+		}
+		active++
+		switch {
+		case t.Last == nil:
+			unchecked++ // never run yet: not evidence of anything
+		case t.Last.OK:
 			up++
-		} else {
+		default:
 			down++
 		}
 		// Only open incidents get a line — a healthy fleet should answer in one.
@@ -374,7 +385,10 @@ func (c *Clients) PulseSummary(ctx context.Context) (string, error) {
 		}
 	}
 	var b strings.Builder
-	fmt.Fprintf(&b, "%d targets · %d up · %d down", len(ov.Targets), up, down)
+	fmt.Fprintf(&b, "%d targets · %d up · %d down", active, up, down)
+	if unchecked > 0 {
+		fmt.Fprintf(&b, " · %d not yet checked", unchecked)
+	}
 	sort.Strings(lines)
 	for _, line := range lines {
 		b.WriteString("\n" + line)

@@ -3,6 +3,7 @@ package capability
 import (
 	"net/url"
 	"strings"
+	"unicode"
 )
 
 // ExtractTags pulls trailing hashtags off a body and returns the body without
@@ -44,13 +45,20 @@ func asHashtag(token string) (string, bool) {
 	if !ok || rest == "" {
 		return "", false
 	}
+	letter := false
 	for _, r := range rest {
 		switch {
-		case r >= 'a' && r <= 'z', r >= 'A' && r <= 'Z',
-			r >= '0' && r <= '9', r == '-', r == '_':
+		case r >= 'a' && r <= 'z', r >= 'A' && r <= 'Z':
+			letter = true
+		case r >= '0' && r <= '9', r == '-', r == '_':
 		default:
 			return "", false
 		}
+	}
+	// A tag needs a letter: "we finished #1" is a number in a sentence, not
+	// a tag, and must not be pulled out of the text.
+	if !letter {
+		return "", false
 	}
 	return strings.ToLower(rest), true
 }
@@ -99,4 +107,18 @@ func plural(n int) string {
 		return ""
 	}
 	return "s"
+}
+
+// SplitTagList parses a tag list the way a person types one on a phone: by
+// commas or spaces, with or without the # that /feed uses. "#life #travel",
+// "life, travel" and "life travel" are the same two tags. A token that is not
+// a valid tag (after its # is restored) is dropped rather than stored verbatim.
+func SplitTagList(s string) []string {
+	out := []string{}
+	for _, tok := range strings.FieldsFunc(s, func(r rune) bool { return r == ',' || unicode.IsSpace(r) }) {
+		if tag, ok := asHashtag("#" + strings.TrimPrefix(tok, "#")); ok {
+			out = append(out, tag)
+		}
+	}
+	return out
 }

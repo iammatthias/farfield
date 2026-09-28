@@ -59,7 +59,10 @@ type Spec struct {
 	Aliases []string
 	Summary string
 	Args    []Arg
-	Run     func(context.Context, *Clients, Invocation) (Result, error)
+	// TakesFiles marks a command that uses attachments. Anything else is
+	// handed a photo only by mistake, and says so rather than dropping it.
+	TakesFiles bool
+	Run        func(context.Context, *Clients, Invocation) (Result, error)
 }
 
 // Usage renders the command the way help should show it: `/qr <target> [label]`.
@@ -88,7 +91,9 @@ func (s *Spec) Usage() string {
 // documentation anyone is going to read.
 func (s *Spec) Bind(rest string, files []NamedFile) (Invocation, error) {
 	in := Invocation{Raw: strings.TrimSpace(rest), Args: map[string]string{}}
-	remaining := in.Raw
+	// The separator is already gone (Split and cutField drop it); trimming
+	// the front again would eat a Rest argument's own indentation.
+	remaining := strings.TrimRight(rest, " \t\r\n")
 
 	for _, a := range s.Args {
 		var value string
@@ -114,9 +119,27 @@ func (s *Spec) Bind(rest string, files []NamedFile) (Invocation, error) {
 
 // cutField splits off the first whitespace-delimited token.
 func cutField(s string) (first, rest string) {
-	s = strings.TrimSpace(s)
-	first, rest = cutSpace(s)
-	return strings.TrimSpace(first), strings.TrimSpace(rest)
+	first, rest = cutSpace(strings.TrimLeft(s, " \t\r\n"))
+	return strings.TrimSpace(first), trimLead(rest)
+}
+
+// trimLead drops the separator in front of an argument without touching the
+// text itself: spaces after a command on its own line, or the blank lines
+// before text that starts below it. Indentation on the first real line of a
+// multi-line argument is content — a pasted code block or YAML — and stays.
+func trimLead(s string) string {
+	sawNewline := false
+	for {
+		i := strings.IndexByte(s, '\n')
+		if i < 0 || strings.TrimSpace(s[:i]) != "" {
+			break
+		}
+		s, sawNewline = s[i+1:], true
+	}
+	if sawNewline {
+		return s
+	}
+	return strings.TrimLeft(s, " \t")
 }
 
 // cutSpace splits s at its first whitespace rune of any kind — space, tab,
@@ -158,6 +181,12 @@ func (r *Registry) Add(specs ...*Spec) {
 			if a.Rest && i != len(s.Args)-1 {
 				panic("capability: " + s.Name + ": Rest arg " + a.Name + " is not last")
 			}
+		}
+		// Lookup lowercases what it is asked for, so a mixed-case name or
+		// alias registered as-is could never match.
+		s.Name = strings.ToLower(s.Name)
+		for i := range s.Aliases {
+			s.Aliases[i] = strings.ToLower(s.Aliases[i])
 		}
 		for _, name := range append([]string{s.Name}, s.Aliases...) {
 			if _, dup := r.byName[name]; dup {
@@ -201,7 +230,9 @@ func Split(text string) (name, rest string, ok bool) {
 	if name == "" {
 		return "", text, false
 	}
-	return name, strings.TrimSpace(rest), true
+	// Only the separator goes: an argument's own leading indentation (a
+	// pasted code block under the command) is content.
+	return name, trimLead(strings.TrimRight(rest, " \t\r\n")), true
 }
 
 // Help renders the command list.
@@ -224,7 +255,11 @@ func (r *Registry) Help(header string) string {
 		}
 	}
 	for i, s := range r.specs {
-		fmt.Fprintf(&b, "%-*s  %s\n", width, usages[i], s.Summary)
+		summary := s.Summary
+		if len(s.Aliases) > 0 {
+			summary += " (also /" + strings.Join(s.Aliases, ", /") + ")"
+		}
+		fmt.Fprintf(&b, "%-*s  %s\n", width, usages[i], summary)
 	}
 	return strings.TrimRight(b.String(), "\n")
 }

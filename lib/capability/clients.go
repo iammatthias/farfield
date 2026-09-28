@@ -27,8 +27,10 @@ import (
 	"mime/multipart"
 	"net/http"
 	"net/textproto"
+	"net/url"
 	"strings"
 	"time"
+	"unicode/utf8"
 )
 
 // UserAgent identifies farfield's own callers to the Cloudflare edge, which is
@@ -56,7 +58,14 @@ func newSvc(url, key string) svc {
 		Key: key,
 		// Long enough to carry photo bytes to feed, short enough that a wedged
 		// sibling cannot hold an inbound webhook open indefinitely.
-		hc: &http.Client{Timeout: 90 * time.Second},
+		hc: &http.Client{
+			Timeout: 90 * time.Second,
+			// Never follow a redirect: an API answers one only to send a
+			// caller without a valid key to a login page, and following it
+			// turned "wrong key" into "invalid character '<'" as the HTML
+			// was parsed as JSON.
+			CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse },
+		},
 	}
 }
 
@@ -83,7 +92,7 @@ func (s svc) do(ctx context.Context, method, path, contentType string, body io.R
 		return nil, err
 	}
 	if resp.StatusCode >= 300 {
-		return nil, fmt.Errorf("%s: %s", resp.Status, FirstLine(out))
+		return nil, s.replyError(resp.StatusCode, out)
 	}
 	return out, nil
 }
@@ -105,9 +114,46 @@ func FirstLine(b []byte) string {
 		s = s[:i]
 	}
 	if len(s) > 160 {
-		s = s[:160] + "…"
+		cut := 160
+		for cut > 0 && !utf8.RuneStart(s[cut]) {
+			cut-- // never split a character: gRPC refuses invalid UTF-8
+		}
+		s = s[:cut] + "…"
 	}
 	return s
+}
+
+// name is the service's short name — "feed" from https://feed.farfield.systems
+// or http://feed:8788 — for prefixing its errors.
+func (s svc) name() string {
+	u, err := url.Parse(s.URL)
+	if err != nil || u.Hostname() == "" {
+		return "service"
+	}
+	host, _, _ := strings.Cut(u.Hostname(), ".")
+	return host
+}
+
+// replyError turns a failed reply into a sentence a person can read in a text
+// message: which service, and what it said. The apps answer errors as
+// {"error":"…"} (scrap in plain text); either way the raw JSON never reaches
+// the sender. A redirect means the key was refused and the app pointed at its
+// login page.
+func (s svc) replyError(code int, body []byte) error {
+	if code >= 300 && code < 400 {
+		return fmt.Errorf("%s: key not accepted (%d)", s.name(), code)
+	}
+	msg := FirstLine(body)
+	var e struct {
+		Error string `json:"error"`
+	}
+	if json.Unmarshal(body, &e) == nil && e.Error != "" {
+		msg = FirstLine([]byte(e.Error))
+	}
+	if msg == "" {
+		msg = http.StatusText(code)
+	}
+	return fmt.Errorf("%s: %s (%d)", s.name(), msg, code)
 }
 
 // ── feed ───────────────────────────────────────────────────────────────────

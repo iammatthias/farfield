@@ -285,3 +285,18 @@ func TestAgentTurnDoesNotSeeSecrets(t *testing.T) {
 		t.Error("agent turn lost its scoped key")
 	}
 }
+
+// A photo sent with a command that has no use for it is refused out loud,
+// never dropped.
+func TestPhotoOnANonFileCommandIsRefused(t *testing.T) {
+	s, srv, _ := newTestServer(t)
+	post(t, srv, "m1", me, "/feed base post")
+	post(t, srv, "m2", me, "/+ with a picture", func(e *envelope) {
+		e.Message.Content = content{Type: "attachment", GUID: "att-1", FileName: "IMG_1.jpeg",
+			MimeType: "image/jpeg", Text: "/+ with a picture"}
+	})
+	got := recorded(t, s, "m2")
+	if got.Status != statusError || !strings.Contains(got.Reply, "doesn't take photos") {
+		t.Errorf("status=%s reply=%q, want a refusal naming the photo", got.Status, got.Reply)
+	}
+}

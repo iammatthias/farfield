@@ -135,6 +135,12 @@ func (s *Server) toAgent(rec *Message, text string, atts []attachment) routeResu
 
 // dispatch binds arguments and runs one command.
 func (s *Server) dispatch(ctx context.Context, rec *Message, spec *capability.Spec, rest string, atts []attachment) routeResult {
+	// A photo sent with a command that has no use for one used to be dropped
+	// without a word — /append or /bm "worked" and the picture was gone. Say
+	// so instead, and never download bytes nothing will read.
+	if len(atts) > 0 && !spec.TakesFiles {
+		return failed(spec.Name, fmt.Errorf("/%s doesn't take photos — send it again without the attachment, or use /feed", spec.Name))
+	}
 	files, err := s.fetchAttachments(ctx, atts)
 	if err != nil {
 		return failed(spec.Name, err)
@@ -265,7 +271,7 @@ func (s *Server) runTags(ctx context.Context, c *capability.Clients, in capabili
 	if err != nil {
 		return capability.Result{}, err
 	}
-	tags := capability.Dedupe(capability.SplitCommaList(in.Arg("list")))
+	tags := capability.Dedupe(capability.SplitTagList(in.Arg("list")))
 	if err := c.Feed.RetagPost(ctx, post.Ref, tags); err != nil {
 		return capability.Result{}, err
 	}
