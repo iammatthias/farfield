@@ -131,6 +131,14 @@ func run(host, port string) error {
 	} else if n > 0 {
 		slog.Warn("closed orphaned jobs from a previous run", "count", n)
 	}
+	// Likewise a message claimed but never finished: no dispatch is running for
+	// it any more, so the claim is released and a redelivery can act on it now
+	// rather than after claimStale.
+	if n, err := releaseOrphanedClaims(db); err != nil {
+		slog.Warn("could not release orphaned claims", "err", err)
+	} else if n > 0 {
+		slog.Warn("released message claims from a previous run", "count", n)
+	}
 
 	// Say plainly at boot which half is missing, because either one alone looks
 	// like a working service that silently does nothing.
@@ -272,14 +280,21 @@ func (s *Server) routes() http.Handler {
 // sweepLoop applies the retention promise hourly, not just at boot — a window
 // enforced once at startup only holds for a process that keeps restarting.
 func (s *Server) sweepLoop() {
-	for {
-		time.Sleep(time.Hour)
+	// Prune first, then hourly: a service restarted more often than hourly
+	// (every deploy) would otherwise never enforce retention at all.
+	for first := true; ; first = false {
+		if !first {
+			time.Sleep(time.Hour)
+		}
 		cutoff := time.Now().Add(-retention).UTC().Format(time.RFC3339)
 		if err := pruneMessages(s.db, cutoff); err != nil {
 			slog.Warn("could not prune messages", "err", err)
 		}
 		if err := pruneJobs(s.db, cutoff); err != nil {
 			slog.Warn("could not prune jobs", "err", err)
+		}
+		if err := pruneSnapshots(s.db, cutoff); err != nil {
+			slog.Warn("could not prune snapshots", "err", err)
 		}
 		if err := store.PruneSessions(s.db); err != nil {
 			slog.Warn("could not prune sessions", "err", err)

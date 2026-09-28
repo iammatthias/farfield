@@ -211,6 +211,22 @@ func (c *FeedClient) AppendToPost(ctx context.Context, slug, body string, tags [
 	return slug, err
 }
 
+// PostState returns a post's current body and tags — what a caller records
+// before changing the post, so the change can be reversed.
+func (c *FeedClient) PostState(ctx context.Context, slug string) (string, []string, error) {
+	p, err := c.getPost(ctx, slug)
+	if err != nil {
+		return "", nil, err
+	}
+	return p.Body, p.Tags, nil
+}
+
+// RestorePost puts a post back to a recorded body and tags.
+func (c *FeedClient) RestorePost(ctx context.Context, slug, body string, tags []string) error {
+	_, err := c.putPost(ctx, slug, body, tags)
+	return err
+}
+
 // RetagPost replaces a post's tags, leaving the body untouched.
 func (c *FeedClient) RetagPost(ctx context.Context, slug string, tags []string) error {
 	cur, err := c.getPost(ctx, slug)

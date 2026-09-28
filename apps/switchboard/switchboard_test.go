@@ -92,6 +92,23 @@ type feedStub struct {
 	posts  []map[string]any
 	medias int
 	n      int
+	// live is every post that currently exists, by slug — what GET, PUT and
+	// DELETE act on, so append and undo can be checked against real state.
+	live map[string]map[string]any
+	// delay slows every create, to hold a delivery open past a redelivery.
+	delay time.Duration
+}
+
+// state returns a post's body, or ok=false if it does not exist.
+func (f *feedStub) state(slug string) (string, bool) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	p, ok := f.live[slug]
+	if !ok {
+		return "", false
+	}
+	b, _ := p["body"].(string)
+	return b, true
 }
 
 func (f *feedStub) count() int {
@@ -101,16 +118,42 @@ func (f *feedStub) count() int {
 }
 
 func (f *feedStub) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	if r.URL.Path == "/api/posts" && r.Method == http.MethodPost && f.delay > 0 {
+		time.Sleep(f.delay)
+	}
 	f.mu.Lock()
 	defer f.mu.Unlock()
+	if f.live == nil {
+		f.live = map[string]map[string]any{}
+	}
+	slug := strings.TrimPrefix(r.URL.Path, "/api/posts/")
 	switch {
 	case r.URL.Path == "/api/posts" && r.Method == http.MethodPost:
 		var p map[string]any
 		_ = json.NewDecoder(r.Body).Decode(&p)
 		f.posts = append(f.posts, p)
 		f.n++
+		f.live[fmt.Sprintf("post%d", f.n)] = p
 		w.WriteHeader(http.StatusCreated)
 		fmt.Fprintf(w, `{"slug":"post%d"}`, f.n)
+	case strings.HasPrefix(r.URL.Path, "/api/posts/") && slug != "media":
+		p, ok := f.live[slug]
+		if !ok {
+			http.NotFound(w, r)
+			return
+		}
+		switch r.Method {
+		case http.MethodGet:
+			_ = json.NewEncoder(w).Encode(map[string]any{"slug": slug, "body": p["body"], "tags": p["tags"]})
+		case http.MethodPut:
+			var np map[string]any
+			_ = json.NewDecoder(r.Body).Decode(&np)
+			f.live[slug] = np
+			_ = json.NewEncoder(w).Encode(map[string]any{"slug": slug})
+		case http.MethodDelete:
+			delete(f.live, slug)
+			w.WriteHeader(http.StatusNoContent)
+		}
 	case r.URL.Path == "/api/posts/media" && r.Method == http.MethodPost:
 		body, _ := io.ReadAll(r.Body)
 		f.medias++

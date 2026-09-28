@@ -52,7 +52,14 @@ type agentRunner struct {
 
 	mu   sync.Mutex
 	live map[string]context.CancelFunc
+	// chats serializes turns within one conversation: two agent processes
+	// resuming the same session history at once would interleave or lose a
+	// turn. One slot per chat; different chats still run side by side.
+	chats map[string]chan struct{}
 }
+
+// errQueueTimeout is a turn that never got to run.
+var errQueueTimeout = errors.New("timed out waiting for a free slot")
 
 func newAgentRunner(db *sql.DB, photon *photonClient, stateDir string) *agentRunner {
 	a := &agentRunner{
@@ -64,6 +71,7 @@ func newAgentRunner(db *sql.DB, photon *photonClient, stateDir string) *agentRun
 		ackAfter: envDuration("SWITCHBOARD_AGENT_ACK_AFTER", 8*time.Second),
 		maxJobs:  envInt("SWITCHBOARD_AGENT_MAX_JOBS", 3),
 		live:     map[string]context.CancelFunc{},
+		chats:    map[string]chan struct{}{},
 	}
 	// Absent binary is a configuration state, not a crash: switchboard still
 	// answers slash commands, which is the half that must never depend on a
@@ -137,21 +145,13 @@ func (a *agentRunner) start(rec *Message, text string, atts []attachment) (*Job,
 // run executes one turn. It always reaches a terminal state and always says
 // something, because the alternative is a message that is never answered.
 func (a *agentRunner) run(job *Job, atts []attachment) {
-	// Queue rather than reject: a second message while one is running is
-	// normal, and being told "too busy" by your own house is absurd. The
-	// ceiling is on concurrency, not on patience.
-	select {
-	case a.sem <- struct{}{}:
-	case <-time.After(a.timeout):
-		a.finish(job, jobFailed, "", "timed out waiting for a free slot")
-		return
-	}
-	defer func() { <-a.sem }()
-
-	ctx, cancel := context.WithTimeout(context.Background(), a.timeout)
-	defer cancel()
+	// Cancellable from the moment the job exists, not from when it gets a
+	// slot: a /cancel aimed at a queued job must stop it, rather than report
+	// "not running" and let it run anyway once the queue clears.
+	jobCtx, stop := context.WithCancel(context.Background())
+	defer stop()
 	a.mu.Lock()
-	a.live[job.ID] = cancel
+	a.live[job.ID] = stop
 	a.mu.Unlock()
 	defer func() {
 		a.mu.Lock()
@@ -161,8 +161,11 @@ func (a *agentRunner) run(job *Job, atts []attachment) {
 
 	// Silence past ackAfter is rude; silence before it is just being quick.
 	// This is the only message that is ever sent before the answer, and it is
-	// sent at most once — the budget for a whole turn is two.
+	// sent at most once — the budget for a whole turn is two. It covers the
+	// wait in the queue too: a queued turn is as silent as a slow one.
 	acked := make(chan struct{})
+	ackOnce := sync.OnceFunc(func() { close(acked) })
+	defer ackOnce()
 	go func() {
 		select {
 		case <-time.After(a.ackAfter):
@@ -170,6 +173,26 @@ func (a *agentRunner) run(job *Job, atts []attachment) {
 		case <-acked:
 		}
 	}()
+
+	// Queue rather than reject: a second message while one is running is
+	// normal, and being told "too busy" by your own house is absurd. The
+	// ceiling is on concurrency, not on patience.
+	release, err := a.acquire(jobCtx, job.ChatGUID)
+	if err != nil {
+		ackOnce()
+		if errors.Is(err, context.Canceled) {
+			a.finish(job, jobCancelled, "", "cancelled")
+			a.say(job.ChatGUID, "cancelled · "+job.ID)
+			return
+		}
+		a.finish(job, jobFailed, "", err.Error())
+		a.say(job.ChatGUID, fmt.Sprintf("✗ %s never started · %s", job.ID, err))
+		return
+	}
+	defer release()
+
+	ctx, cancel := context.WithTimeout(jobCtx, a.timeout)
+	defer cancel()
 
 	// Photos are fetched here rather than in the webhook: the bytes can be
 	// several megabytes off a phone, and Photon is waiting on the other end of
@@ -181,7 +204,7 @@ func (a *agentRunner) run(job *Job, atts []attachment) {
 	if err == nil {
 		out, err = a.exec(ctx, job, files)
 	}
-	close(acked)
+	ackOnce()
 
 	switch {
 	case errors.Is(ctx.Err(), context.Canceled):
@@ -203,6 +226,46 @@ func (a *agentRunner) run(job *Job, atts []attachment) {
 		}
 		a.say(job.ChatGUID, reply)
 	}
+}
+
+// acquire waits for this chat's turn and then a free slot, in that order, so a
+// turn queued behind its own conversation holds no slot another chat could
+// use. Both waits share one deadline and end early on cancel. The returned
+// func gives both back.
+func (a *agentRunner) acquire(ctx context.Context, chat string) (func(), error) {
+	deadline := time.NewTimer(a.timeout)
+	defer deadline.Stop()
+
+	lock := a.chatLock(chat)
+	select {
+	case lock <- struct{}{}:
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	case <-deadline.C:
+		return nil, errQueueTimeout
+	}
+	select {
+	case a.sem <- struct{}{}:
+	case <-ctx.Done():
+		<-lock
+		return nil, ctx.Err()
+	case <-deadline.C:
+		<-lock
+		return nil, errQueueTimeout
+	}
+	return func() { <-a.sem; <-lock }, nil
+}
+
+// chatLock returns the one-slot channel that serializes a chat's turns.
+func (a *agentRunner) chatLock(chat string) chan struct{} {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	lock, ok := a.chats[chat]
+	if !ok {
+		lock = make(chan struct{}, 1)
+		a.chats[chat] = lock
+	}
+	return lock
 }
 
 // exec runs the agent and returns its reply.
@@ -312,13 +375,15 @@ func stageAttachments(ctx context.Context, dl func(context.Context, string) ([]b
 		return nil, err
 	}
 	var out []namedTempFile
-	for _, a := range atts {
+	for i, a := range atts {
 		data, err := dl(ctx, a.ID)
 		if err != nil {
 			cleanupTempFiles(out)
 			return nil, fmt.Errorf("could not fetch %s: %w", displayName(a), err)
 		}
-		path := filepath.Join(dir, filepath.Base(displayName(a)))
+		// Numbered, because two photos off a phone are routinely both
+		// "image.jpeg" and the second would overwrite the first.
+		path := filepath.Join(dir, fmt.Sprintf("%02d-%s", i+1, safeBase(displayName(a))))
 		if err := os.WriteFile(path, data, 0o600); err != nil {
 			cleanupTempFiles(out)
 			return nil, err
@@ -326,6 +391,17 @@ func stageAttachments(ctx context.Context, dl func(context.Context, string) ([]b
 		out = append(out, namedTempFile{Name: displayName(a), Path: path, dir: dir})
 	}
 	return out, nil
+}
+
+// safeBase is a name that can only ever be a file inside the staging
+// directory: "." or ".." (or a bare separator) would name the directory
+// itself, or its parent.
+func safeBase(name string) string {
+	b := filepath.Base(name)
+	if b == "." || b == ".." || b == string(filepath.Separator) {
+		return "attachment"
+	}
+	return b
 }
 
 func cleanupTempFiles(files []namedTempFile) {
@@ -350,12 +426,29 @@ func newJobID() string {
 	return hex.EncodeToString(b[:])
 }
 
+// lastLines keeps the last n lines of a failed turn's stderr that say
+// something. Blank lines and the harness's progress spinner ("Working...")
+// are dropped: they are noise on the way to the one line that explains the
+// failure, and they were ending up in the text sent back.
 func lastLines(s string, n int) string {
-	lines := strings.Split(strings.TrimRight(s, "\n"), "\n")
+	var lines []string
+	for _, l := range strings.Split(s, "\n") {
+		l = strings.TrimSpace(l)
+		if l == "" || isProgressLine(l) {
+			continue
+		}
+		lines = append(lines, l)
+	}
 	if len(lines) > n {
 		lines = lines[len(lines)-n:]
 	}
 	return strings.Join(lines, "; ")
+}
+
+// isProgressLine recognizes a harness's status spinner, which omp writes to
+// stderr as "Working..." while a turn runs.
+func isProgressLine(l string) bool {
+	return strings.HasSuffix(l, "...") && !strings.Contains(strings.TrimSuffix(l, "..."), " ") && len(l) <= 20
 }
 
 func firstLine(b []byte) string {
@@ -363,10 +456,7 @@ func firstLine(b []byte) string {
 	if i := strings.IndexByte(s, '\n'); i >= 0 {
 		s = s[:i]
 	}
-	if len(s) > 300 {
-		s = s[:300] + "…"
-	}
-	return s
+	return truncate(s, 300)
 }
 
 func envDuration(name string, fallback time.Duration) time.Duration {

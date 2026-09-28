@@ -3,6 +3,8 @@ package main
 import (
 	"database/sql"
 	"errors"
+	"strings"
+	"time"
 
 	"github.com/iammatthias/farfield/lib/store"
 	_ "modernc.org/sqlite" // registers the "sqlite" driver
@@ -28,12 +30,21 @@ type Message struct {
 
 // Status values. `ignored` covers every well-formed message we chose not to act
 // on (wrong sender, group thread, empty body) — distinct from `error`, which
-// means we tried and the downstream service failed.
+// means we tried and the downstream service failed. `pending` is a claimed
+// message still being dispatched; `undone` is a successful action /undo has
+// since reversed, so it no longer counts as "the thing I just did".
 const (
 	statusOK      = "ok"
 	statusIgnored = "ignored"
 	statusError   = "error"
+	statusPending = "pending"
+	statusUndone  = "undone"
 )
+
+// claimStale is how long a pending claim holds. Past it the dispatch is
+// presumed dead (a crash mid-command) and a redelivery may take the message
+// over, rather than a lost process silencing it forever.
+const claimStale = 10 * time.Minute
 
 const schema = `
 CREATE TABLE IF NOT EXISTS messages (
@@ -55,7 +66,7 @@ const messageCols = `id, webhook_id, sender, chat_guid, body, route, ref, reply,
 
 // openDB opens the SQLite database, applies pragmas, and migrates.
 func openDB(path string) (*sql.DB, error) {
-	return store.OpenWithSchema(path, schema, jobSchema)
+	return store.OpenWithSchema(path, schema, jobSchema, snapshotSchema)
 }
 
 func scanMessage(row interface{ Scan(...any) error }) (*Message, error) {
@@ -97,6 +108,51 @@ func recordMessage(db *sql.DB, m *Message) error {
 		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		m.ID, m.WebhookID, m.Sender, m.ChatGUID, m.Body,
 		m.Route, m.Ref, m.Reply, m.Status, m.ReceivedAt)
+	return err
+}
+
+// claimMessage reserves a message id before it is dispatched, and reports
+// whether this delivery won it.
+//
+// The completed row alone cannot be the idempotency record: it is written only
+// after the command finishes, and a command that downloads photos and posts
+// them can outlast Photon's patience — the redelivery arrives, finds no row,
+// and posts a second time. So a pending row is written first, atomically, and
+// only the delivery that wrote it acts. A claim older than claimStale is
+// presumed abandoned and can be taken over, so a crash mid-dispatch does not
+// silence the message for good.
+func claimMessage(db *sql.DB, m *Message) (bool, error) {
+	if m.ReceivedAt == "" {
+		m.ReceivedAt = store.NowRFC3339()
+	}
+	res, err := db.Exec(
+		`INSERT OR IGNORE INTO messages (`+messageCols+`)
+		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		m.ID, m.WebhookID, m.Sender, m.ChatGUID, m.Body,
+		"", "", "", statusPending, m.ReceivedAt)
+	if err != nil {
+		return false, err
+	}
+	if n, _ := res.RowsAffected(); n == 1 {
+		return true, nil
+	}
+	stale := time.Now().Add(-claimStale).UTC().Format(time.RFC3339)
+	res, err = db.Exec(
+		`UPDATE messages SET received_at = ? WHERE id = ? AND status = ? AND received_at < ?`,
+		m.ReceivedAt, m.ID, statusPending, stale)
+	if err != nil {
+		return false, err
+	}
+	n, _ := res.RowsAffected()
+	return n == 1, nil
+}
+
+// markUndone retires a successful action once /undo has reversed it, so the
+// next /undo reaches the action before it and /append and /tags stop aiming
+// at a post that no longer exists.
+func markUndone(db *sql.DB, id string) error {
+	_, err := db.Exec(`UPDATE messages SET status = ? WHERE id = ? AND status = ?`,
+		statusUndone, id, statusOK)
 	return err
 }
 
@@ -302,4 +358,73 @@ func runningJobCount(db *sql.DB) (int, error) {
 func pruneJobs(db *sql.DB, cutoff string) error {
 	_, err := db.Exec(`DELETE FROM jobs WHERE status <> ? AND started_at < ?`, jobRunning, cutoff)
 	return err
+}
+
+// ── append snapshots ───────────────────────────────────────────────────────
+
+// An append rewrites a post in place, so undoing one means putting the old
+// body back — deleting the post, which is what the slug alone could do, would
+// lose everything that was there before. Each append records what it replaced;
+// /undo pops the newest snapshot for that post.
+const snapshotSchema = `
+CREATE TABLE IF NOT EXISTS post_snapshots (
+	sender     TEXT NOT NULL,
+	slug       TEXT NOT NULL,
+	body       TEXT NOT NULL,
+	tags       TEXT NOT NULL DEFAULT '',
+	created_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS post_snapshots_by_slug ON post_snapshots (sender, slug, created_at DESC);`
+
+// saveSnapshot records a post's state before an append changes it. Tags are
+// stored comma-joined: feed tags never contain commas (they are parsed from a
+// comma list in the first place).
+func saveSnapshot(db *sql.DB, sender, slug, body string, tags []string) error {
+	_, err := db.Exec(
+		`INSERT INTO post_snapshots (sender, slug, body, tags, created_at) VALUES (?, ?, ?, ?, ?)`,
+		sender, slug, body, strings.Join(tags, ","), store.NowRFC3339())
+	return err
+}
+
+// latestSnapshot returns the newest recorded state of a post before an append,
+// and its rowid so the caller can discard it once restored. ok is false when
+// there is none.
+func latestSnapshot(db *sql.DB, sender, slug string) (rowid int64, body string, tags []string, ok bool, err error) {
+	var joined string
+	err = db.QueryRow(
+		`SELECT rowid, body, tags FROM post_snapshots WHERE sender = ? AND slug = ?
+		 ORDER BY created_at DESC, rowid DESC LIMIT 1`, sender, slug).Scan(&rowid, &body, &joined)
+	if errors.Is(err, sql.ErrNoRows) {
+		return 0, "", nil, false, nil
+	}
+	if err != nil {
+		return 0, "", nil, false, err
+	}
+	if joined != "" {
+		tags = strings.Split(joined, ",")
+	}
+	return rowid, body, tags, true, nil
+}
+
+func dropSnapshot(db *sql.DB, rowid int64) error {
+	_, err := db.Exec(`DELETE FROM post_snapshots WHERE rowid = ?`, rowid)
+	return err
+}
+
+// pruneSnapshots bounds the table like the message log: a snapshot is only
+// reachable through an append row, and those age out on the same cutoff.
+func pruneSnapshots(db *sql.DB, cutoff string) error {
+	_, err := db.Exec(`DELETE FROM post_snapshots WHERE created_at < ?`, cutoff)
+	return err
+}
+
+// releaseOrphanedClaims drops pending claims left by a process that died
+// mid-dispatch, so the message's redelivery is acted on instead of answered
+// as a duplicate.
+func releaseOrphanedClaims(db *sql.DB) (int64, error) {
+	res, err := db.Exec(`DELETE FROM messages WHERE status = ?`, statusPending)
+	if err != nil {
+		return 0, err
+	}
+	return res.RowsAffected()
 }

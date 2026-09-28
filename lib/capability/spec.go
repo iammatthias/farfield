@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"sort"
 	"strings"
+	"unicode"
 )
 
 // Arg is one positional parameter of a command.
@@ -114,8 +115,18 @@ func (s *Spec) Bind(rest string, files []NamedFile) (Invocation, error) {
 // cutField splits off the first whitespace-delimited token.
 func cutField(s string) (first, rest string) {
 	s = strings.TrimSpace(s)
-	first, rest, _ = strings.Cut(s, " ")
+	first, rest = cutSpace(s)
 	return strings.TrimSpace(first), strings.TrimSpace(rest)
+}
+
+// cutSpace splits s at its first whitespace rune of any kind — space, tab,
+// newline — keeping everything after it, line breaks included, in rest.
+func cutSpace(s string) (first, rest string) {
+	i := strings.IndexFunc(s, unicode.IsSpace)
+	if i < 0 {
+		return s, ""
+	}
+	return s[:i], s[i:]
 }
 
 // Registry is the set of commands a surface exposes.
@@ -182,8 +193,11 @@ func Split(text string) (name, rest string, ok bool) {
 	if !strings.HasPrefix(text, "/") {
 		return "", text, false
 	}
-	name, rest, _ = strings.Cut(text[1:], " ")
-	name = strings.ToLower(strings.TrimSpace(name))
+	// Any whitespace ends the name, not just a space: on a phone "/feed",
+	// Return, "hello" arrives as "/feed\nhello", and a caption joined from
+	// separate text parts does the same.
+	name, rest = cutSpace(text[1:])
+	name = strings.ToLower(name)
 	if name == "" {
 		return "", text, false
 	}

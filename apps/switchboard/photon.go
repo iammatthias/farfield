@@ -13,12 +13,18 @@ import (
 	"strconv"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"github.com/iammatthias/farfield/lib/web"
 )
 
 // Photon's webhook headers. The signature is a real HMAC over the raw body —
 // not, as some providers do, a static secret echoed back in a header.
+// dispatchTimeout bounds one slash command, detached from the webhook request
+// so a hung-up delivery cannot cut it short. Generous: a command may pull
+// several photos off the line and post them.
+const dispatchTimeout = 2 * time.Minute
+
 const (
 	hdrSignature = "X-Spectrum-Signature"
 	hdrTimestamp = "X-Spectrum-Timestamp"
@@ -298,7 +304,10 @@ func (s *Server) dispatchWebhook(w http.ResponseWriter, r *http.Request, env *en
 	if prior, err := getMessage(s.db, msg.ID); err != nil {
 		s.fail(w, "read message log", err)
 		return
-	} else if prior != nil {
+	} else if prior != nil && prior.Status != statusPending {
+		// A pending row is not finished work: it falls through to the claim,
+		// which answers "duplicate" while the claim is live and lets this
+		// delivery take over once it has gone stale (a restart mid-command).
 		web.WriteJSON(w, http.StatusOK, map[string]any{
 			"duplicate": true, "status": prior.Status, "ref": prior.Ref,
 		})
@@ -354,7 +363,27 @@ func (s *Server) dispatchWebhook(w http.ResponseWriter, r *http.Request, env *en
 		return
 	}
 
-	result := s.route(r.Context(), rec, text, atts)
+	// Claim before acting. The completed-row check above only catches a
+	// redelivery that arrives after the first one finished; this catches one
+	// that arrives while it is still running.
+	claimed, err := claimMessage(s.db, rec)
+	if err != nil {
+		s.fail(w, "claim message", err)
+		return
+	}
+	if !claimed {
+		web.WriteJSON(w, http.StatusOK, map[string]any{"duplicate": true, "status": statusPending})
+		return
+	}
+
+	// The command runs on its own clock, not the request's: if Photon gives up
+	// on a slow delivery and hangs up, a post half-made on a cancelled context
+	// is worse than one that finishes. The claim already stops the retry from
+	// running it again.
+	ctx, cancel := context.WithTimeout(context.WithoutCancel(r.Context()), dispatchTimeout)
+	defer cancel()
+
+	result := s.route(ctx, rec, text, atts)
 	rec.Route, rec.Ref, rec.Reply = result.route, result.ref, result.reply
 	rec.Status = statusOK
 	if result.err != nil {
@@ -368,7 +397,7 @@ func (s *Server) dispatchWebhook(w http.ResponseWriter, r *http.Request, env *en
 	// The reply is best effort in both directions: a send failure must not undo
 	// a post that already exists, and must not provoke a retry that would post
 	// it again. It is logged and the delivery is acknowledged.
-	s.reply(r.Context(), rec.ChatGUID, result)
+	s.reply(ctx, rec.ChatGUID, result)
 
 	web.WriteJSON(w, http.StatusOK, map[string]any{
 		"route": result.route, "ref": result.ref, "status": rec.Status,
@@ -442,9 +471,16 @@ func rawContent(body []byte) string {
 	return string(probe.Message.Content)
 }
 
+// truncate shortens s to at most n bytes plus an ellipsis, backing up to a
+// character boundary: a cut through a multi-byte character (any emoji) is
+// invalid UTF-8, and gRPC refuses to send a string field that holds it.
 func truncate(s string, n int) string {
 	if len(s) <= n {
 		return s
 	}
-	return s[:n] + "…"
+	cut := n
+	for cut > 0 && !utf8.RuneStart(s[cut]) {
+		cut--
+	}
+	return s[:cut] + "…"
 }

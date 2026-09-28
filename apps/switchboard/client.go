@@ -168,7 +168,9 @@ func (c *photonClient) SendText(ctx context.Context, chatGUID, text string) erro
 	}
 	_, err := c.msgs.SendTextMessage(ctx, &imsg.SendTextMessageRequest{
 		ChatGuid: chatGUID,
-		Text:     text,
+		// A proto3 string must be valid UTF-8 or the send fails outright. Text
+		// here can carry a tool's raw stderr, which promises nothing.
+		Text: strings.ToValidUTF8(text, "�"),
 	})
 	return err
 }

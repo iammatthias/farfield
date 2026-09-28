@@ -185,17 +185,43 @@ func (s *Server) runUndo(ctx context.Context, c *capability.Clients, in capabili
 	if prior == nil || prior.Ref == "" {
 		return capability.Result{}, fmt.Errorf("nothing to undo")
 	}
-	if err := deleteRef(ctx, c, prior.Route, prior.Ref); err != nil {
+	if prior.Route == "append" {
+		// An append changed a post that existed before it; undoing it restores
+		// that post, never deletes it.
+		if err := s.restoreAppend(ctx, c, in.Actor, prior.Ref); err != nil {
+			return capability.Result{}, err
+		}
+	} else if err := deleteRef(ctx, c, prior.Route, prior.Ref); err != nil {
+		return capability.Result{}, err
+	}
+	// Retire the row so the next /undo walks further back, and /append and
+	// /tags stop resolving to a record that is gone.
+	if err := markUndone(s.db, prior.ID); err != nil {
 		return capability.Result{}, err
 	}
 	return capability.Result{Ref: prior.Ref,
 		Text: fmt.Sprintf("undone · %s %s", prior.Route, prior.Ref)}, nil
 }
 
+// restoreAppend puts a post back to how it was before its latest append.
+func (s *Server) restoreAppend(ctx context.Context, c *capability.Clients, sender, slug string) error {
+	rowid, body, tags, ok, err := latestSnapshot(s.db, sender, slug)
+	if err != nil {
+		return err
+	}
+	if !ok {
+		return fmt.Errorf("no record of %s before that append — edit it in the feed console", slug)
+	}
+	if err := c.Feed.RestorePost(ctx, slug, body, tags); err != nil {
+		return err
+	}
+	return dropSnapshot(s.db, rowid)
+}
+
 // deleteRef removes a record from whichever service created it.
 func deleteRef(ctx context.Context, c *capability.Clients, route, ref string) error {
 	switch route {
-	case "feed", "append":
+	case "feed":
 		return c.Feed.DeletePost(ctx, ref)
 	case "bm":
 		return c.Bookmarks.Delete(ctx, ref)
@@ -215,6 +241,14 @@ func (s *Server) runAppend(ctx context.Context, c *capability.Clients, in capabi
 	}
 	post, err := s.recentPost(in.Actor)
 	if err != nil {
+		return capability.Result{}, err
+	}
+	// Record the post as it stands, so /undo can put it back.
+	curBody, curTags, err := c.Feed.PostState(ctx, post.Ref)
+	if err != nil {
+		return capability.Result{}, err
+	}
+	if err := saveSnapshot(s.db, in.Actor, post.Ref, curBody, curTags); err != nil {
 		return capability.Result{}, err
 	}
 	body, tags := capability.ExtractTags(text)
