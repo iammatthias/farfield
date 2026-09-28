@@ -163,3 +163,22 @@ func TestCommandFilesAvoidHarnessBuiltins(t *testing.T) {
 		}
 	}
 }
+
+func TestTakeFileFlags(t *testing.T) {
+	rest, paths := takeFileFlags([]string{"--file", "a.jpg", "hello", "-f", "b.heic", "world"})
+	if strings.Join(rest, " ") != "hello world" || strings.Join(paths, ",") != "a.jpg,b.heic" {
+		t.Errorf("rest=%v paths=%v", rest, paths)
+	}
+}
+
+func TestReadFilesTypesHEICByExtension(t *testing.T) {
+	dir := t.TempDir()
+	p := filepath.Join(dir, "IMG_1.HEIC")
+	if err := os.WriteFile(p, []byte("\x00\x00\x00\x18ftypheic"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	files, err := readFiles([]string{p})
+	if err != nil || len(files) != 1 || files[0].Mime != "image/heic" || files[0].Name != "IMG_1.HEIC" {
+		t.Errorf("files=%+v err=%v", files, err)
+	}
+}

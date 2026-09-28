@@ -12,6 +12,7 @@
 //	farfield <command> [args...]
 //	farfield help
 //	farfield qr <target> [label] [--save out.png]
+//	farfield feed [caption...] --file photo.jpg [--file ...]
 //	farfield commands [dir]        regenerate the agents' slash commands
 //
 // Commands take positional arguments in the same loose shape they take over
@@ -23,8 +24,11 @@ package main
 import (
 	"context"
 	"fmt"
+	"mime"
+	"net/http"
 	"os"
 	"os/signal"
+	"path/filepath"
 	"strings"
 	"syscall"
 	"time"
@@ -70,13 +74,22 @@ func run(argv []string) error {
 	}
 
 	args, savePath := takeSaveFlag(argv[1:])
+	args, filePaths := takeFileFlags(args)
 
 	spec, ok := reg.Lookup(name)
 	if !ok {
 		return fmt.Errorf("unknown command %q\n\n%s", name, help(reg))
 	}
 
-	in, err := spec.Bind(strings.Join(args, " "), nil)
+	files, err := readFiles(filePaths)
+	if err != nil {
+		return err
+	}
+	if len(files) > 0 && !spec.TakesFiles {
+		return fmt.Errorf("/%s doesn't take files", spec.Name)
+	}
+
+	in, err := spec.Bind(strings.Join(args, " "), files)
 	if err != nil {
 		return err
 	}
@@ -84,7 +97,12 @@ func run(argv []string) error {
 
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
-	ctx, cancel := context.WithTimeout(ctx, 2*time.Minute)
+	// Photos get longer: the upload's own deadline scales with its size.
+	limit := 2 * time.Minute
+	if len(files) > 0 {
+		limit = 10 * time.Minute
+	}
+	ctx, cancel := context.WithTimeout(ctx, limit)
 	defer cancel()
 
 	res, err := spec.Run(ctx, capability.New(capability.FromEnv()), in)
@@ -142,4 +160,52 @@ func render(res capability.Result, savePath string) error {
 
 func help(reg *capability.Registry) string {
 	return reg.Help("farfield — drive the fleet\n\nusage: farfield <command> [args...]")
+}
+
+// takeFileFlags pulls every `--file <path>` (or `-f <path>`) out of the
+// argument list. It is how a photo reaches /feed from a shell — and from the
+// texting agent, which is handed the staged paths of the photos it was sent.
+func takeFileFlags(argv []string) (rest, paths []string) {
+	for i := 0; i < len(argv); i++ {
+		if argv[i] == "--file" || argv[i] == "-f" {
+			if i+1 < len(argv) {
+				paths = append(paths, argv[i+1])
+				i++
+			}
+			continue
+		}
+		rest = append(rest, argv[i])
+	}
+	return rest, paths
+}
+
+// readFiles loads each path as an attachment, typed by its content (falling
+// back to its extension, which is what names a HEIC — the content sniffer
+// does not know it).
+func readFiles(paths []string) ([]capability.NamedFile, error) {
+	var out []capability.NamedFile
+	for _, p := range paths {
+		data, err := os.ReadFile(p)
+		if err != nil {
+			return nil, err
+		}
+		typ := http.DetectContentType(data)
+		if typ == "application/octet-stream" {
+			if byExt := extMime(filepath.Ext(p)); byExt != "" {
+				typ = byExt
+			}
+		}
+		out = append(out, capability.NamedFile{Name: filepath.Base(p), Mime: typ, Data: data})
+	}
+	return out, nil
+}
+
+func extMime(ext string) string {
+	switch strings.ToLower(ext) {
+	case ".heic", ".heif":
+		return "image/heic"
+	case ".mov":
+		return "video/quicktime"
+	}
+	return mime.TypeByExtension(ext)
 }

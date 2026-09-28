@@ -274,7 +274,7 @@ func (a *agentRunner) chatLock(chat string) chan struct{} {
 // is captured only to explain a failure. That split is why nothing streams into
 // the thread: there is no intermediate output to leak.
 func (a *agentRunner) exec(ctx context.Context, job *Job, files []namedTempFile) (string, error) {
-	args := []string{"--prompt", job.Prompt, "--session-dir", a.sessionDir(job.ChatGUID)}
+	args := []string{"--prompt", promptWithAttachments(job.Prompt, files), "--session-dir", a.sessionDir(job.ChatGUID)}
 	for _, f := range files {
 		args = append(args, "--file", f.Path)
 	}
@@ -321,6 +321,27 @@ func (a *agentRunner) exec(ctx context.Context, job *Job, files []namedTempFile)
 		return "", fmt.Errorf("agent failed: %s", detail)
 	}
 	return stdout.String(), nil
+}
+
+// promptWithAttachments names the staged photo paths at the end of the prompt.
+//
+// The harness shows the model each image, but not where it lives on disk — and
+// posting a texted photo means handing that file to `farfield feed --file`.
+// The persona documents the `[attached: …]` line. A bare photo arrives as the
+// line alone, which is how the agent tells "no caption" from a caption.
+func promptWithAttachments(prompt string, files []namedTempFile) string {
+	if len(files) == 0 {
+		return prompt
+	}
+	paths := make([]string, len(files))
+	for i, f := range files {
+		paths[i] = f.Path
+	}
+	note := "[attached: " + strings.Join(paths, ", ") + "]"
+	if strings.TrimSpace(prompt) == "" {
+		return note
+	}
+	return prompt + "\n\n" + note
 }
 
 // agentEnv is the environment an agent turn runs with: an allowlist, never

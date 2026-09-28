@@ -342,3 +342,16 @@ func TestRetryOnce(t *testing.T) {
 		t.Error("Unauthenticated did not drop the cached token")
 	}
 }
+
+func TestPromptNamesAttachedPhotos(t *testing.T) {
+	files := []namedTempFile{{Path: "/tmp/x/01-a.jpeg"}, {Path: "/tmp/x/02-b.heic"}}
+	if got := promptWithAttachments("Plotting self portraits", files); got != "Plotting self portraits\n\n[attached: /tmp/x/01-a.jpeg, /tmp/x/02-b.heic]" {
+		t.Errorf("captioned = %q", got)
+	}
+	if got := promptWithAttachments("", files[:1]); got != "[attached: /tmp/x/01-a.jpeg]" {
+		t.Errorf("bare = %q", got)
+	}
+	if got := promptWithAttachments("hi", nil); got != "hi" {
+		t.Errorf("no files = %q", got)
+	}
+}
