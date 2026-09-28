@@ -281,6 +281,7 @@ func (a *agentRunner) exec(ctx context.Context, job *Job, files []namedTempFile)
 
 	cmd := exec.CommandContext(ctx, a.cmd, args...)
 	cmd.Dir = a.workspace()
+	cmd.Env = agentEnv(os.Environ())
 	var stdout, stderr strings.Builder
 	cmd.Stdout = &stdout
 	cmd.Stderr = &stderr
@@ -320,6 +321,43 @@ func (a *agentRunner) exec(ctx context.Context, job *Job, files []namedTempFile)
 		return "", fmt.Errorf("agent failed: %s", detail)
 	}
 	return stdout.String(), nil
+}
+
+// agentEnv is the environment an agent turn runs with: an allowlist, never
+// switchboard's own.
+//
+// switchboard is started with the whole fleet .env — every app's write key,
+// the admin password, the webhook and Photon secrets, the site's deploy hook.
+// An agent turn is a model reading text from outside (a pasted link, a
+// forwarded message), so anything in its environment is one prompt injection
+// from being echoed back or used. It gets what a harness needs to run, its own
+// settings, and farfield's scoped FARFIELD_* keys — minted per app, revocable
+// without touching anything else. The model credential is not passed at all:
+// ff-agent loads it from /etc/farfield/agent.env itself.
+func agentEnv(parent []string) []string {
+	base := map[string]bool{
+		"PATH": true, "HOME": true, "USER": true, "LOGNAME": true, "SHELL": true,
+		"LANG": true, "TZ": true, "TMPDIR": true, "TERM": true,
+	}
+	var out []string
+	for _, kv := range parent {
+		name, _, ok := strings.Cut(kv, "=")
+		if !ok {
+			continue
+		}
+		switch {
+		case base[name],
+			strings.HasPrefix(name, "LC_"),
+			strings.HasPrefix(name, "XDG_"),
+			strings.HasPrefix(name, "FF_AGENT_"),
+			strings.HasPrefix(name, "FARFIELD_"),
+			// Service locations are not secrets — but a URL that carries a
+			// token (the site's deploy hook, a webhook) is.
+			strings.HasSuffix(name, "_URL") && !strings.Contains(name, "HOOK") && !strings.Contains(name, "SECRET"):
+			out = append(out, kv)
+		}
+	}
+	return out
 }
 
 // cancel stops a running turn. Reports whether there was one to stop.

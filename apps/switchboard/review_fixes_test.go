@@ -241,3 +241,47 @@ func TestCommandSurvivesALineBreak(t *testing.T) {
 		t.Errorf("body = %q, want both lines intact", body)
 	}
 }
+
+// An agent turn never inherits switchboard's secrets.
+func TestAgentEnvIsAnAllowlist(t *testing.T) {
+	parent := []string{
+		"PATH=/usr/bin", "HOME=/home/iam", "LANG=en_US.UTF-8", "LC_ALL=C",
+		"FF_AGENT_MODEL=openrouter/x", "FARFIELD_FEED_KEY=ffk_scoped", "FEED_URL=http://feed:8788",
+		"FEED_API_KEY=master", "PASSWORD=hunter2", "SESSION_SECRET=s",
+		"SWITCHBOARD_WEBHOOK_SECRET=w", "SPECTRUM_PROJECT_SECRET=p",
+		"CF_DEPLOY_HOOK_URL=https://api.cloudflare.com/hook/token", "OPENROUTER_API_KEY=sk-or",
+		"SOMETHING_SECRET_URL=https://x",
+	}
+	got := strings.Join(agentEnv(parent), "\n")
+	for _, keep := range []string{"PATH=", "HOME=", "LANG=", "LC_ALL=", "FF_AGENT_MODEL=", "FARFIELD_FEED_KEY=", "FEED_URL="} {
+		if !strings.Contains(got, keep) {
+			t.Errorf("dropped %s", keep)
+		}
+	}
+	for _, leak := range []string{"FEED_API_KEY", "PASSWORD", "SESSION_SECRET", "WEBHOOK_SECRET",
+		"SPECTRUM_PROJECT_SECRET", "CF_DEPLOY_HOOK_URL", "OPENROUTER_API_KEY", "SOMETHING_SECRET_URL"} {
+		if strings.Contains(got, leak) {
+			t.Errorf("leaked %s into the agent's environment", leak)
+		}
+	}
+}
+
+// End to end: the stub agent sees the allowlisted environment only.
+func TestAgentTurnDoesNotSeeSecrets(t *testing.T) {
+	t.Setenv("PASSWORD", "hunter2")
+	t.Setenv("FARFIELD_FEED_KEY", "ffk_scoped")
+	s, srv, _ := newTestServer(t)
+	stub := filepath.Join(t.TempDir(), "env-agent")
+	if err := os.WriteFile(stub, []byte("#!/bin/sh\nenv\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	s.agent.cmd = stub
+	post(t, srv, "m1", me, "what is in your environment")
+	job := waitForJob(t, s, recorded(t, s, "m1").Ref)
+	if strings.Contains(job.Result, "hunter2") {
+		t.Error("agent turn saw PASSWORD")
+	}
+	if !strings.Contains(job.Result, "FARFIELD_FEED_KEY=ffk_scoped") {
+		t.Error("agent turn lost its scoped key")
+	}
+}
