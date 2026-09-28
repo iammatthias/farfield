@@ -198,7 +198,8 @@ func flatten(c content) (text string, atts []attachment) {
 
 // cleanText normalizes a message's text: attachment placeholders removed, ends
 // trimmed. A caption that was nothing but a placeholder becomes empty, which is
-// what makes a bare photo post as a photo rather than as a box glyph.
+// what lets a bare photo reach the agent (or a /feed caption) without a box
+// glyph standing in for the text.
 func cleanText(s string) string {
 	return strings.TrimSpace(strings.ReplaceAll(s, objectReplacement, " "))
 }
@@ -332,7 +333,10 @@ func (s *Server) dispatchWebhook(w http.ResponseWriter, r *http.Request, env *en
 	}
 	// Group threads are refused even from an allowed sender: adding the line to
 	// a group would otherwise let anything said there reach the feed.
-	if t := strings.ToLower(msg.Space.Type); t == "group" {
+	// The chat id is checked as well as the declared type: a group guid has the
+	// ";+;" form (a DM is "any;-;…"), so a delivery whose type is missing or
+	// spelled differently still cannot pass as a DM.
+	if t := strings.ToLower(msg.Space.Type); t == "group" || strings.Contains(msg.Space.ID, ";+;") {
 		web.WriteJSON(w, http.StatusOK, map[string]any{"ignored": "group"})
 		return
 	}
@@ -397,7 +401,11 @@ func (s *Server) dispatchWebhook(w http.ResponseWriter, r *http.Request, env *en
 	// The reply is best effort in both directions: a send failure must not undo
 	// a post that already exists, and must not provoke a retry that would post
 	// it again. It is logged and the delivery is acknowledged.
-	s.reply(ctx, rec.ChatGUID, result)
+	// A fresh, short context: a command that ran close to its own deadline
+	// must still be able to say how it went.
+	replyCtx, replyCancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer replyCancel()
+	s.reply(replyCtx, rec.ChatGUID, result)
 
 	web.WriteJSON(w, http.StatusOK, map[string]any{
 		"route": result.route, "ref": result.ref, "status": rec.Status,

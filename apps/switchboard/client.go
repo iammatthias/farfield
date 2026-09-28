@@ -12,7 +12,9 @@ import (
 	"time"
 
 	"google.golang.org/grpc"
+	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/credentials"
+	"google.golang.org/grpc/status"
 
 	imsg "github.com/iammatthias/farfield/apps/switchboard/gen/photon/imessage/v1"
 )
@@ -140,8 +142,44 @@ func (c *photonClient) lineToken(ctx context.Context) (string, error) {
 		return "", fmt.Errorf("photon token: %s: %s", resp.Status, out.Message)
 	}
 	c.token = out.Data.Token
-	c.expires = time.Now().Add(time.Duration(out.Data.ExpiresIn) * time.Second)
+	// A missing or zero expiresIn would make every RPC mint a fresh token;
+	// assume a short life instead. Photon's tokens last 15 minutes.
+	ttl := time.Duration(out.Data.ExpiresIn) * time.Second
+	if ttl <= tokenSkew {
+		ttl = 5 * time.Minute
+	}
+	c.expires = time.Now().Add(ttl)
 	return c.token, nil
+}
+
+// dropToken forgets the cached line token, so the next RPC mints a new one.
+// Called when Photon rejects the token before its stated expiry (revoked or
+// rotated early), which would otherwise fail every call until it ran out.
+func (c *photonClient) dropToken() {
+	c.mu.Lock()
+	c.token = ""
+	c.mu.Unlock()
+}
+
+// retryOnce runs an RPC and, on a failure worth retrying, runs it one more
+// time: after dropping the token if Photon refused it, or after a short pause
+// if the line was momentarily unavailable. Only for idempotent-enough sends —
+// the cost of a rare duplicate reply is lower than the cost of silence.
+func (c *photonClient) retryOnce(ctx context.Context, rpc func() error) error {
+	err := rpc()
+	switch status.Code(err) {
+	case codes.Unauthenticated:
+		c.dropToken()
+	case codes.Unavailable, codes.DeadlineExceeded, codes.ResourceExhausted:
+		select {
+		case <-time.After(time.Second):
+		case <-ctx.Done():
+			return err
+		}
+	default:
+		return err
+	}
+	return rpc()
 }
 
 // userAgent identifies switchboard to Photon and to the Cloudflare edge, which
@@ -166,13 +204,16 @@ func (c *photonClient) SendText(ctx context.Context, chatGUID, text string) erro
 	if strings.TrimSpace(text) == "" {
 		return nil
 	}
-	_, err := c.msgs.SendTextMessage(ctx, &imsg.SendTextMessageRequest{
+	req := &imsg.SendTextMessageRequest{
 		ChatGuid: chatGUID,
 		// A proto3 string must be valid UTF-8 or the send fails outright. Text
 		// here can carry a tool's raw stderr, which promises nothing.
 		Text: strings.ToValidUTF8(text, "�"),
+	}
+	return c.retryOnce(ctx, func() error {
+		_, err := c.msgs.SendTextMessage(ctx, req)
+		return err
 	})
-	return err
 }
 
 // Download pulls an attachment's primary bytes off the line.
@@ -215,8 +256,6 @@ func (c *photonClient) Download(ctx context.Context, guid string) ([]byte, error
 	return data, nil
 }
 
-// SendImage uploads bytes to the line and sends them into a conversation —
-// how a generated QR code arrives as a picture rather than a link.
 // upload puts bytes on the line and returns the attachment guid.
 func (c *photonClient) upload(ctx context.Context, name string, data []byte) (string, error) {
 	if c == nil {
@@ -236,6 +275,8 @@ func (c *photonClient) upload(ctx context.Context, name string, data []byte) (st
 	return guid, nil
 }
 
+// SendImage uploads bytes to the line and sends them into a conversation —
+// how a generated QR code arrives as a picture rather than a link.
 func (c *photonClient) SendImage(ctx context.Context, chatGUID, name string, data []byte) error {
 	guid, err := c.upload(ctx, name, data)
 	if err != nil {

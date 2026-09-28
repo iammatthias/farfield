@@ -2,6 +2,9 @@ package main
 
 import (
 	"context"
+
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
 	"os"
 	"path/filepath"
 	"strings"
@@ -298,5 +301,44 @@ func TestPhotoOnANonFileCommandIsRefused(t *testing.T) {
 	got := recorded(t, s, "m2")
 	if got.Status != statusError || !strings.Contains(got.Reply, "doesn't take photos") {
 		t.Errorf("status=%s reply=%q, want a refusal naming the photo", got.Status, got.Reply)
+	}
+}
+
+// A group thread is refused even when its declared type is missing.
+func TestGroupGuidIsRefusedWithoutAType(t *testing.T) {
+	s, srv, feed := newTestServer(t)
+	post(t, srv, "m1", me, "/feed from a group", func(e *envelope) {
+		e.Message.Space.Type = ""
+		e.Message.Space.ID = "any;+;chat123456"
+	})
+	if feed.count() != 0 {
+		t.Error("a group-thread message reached feed")
+	}
+	if rec, _ := getMessage(s.db, "m1"); rec != nil && rec.Status == statusOK {
+		t.Error("a group-thread message was acted on")
+	}
+}
+
+// retryOnce retries transient and auth failures exactly once, and nothing else.
+func TestRetryOnce(t *testing.T) {
+	c := &photonClient{token: "cached"}
+	for _, tc := range []struct {
+		code  codes.Code
+		calls int
+	}{{codes.Unavailable, 2}, {codes.Unauthenticated, 2}, {codes.InvalidArgument, 1}, {codes.OK, 1}} {
+		calls := 0
+		_ = c.retryOnce(context.Background(), func() error {
+			calls++
+			if tc.code == codes.OK {
+				return nil
+			}
+			return status.Error(tc.code, "x")
+		})
+		if calls != tc.calls {
+			t.Errorf("%v: %d calls, want %d", tc.code, calls, tc.calls)
+		}
+	}
+	if c.token != "" {
+		t.Error("Unauthenticated did not drop the cached token")
 	}
 }

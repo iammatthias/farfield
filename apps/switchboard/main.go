@@ -58,7 +58,8 @@ func main() {
 	}
 
 	if len(os.Args) > 1 && os.Args[1] == "health" {
-		// Probes /status — backs the Docker healthcheck (distroless: no curl).
+		// Probes /status — a self-check for the host unit and ff-switchboard,
+		// now that switchboard runs under systemd rather than in docker.
 		os.Exit(web.Health(store.Env("SWITCHBOARD_PORT", "8802")))
 	}
 

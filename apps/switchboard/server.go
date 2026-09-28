@@ -227,6 +227,18 @@ func statusTargets() []capability.Target {
 
 // parseAllow builds the sender allowlist, normalizing each entry the same way
 // an inbound handle is normalized so the two can be compared directly.
+// firstAllowed is the first handle in the allowlist, normalized — the thread
+// the probe tool reads and writes. The raw value can hold several handles, and
+// a chat id built from the whole string matches no chat at all.
+func firstAllowed(raw string) string {
+	for _, part := range strings.Split(raw, ",") {
+		if h := normalizeHandle(part); h != "" {
+			return h
+		}
+	}
+	return ""
+}
+
 func parseAllow(raw string) map[string]bool {
 	out := map[string]bool{}
 	for _, part := range strings.Split(raw, ",") {

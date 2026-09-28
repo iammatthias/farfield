@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"path/filepath"
 	"time"
 
 	"google.golang.org/protobuf/encoding/protojson"
@@ -39,7 +40,7 @@ func runProbe(n int) error {
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 
-	msgs, err := client.RecentMessages(ctx, dmChatGUID(store.Env("SWITCHBOARD_ALLOW", "")), n)
+	msgs, err := client.RecentMessages(ctx, dmChatGUID(firstAllowed(store.Env("SWITCHBOARD_ALLOW", ""))), n)
 	if err != nil {
 		return err
 	}
@@ -136,8 +137,8 @@ func runProbeSend(path string) error {
 	if err != nil {
 		return err
 	}
-	chat := dmChatGUID(store.Env("SWITCHBOARD_ALLOW", ""))
-	guid, err := client.upload(ctx, "probe.png", data)
+	chat := dmChatGUID(firstAllowed(store.Env("SWITCHBOARD_ALLOW", "")))
+	guid, err := client.upload(ctx, filepath.Base(path), data)
 	if err != nil {
 		return fmt.Errorf("upload: %w", err)
 	}
