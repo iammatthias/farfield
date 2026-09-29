@@ -130,7 +130,7 @@ func newTestServer(t *testing.T) (*httptest.Server, *http.Cookie) {
 		auth: &web.Auth{DB: db, Password: "pw"},
 		md:   &markdown.Renderer{MetaBase: "http://127.0.0.1:0", PublicBase: "https://public.example", HardWraps: true},
 	}
-	tmpl, err := web.ParseTemplates(assets, nil)
+	tmpl, err := web.ParseTemplates(assets, tmplFuncs)
 	if err != nil {
 		t.Fatalf("parse templates: %v", err)
 	}
@@ -195,9 +195,9 @@ func TestPreviewRendersHardWraps(t *testing.T) {
 }
 
 // TestComposerRendersDocumentFirst confirms the admin composer page carries
-// the document-first editor markup: the doc-card trigger, the hidden
-// markdown fallback, the metadata rail, and the editor config with feed's
-// hard-wrap flag.
+// the WebAssembly editor: the body field opts in (with image upload through
+// the session-gated embed proxy), the plain textarea stays as the fallback
+// that posts, and the meta band and save pill are still there.
 func TestComposerRendersDocumentFirst(t *testing.T) {
 	srv, cookie := newTestServer(t)
 
@@ -218,17 +218,15 @@ func TestComposerRendersDocumentFirst(t *testing.T) {
 	page := string(raw)
 	for _, want := range []string{
 		`data-async`,
-		`data-doc-host`, // the page IS the editor — no dialog, no doc-card
 		`data-band`,     // the meta band replaced the sidebar
 		`doc-fallback`,
 		`<textarea id="body"`,
 		`data-doc-save`, // the floating pill's save
 		`doc-words`,
 		`save-note`,
-		`preview:"/preview"`,
-		`editdoc:"/editdoc"`,
-		`hardWraps:true`,
-		`/static/editor.js`,
+		`data-editor data-editor-upload="/embed/blob"`,
+		`/static/editor/host.js`,
+		`/static/editor/mount.js`,
 		`/static/band.js`,
 	} {
 		if !strings.Contains(page, want) {

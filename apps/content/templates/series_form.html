@@ -42,12 +42,9 @@
           <div data-series-tray></div>
         </div>
       {{end}}
-
-      <div data-doc-host></div>
-
       <div class="field doc-fallback">
         <label for="body">Body (markdown)</label>
-        <textarea id="body" name="body">{{.Series.Body}}</textarea>
+        <textarea id="body" name="body" data-editor data-editor-upload="/embed/blob">{{.Series.Body}}</textarea>
         <p class="hint">Rendered inline wherever an entry embeds this series.
           Images go inline as blob://&lt;cid&gt;.</p>
       </div>
@@ -56,11 +53,10 @@
         <button type="button" data-doc-save>{{if .IsNew}}Create series{{else}}Save{{end}}</button>
         <span class="save-note"></span>
       </div>
-    </div>
+    </div>  </form>
 
-    <script>window.FARFIELD={blobs:"{{.BlobsPublic}}",content:"{{.ContentPublic}}",preview:"/preview",editdoc:"/editdoc",embeds:["blob"]};</script>
-  </form>
-
-  <script src="/static/editor.js?v={{.AssetVer}}" defer></script>
+  <link rel="stylesheet" href="/static/editor/host.css?v={{editorVer}}">
+  <script src="/static/editor/host.js?v={{editorVer}}" defer></script>
+  <script src="/static/editor/mount.js?v={{editorVer}}" defer></script>
   <script src="/static/band.js?v={{.AssetVer}}" defer></script>
 {{end}}

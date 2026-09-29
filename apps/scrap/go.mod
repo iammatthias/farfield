@@ -9,6 +9,7 @@ require (
 	github.com/iammatthias/farfield/lib/keys v0.0.0
 	github.com/iammatthias/farfield/lib/pulse v0.0.0
 	github.com/iammatthias/farfield/lib/store v0.0.0
+	github.com/iammatthias/farfield/lib/editor v0.0.0
 	github.com/iammatthias/farfield/lib/theme v0.0.0
 	github.com/iammatthias/farfield/lib/web v0.0.0
 	modernc.org/sqlite v1.50.1
@@ -34,6 +35,8 @@ replace (
 	github.com/iammatthias/farfield/lib/keys => ../../lib/keys
 	github.com/iammatthias/farfield/lib/pulse => ../../lib/pulse
 	github.com/iammatthias/farfield/lib/store => ../../lib/store
+	github.com/iammatthias/farfield/lib/editor => ../../lib/editor
 	github.com/iammatthias/farfield/lib/theme => ../../lib/theme
+	github.com/iammatthias/farfield/lib/wat => ../../lib/wat
 	github.com/iammatthias/farfield/lib/web => ../../lib/web
 )

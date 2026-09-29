@@ -6,7 +6,7 @@
     <form method="post" action="/pastes">
       <div class="field">
         <label for="body">Body</label>
-        <textarea id="body" name="body" autofocus
+        <textarea id="body" name="body" autofocus data-editor data-editor-tools="plain"
                   placeholder="paste text here">{{.Body}}</textarea>
       </div>
       <div class="controls">
@@ -65,4 +65,7 @@
       </div>
     </form>
   </section>
+  <link rel="stylesheet" href="/static/editor/host.css?v={{editorVer}}">
+  <script src="/static/editor/host.js?v={{editorVer}}" defer></script>
+  <script src="/static/editor/mount.js?v={{editorVer}}" defer></script>
 {{end}}

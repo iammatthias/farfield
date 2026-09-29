@@ -28,7 +28,7 @@ var Styles = stripFontFaces(CSS)
 // /static/styles.css?v={{.AssetVer}} with AssetVer set to this value, which
 // makes the immutable Cache-Control below safe: a theme change changes the
 // URL, so clients can cache the old one forever.
-var Version = cid.Of([]byte(Styles + EditorJS + BandJS))[:16]
+var Version = cid.Of([]byte(Styles + BandJS))[:16]
 
 // FontsVersion fingerprints the faces alone, so they carry a URL that changes
 // only when a font does.
@@ -39,11 +39,6 @@ var FontsVersion = cid.Of([]byte(Fonts))[:16]
 // links this must link that too — lib/web's layout does.
 func CSSHandler() http.HandlerFunc {
 	return assetHandler("text/css; charset=utf-8", Styles, "theme.css", Version)
-}
-
-// EditorJSHandler serves the shared editor script the same way.
-func EditorJSHandler() http.HandlerFunc {
-	return assetHandler("text/javascript; charset=utf-8", EditorJS, "editor.js", Version)
 }
 
 // BandJSHandler serves the meta-band script the same way.

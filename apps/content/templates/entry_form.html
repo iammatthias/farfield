@@ -113,11 +113,9 @@
       </div>
 
       {{/* The page is the editor: the writing surface mounts here. */}}
-      <div data-doc-host></div>
-
       <div class="field doc-fallback">
         <label for="body">Body (markdown)</label>
-        <textarea id="body" name="body">{{.Entry.Body}}</textarea>
+        <textarea id="body" name="body" data-editor data-editor-upload="/embed/blob">{{.Entry.Body}}</textarea>
         <p class="hint">Reference images as blob://&lt;cid&gt;.</p>
       </div>
 
@@ -126,16 +124,15 @@
         <span class="save-note"></span>
         <span data-pub-note></span>
       </div>
-    </div>
-
-    <script>window.FARFIELD={blobs:"{{.BlobsPublic}}",content:"{{.ContentPublic}}",preview:"/preview",editdoc:"/editdoc"};</script>
-  </form>
+    </div>  </form>
 
   {{range .Revisions}}{{if not .Current}}
     <form id="restore-{{.ID}}" method="post"
           action="/entries/{{$.Entry.Slug}}/revisions/{{.ID}}/restore"></form>
   {{end}}{{end}}
 
-  <script src="/static/editor.js?v={{.AssetVer}}" defer></script>
+  <link rel="stylesheet" href="/static/editor/host.css?v={{editorVer}}">
+  <script src="/static/editor/host.js?v={{editorVer}}" defer></script>
+  <script src="/static/editor/mount.js?v={{editorVer}}" defer></script>
   <script src="/static/band.js?v={{.AssetVer}}" defer></script>
 {{end}}

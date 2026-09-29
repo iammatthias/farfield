@@ -23,12 +23,9 @@
         <span class="doc-words mono"></span>
         {{if not .IsNew}}<span class="chip static state-live">live</span>{{end}}
       </div>
-
-      <div data-doc-host></div>
-
       <div class="field doc-fallback">
         <label for="body">Body (markdown)</label>
-        <textarea id="body" name="body">{{.Post.Body}}</textarea>
+        <textarea id="body" name="body" data-editor data-editor-upload="/embed/blob">{{.Post.Body}}</textarea>
         <p class="hint">Reference images as blob://&lt;cid&gt;.</p>
       </div>
 
@@ -36,11 +33,10 @@
         <button type="button" data-doc-save>{{if .IsNew}}Post{{else}}Save{{end}}</button>
         <span class="save-note"></span>
       </div>
-    </div>
+    </div>  </form>
 
-    <script>window.FARFIELD={blobs:"{{.BlobsPublic}}",content:"{{.ContentPublic}}",preview:"/preview",editdoc:"/editdoc",hardWraps:true};</script>
-  </form>
-
-  <script src="/static/editor.js?v={{.AssetVer}}" defer></script>
+  <link rel="stylesheet" href="/static/editor/host.css?v={{editorVer}}">
+  <script src="/static/editor/host.js?v={{editorVer}}" defer></script>
+  <script src="/static/editor/mount.js?v={{editorVer}}" defer></script>
   <script src="/static/band.js?v={{.AssetVer}}" defer></script>
 {{end}}

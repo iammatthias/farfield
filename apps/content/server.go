@@ -3,10 +3,12 @@ package main
 import (
 	"database/sql"
 	"embed"
+	"html/template"
 	"log/slog"
 	"net/http"
 	"time"
 
+	"github.com/iammatthias/farfield/lib/editor"
 	"github.com/iammatthias/farfield/lib/keys"
 	"github.com/iammatthias/farfield/lib/markdown"
 	"github.com/iammatthias/farfield/lib/pulse"
@@ -68,7 +70,7 @@ func run(host, port string) error {
 		slog.Warn("could not prune sessions", "err", err)
 	}
 
-	tmpl, err := web.ParseTemplates(assets, nil)
+	tmpl, err := web.ParseTemplates(assets, tmplFuncs)
 	if err != nil {
 		return err
 	}
@@ -204,7 +206,8 @@ func (s *Server) routes() http.Handler {
 	// Shared theme stylesheet and editor script.
 	mux.HandleFunc("GET /static/fonts.css", theme.FontsHandler())
 	mux.HandleFunc("GET /static/styles.css", theme.CSSHandler())
-	mux.HandleFunc("GET /static/editor.js", theme.EditorJSHandler())
+	// the WebAssembly editor: module, host, fonts
+	mux.Handle("GET /static/editor/", editor.Handler("/static/editor/"))
 	mux.HandleFunc("GET /static/band.js", theme.BandJSHandler())
 
 	// App-local static assets. The vendored semantic-search engine is
@@ -224,3 +227,7 @@ func (s *Server) routes() http.Handler {
 	return web.CORS(web.LogRequests(web.Gzip(s.pulse.Wrap(s.rebuild.Wrap(s.db, mux)))),
 		"GET", "POST", "PUT", "DELETE", "OPTIONS")
 }
+
+// tmplFuncs are the template helpers every page (and every test that parses
+// the templates) needs: editorVer versions the WebAssembly editor's assets.
+var tmplFuncs = template.FuncMap{"editorVer": editor.Version}

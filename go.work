@@ -7,6 +7,7 @@ use (
 	./apps/bookmarks
 	./apps/content
 	./apps/daily
+	./apps/desk
 	./apps/farfield
 	./apps/feed
 	./apps/keys
@@ -21,6 +22,7 @@ use (
 	./lib/capability
 	./lib/bytestore
 	./lib/cid
+	./lib/editor
 	./lib/fleet
 	./lib/keys
 	./lib/markdown
@@ -30,5 +32,6 @@ use (
 	./lib/recipe
 	./lib/store
 	./lib/theme
+	./lib/wat
 	./lib/web
 )

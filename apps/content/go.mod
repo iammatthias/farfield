@@ -9,6 +9,7 @@ require (
 	github.com/iammatthias/farfield/lib/markdown v0.0.0
 	github.com/iammatthias/farfield/lib/pulse v0.0.0
 	github.com/iammatthias/farfield/lib/store v0.0.0
+	github.com/iammatthias/farfield/lib/editor v0.0.0
 	github.com/iammatthias/farfield/lib/theme v0.0.0
 	github.com/iammatthias/farfield/lib/web v0.0.0
 	gopkg.in/yaml.v3 v3.0.1
@@ -36,6 +37,8 @@ replace (
 	github.com/iammatthias/farfield/lib/markdown => ../../lib/markdown
 	github.com/iammatthias/farfield/lib/pulse => ../../lib/pulse
 	github.com/iammatthias/farfield/lib/store => ../../lib/store
+	github.com/iammatthias/farfield/lib/editor => ../../lib/editor
 	github.com/iammatthias/farfield/lib/theme => ../../lib/theme
+	github.com/iammatthias/farfield/lib/wat => ../../lib/wat
 	github.com/iammatthias/farfield/lib/web => ../../lib/web
 )

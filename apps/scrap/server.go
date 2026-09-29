@@ -10,6 +10,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/iammatthias/farfield/lib/editor"
 	"github.com/iammatthias/farfield/lib/keys"
 	"github.com/iammatthias/farfield/lib/pulse"
 	"github.com/iammatthias/farfield/lib/store"
@@ -110,7 +111,8 @@ func (s *Server) parseTemplates() error {
 		"ttl":    ttlText,
 		// Paste.Size() is an int (a body is capped well under 2 GiB), and a
 		// template func's arguments are matched by exact type.
-		"sizeText": func(n int) string { return web.HumanSize(int64(n)) },
+		"sizeText":  func(n int) string { return web.HumanSize(int64(n)) },
+		"editorVer": editor.Version,
 	}
 	tmpl, err := web.ParseTemplates(assets, funcs)
 	if err != nil {
@@ -168,6 +170,8 @@ func (s *Server) routes() http.Handler {
 	mux.HandleFunc("GET /status", s.handleStatus)
 	mux.HandleFunc("GET /static/fonts.css", theme.FontsHandler())
 	mux.HandleFunc("GET /static/styles.css", theme.CSSHandler())
+	// the WebAssembly editor: module, host, fonts
+	mux.Handle("GET /static/editor/", editor.Handler("/static/editor/"))
 
 	// Everything scrap serves is text, so Gzip wraps the whole mux. Logging
 	// sits outside so the recorded status is the final one; pulse traffic

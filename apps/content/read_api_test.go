@@ -21,7 +21,7 @@ func readTestServer(t *testing.T) (*Server, pubDraft) {
 		t.Fatalf("openDB: %v", err)
 	}
 	t.Cleanup(func() { db.Close() })
-	tmpl, err := web.ParseTemplates(assets, nil)
+	tmpl, err := web.ParseTemplates(assets, tmplFuncs)
 	if err != nil {
 		t.Fatalf("templates: %v", err)
 	}
