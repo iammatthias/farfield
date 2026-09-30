@@ -568,3 +568,62 @@ func TestGammaCurve(t *testing.T) {
 		t.Errorf("mid coverage %d not lifted", lut[128])
 	}
 }
+
+// An image line makes room for its image, and the renderer draws its pixels
+// there; the Markdown above it stays as text.
+func TestImageLineDrawsPixels(t *testing.T) {
+	e := newEd(t)
+	e.setText("before\n![](blob://bafkreitest)\nafter")
+	e.call("render")
+	h0 := e.call("doc_height")
+
+	const w, h = 40, 20
+	ptr := uint32(e.call("image_alloc", w*h*4))
+	if ptr == 0 {
+		t.Fatal("image_alloc failed")
+	}
+	px := make([]byte, w*h*4)
+	for i := 0; i < len(px); i += 4 {
+		px[i], px[i+1], px[i+2], px[i+3] = 200, 30, 40, 255 // RGBA
+	}
+	e.m.Memory().Write(ptr, px)
+	url := "blob://bafkreitest"
+	e.m.Memory().Write(uint32(e.call("io_ptr")), []byte(url))
+	e.call("image_put", uint64(len(url)), w, h, uint64(ptr))
+
+	e.call("render")
+	_ = h0
+	// the caret is on the first line, away from the image: only the image shows
+	hidden := e.call("doc_height")
+	// with the caret on the image line its source comes back above the image
+	e.sel(len("before\n")+3, len("before\n")+3)
+	e.call("render")
+	shown := e.call("doc_height")
+	if shown <= hidden {
+		t.Fatalf("caret on the image line should reveal its source: height %d → %d", hidden, shown)
+	}
+	e.sel(0, 0)
+	e.call("render")
+	if got := e.call("doc_height"); got != hidden {
+		t.Fatalf("moving away should hide the source again: height %d, want %d", got, hidden)
+	}
+	img := e.frame()
+	found := false
+	b := img.Bounds()
+	for y := b.Min.Y; y < b.Max.Y && !found; y++ {
+		for x := b.Min.X; x < b.Max.X; x++ {
+			c := img.RGBAAt(x, y)
+			if c.R == 200 && c.G == 30 && c.B == 40 {
+				found = true
+				break
+			}
+		}
+	}
+	if !found {
+		t.Fatal("image pixels never reached the framebuffer")
+	}
+	// the source is still text
+	if e.text() != "before\n![](blob://bafkreitest)\nafter" {
+		t.Fatalf("text changed: %q", e.text())
+	}
+}

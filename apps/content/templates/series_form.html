@@ -43,7 +43,7 @@
       {{end}}
       <div class="field doc-fallback">
         <label for="body">Body (markdown)</label>
-        <textarea id="body" name="body" data-editor data-editor-upload="/embed/blob">{{.Series.Body}}</textarea>
+        <textarea id="body" name="body" data-editor data-editor-upload="/embed/blob" data-editor-blobs="{{.BlobsPublic}}">{{.Series.Body}}</textarea>
         <p class="hint">Rendered inline wherever an entry embeds this series.
           Images go inline as blob://&lt;cid&gt;.</p>
       </div>

@@ -27,6 +27,10 @@
   (global $doc_h (mut i32) (i32.const 0))   ;; laid-out content height
   (global $laid_rev (mut i32) (i32.const -1)) ;; text revision the layout is for
   (global $laid_w (mut i32) (i32.const -1))
+  ;; the logical lines the selection touched at layout time: an image line
+  ;; shows its source only while the selection is on it
+  (global $laid_lo (mut i32) (i32.const -1))
+  (global $laid_hi (mut i32) (i32.const -1))
 
   ;; css → device px
   (func $dp (param $css i32) (result i32)
@@ -171,15 +175,21 @@
     (global.set $nlines (i32.add (global.get $nlines) (i32.const 1))))
 
   ;; $layout rebuilds the line table when the text or the width changed.
-  (func $layout (local $p i32) (local $ls i32) (local $le i32) (local $info i32) (local $y i32) (local $h i32)
+  (func $layout (local $p i32) (local $ls i32) (local $le i32) (local $info i32) (local $y i32) (local $h i32) (local $img i32) (local $y2 i32)
     (local $x0 i32) (local $avail f32) (local $start i32) (local $i i32) (local $x f32) (local $a f32)
     (local $brk i32) (local $cp i32) (local $cl i32) (local $first i32) (local $kind i32) (local $prevkind i32)
-    (if (i32.and (i32.eq (global.get $laid_rev) (global.get $revision)) (i32.eq (global.get $laid_w) (global.get $W)))
+    (if (i32.and (i32.and (i32.eq (global.get $laid_rev) (global.get $revision)) (i32.eq (global.get $laid_w) (global.get $W)))
+                 (i32.or (i32.eqz (global.get $img_n))
+                   (i32.and (i32.eq (global.get $laid_lo) (call $line_start (call $sel_lo)))
+                            (i32.eq (global.get $laid_hi) (call $line_start (call $sel_hi))))))
       (then (return)))
+    (global.set $laid_lo (call $line_start (call $sel_lo)))
+    (global.set $laid_hi (call $line_start (call $sel_hi)))
     (global.set $laid_rev (global.get $revision))
     (global.set $laid_w (global.get $W))
     (global.set $nlines (i32.const 0))
     (global.set $in_fence (i32.const 0))
+    (global.set $place_n (i32.const 0))
     (local.set $y (global.get $pad_top))
     (local.set $prevkind (i32.const -1))
     (block $all_done
@@ -189,6 +199,20 @@
         (local.set $info (call $classify (local.get $ls) (local.get $le)))
         (call $style_line (local.get $ls) (local.get $le) (local.get $info))
         (local.set $kind (i32.and (local.get $info) (i32.const 0xFF)))
+        ;; an image line away from the selection shows only its image: one
+        ;; record (flag 4, drawn without text) as tall as the image
+        (local.set $img (call $image_line (local.get $ls) (local.get $le)))
+        (if (i32.and (i32.ge_s (local.get $img) (i32.const 0))
+                     (i32.or (i32.gt_s (call $sel_lo) (local.get $le)) (i32.lt_s (call $sel_hi) (local.get $ls))))
+          (then
+            (local.set $y2 (call $image_place (local.get $img) (local.get $y)))
+            (call $emit (local.get $ls) (local.get $le) (local.get $y) (i32.sub (local.get $y2) (local.get $y))
+              (local.get $info) (global.get $col_x) (i32.const 7) (local.get $ls))
+            (local.set $y (local.get $y2))
+            (local.set $prevkind (local.get $kind))
+            (br_if $all_done (i32.ge_u (local.get $le) (global.get $len)))
+            (local.set $p (i32.add (local.get $le) (i32.const 1)))
+            (br $lines)))
         ;; a heading gets air above it, unless it opens the document
         (if (i32.and (i32.eq (local.get $kind) (global.get $K_HEAD)) (i32.gt_s (global.get $nlines) (i32.const 0)))
           (then (local.set $y (i32.add (local.get $y) (i32.div_s (call $line_px (local.get $info)) (i32.const 2))))))
@@ -232,6 +256,8 @@
         (call $emit (local.get $start) (local.get $le) (local.get $y) (local.get $h) (local.get $info)
           (local.get $x0) (i32.or (i32.const 2) (local.get $first)) (local.get $ls))
         (local.set $y (i32.add (local.get $y) (local.get $h)))
+        ;; an image line makes room for its image
+        (local.set $y (call $place_image (local.get $ls) (local.get $le) (local.get $y)))
         (local.set $prevkind (local.get $kind))
         (br_if $all_done (i32.ge_u (local.get $le) (global.get $len)))
         (local.set $p (i32.add (local.get $le) (i32.const 1)))

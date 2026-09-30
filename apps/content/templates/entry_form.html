@@ -80,7 +80,7 @@
       {{/* The page is the editor: the writing surface mounts here. */}}
       <div class="field doc-fallback">
         <label for="body">Body (markdown)</label>
-        <textarea id="body" name="body" data-editor data-editor-upload="/embed/blob">{{.Entry.Body}}</textarea>
+        <textarea id="body" name="body" data-editor data-editor-upload="/embed/blob" data-editor-blobs="{{.BlobsPublic}}">{{.Entry.Body}}</textarea>
         <p class="hint">Reference images as blob://&lt;cid&gt;.</p>
       </div>
 

@@ -174,6 +174,8 @@
     (local $slot i32) (local $px i32) (local $g i32) (local $a f32) (local $xi i32) (local $lo i32) (local $hi i32)
     (local $selx0 i32) (local $selx1 i32) (local $sel i32) (local $aw i32)
     (local.set $r (call $rec (local.get $l)))
+    ;; an image line away from the selection: its image is drawn, its source is not
+    (if (i32.and (i32.load offset=24 (local.get $r)) (i32.const 0x40000)) (then (return)))
     (local.set $y (i32.sub (i32.load offset=8 (local.get $r)) (global.get $scroll)))
     (local.set $h (i32.load offset=12 (local.get $r)))
     (local.set $base (i32.add (local.get $y) (i32.load offset=16 (local.get $r))))
@@ -282,6 +284,7 @@
         (call $draw_line (local.get $l))
         (local.set $l (i32.add (local.get $l) (i32.const 1)))
         (br $lines)))
+    (call $draw_images)
     ;; an empty document shows its placeholder
     (if (i32.and (i32.eqz (global.get $len)) (i32.ne (global.get $ph_len) (i32.const 0)))
       (then

@@ -39,6 +39,8 @@
     (local $need i32) (local $have i32) (local $measure i32)
     (local.set $w (call $clamp (local.get $w) (i32.const 1) (i32.const 8192)))
     (local.set $h (call $clamp (local.get $h) (i32.const 1) (i32.const 8192)))
+    ;; the framebuffer stays under the image heap, 64 MiB above its base
+    (local.set $h (call $min (local.get $h) (i32.div_u (i32.div_u (i32.sub (global.get $IMG_HEAP) (global.get $FB)) (i32.const 4)) (local.get $w))))
     (local.set $need (i32.shr_u (i32.add (i32.add (global.get $FB) (i32.mul (i32.mul (local.get $w) (local.get $h)) (i32.const 4)))
                                          (i32.const 0xFFFF)) (i32.const 16)))
     (local.set $have (memory.size))
