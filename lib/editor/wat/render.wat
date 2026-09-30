@@ -19,6 +19,10 @@
   (global $dirty_h (mut i32) (i32.const 0))
   (func (export "dirty_y") (result i32) (global.get $dirty_y))
   (func (export "dirty_h") (result i32) (global.get $dirty_h))
+  (func (export "is_dirty") (result i32) (global.get $dirty))
+  ;; rows images may be drawn into (render_band narrows it)
+  (global $clip_y0 (mut i32) (i32.const 0))
+  (global $clip_y1 (mut i32) (i32.const 0x7FFFFFFF))
 
   (func $color (param $i i32) (result i32)
     (i32.load (i32.add (global.get $PALETTE) (i32.shl (local.get $i) (i32.const 2)))))
@@ -259,7 +263,8 @@
         (local.set $px (call $px_for (local.get $st) (local.get $info)))
         (local.set $a (call $cp_adv (local.get $cp) (local.get $st) (local.get $info)))
         (local.set $xi (i32.trunc_sat_f32_s (f32.nearest (local.get $x))))
-        (if (i32.gt_u (local.get $cp) (i32.const 0x20))
+        ;; a concealed syntax character has no width: nothing to draw
+        (if (i32.and (i32.gt_u (local.get $cp) (i32.const 0x20)) (f32.gt (local.get $a) (f32.const 0)))
           (then
             (local.set $g (call $resolve (local.get $slot) (local.get $cp)))
             (call $draw_glyph (call $glyph (global.get $res_slot) (local.get $g) (local.get $px))
@@ -333,6 +338,58 @@
           (call $max (i32.const 1) (i32.sub (global.get $doc_h) (global.get $H)))))
         (call $fill (i32.sub (global.get $W) (call $dp (i32.const 6))) (local.get $ty)
           (call $dp (i32.const 3)) (local.get $th) (call $color (i32.const 8)))))
+    (i32.const 1))
+
+  ;; render_band redraws only surface rows y0..y1 — widened to whole visual
+  ;; lines, so no glyph is ever drawn twice over an uncleared edge — and
+  ;; reports them as dirty_y/dirty_h. A host with a tall surface (page mode's
+  ;; tile) redraws what is on screen after an edit and fills in the rest as it
+  ;; scrolls into view, instead of the whole surface on every keystroke.
+  (func (export "render_band") (param $y0 i32) (param $y1 i32) (result i32)
+    (local $l i32) (local $l2 i32) (local $r i32) (local $top i32) (local $bot i32) (local $cl i32)
+    (if (i32.or (i32.eqz (global.get $W)) (i32.eqz (global.get $H))) (then (return (i32.const 0))))
+    (call $layout)
+    (local.set $y0 (call $clamp (local.get $y0) (i32.const 0) (global.get $H)))
+    (local.set $y1 (call $clamp (local.get $y1) (i32.const 0) (global.get $H)))
+    (if (i32.ge_s (local.get $y0) (local.get $y1)) (then (return (i32.const 0))))
+    ;; an empty document (the placeholder) is small: draw it all
+    (if (i32.or (i32.eqz (global.get $nlines)) (i32.eqz (global.get $len)))
+      (then (global.set $dirty (i32.const 1)) (return (call $render))))
+    (local.set $l (call $line_at_y (i32.add (global.get $scroll) (local.get $y0))))
+    (local.set $l2 (call $line_at_y (i32.add (global.get $scroll) (i32.sub (local.get $y1) (i32.const 1)))))
+    (local.set $r (call $rec (local.get $l)))
+    (local.set $top (call $min (local.get $y0) (i32.sub (i32.load offset=8 (local.get $r)) (global.get $scroll))))
+    (local.set $r (call $rec (local.get $l2)))
+    (local.set $bot (call $max (local.get $y1)
+      (i32.sub (i32.add (i32.load offset=8 (local.get $r)) (i32.load offset=12 (local.get $r))) (global.get $scroll))))
+    (local.set $top (call $max (local.get $top) (i32.const 0)))
+    (local.set $bot (call $min (local.get $bot) (global.get $H)))
+    (call $fill (i32.const 0) (local.get $top) (global.get $W) (i32.sub (local.get $bot) (local.get $top)) (call $color (i32.const 0)))
+    (local.set $cl (local.get $l))
+    (block $done
+      (loop $lines
+        (br_if $done (i32.gt_s (local.get $cl) (local.get $l2)))
+        (call $draw_line (local.get $cl))
+        (local.set $cl (i32.add (local.get $cl) (i32.const 1)))
+        (br $lines)))
+    (global.set $clip_y0 (local.get $top))
+    (global.set $clip_y1 (local.get $bot))
+    (call $draw_images)
+    (global.set $clip_y0 (i32.const 0))
+    (global.set $clip_y1 (i32.const 0x7FFFFFFF))
+    ;; the caret, when it falls in the band
+    (if (i32.and (global.get $focused) (global.get $caret_on))
+      (then
+        (local.set $cl (call $line_of (global.get $sel_h)))
+        (if (i32.and (i32.ge_s (local.get $cl) (local.get $l)) (i32.le_s (local.get $cl) (local.get $l2)))
+          (then
+            (local.set $r (call $rec (local.get $cl)))
+            (call $fill (call $x_of (global.get $sel_h)) (i32.sub (i32.load offset=8 (local.get $r)) (global.get $scroll))
+              (call $max (call $dp (i32.const 2)) (i32.const 1)) (i32.load offset=12 (local.get $r)) (call $color (i32.const 6)))))))
+    (global.set $dirty (i32.const 0))
+    (global.set $blink (i32.const 0))
+    (global.set $dirty_y (local.get $top))
+    (global.set $dirty_h (i32.sub (local.get $bot) (local.get $top)))
     (i32.const 1))
 
   ;; $render_caret_line repaints only the caret's visual line — background,

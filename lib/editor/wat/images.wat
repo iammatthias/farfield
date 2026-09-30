@@ -159,12 +159,12 @@
         (if (i32.and (i32.lt_s (local.get $top) (global.get $H))
                      (i32.gt_s (i32.add (local.get $top) (local.get $dh)) (i32.const 0)))
           (then
-            (local.set $j (call $max (i32.const 0) (i32.sub (i32.const 0) (local.get $top))))
+            (local.set $j (call $max (i32.const 0) (i32.sub (global.get $clip_y0) (local.get $top))))
             (block $rows_done
               (loop $rows
                 (br_if $rows_done (i32.ge_s (local.get $j) (local.get $dh)))
                 (local.set $sy (i32.add (local.get $top) (local.get $j)))
-                (br_if $rows_done (i32.ge_s (local.get $sy) (global.get $H)))
+                (br_if $rows_done (i32.ge_s (local.get $sy) (call $min (global.get $H) (global.get $clip_y1))))
                 (local.set $row (i32.mul (i32.div_s (i32.mul (local.get $j) (local.get $h)) (local.get $dh)) (local.get $w)))
                 (local.set $i (i32.const 0))
                 (block $cols_done

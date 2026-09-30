@@ -248,7 +248,13 @@
             (local.set $p (i32.add (local.get $p) (i32.const 2)))
             (br $scan)))
         (local.set $p (i32.add (local.get $p) (i32.const 1)))
-        (br $scan))))
+        (br $scan)))
+    ;; a backslash ending the line is a hard break — syntax, like the rest
+    (if (i32.gt_s (local.get $e) (local.get $s))
+      (then
+        (if (i32.and (i32.eq (call $byte (i32.sub (local.get $e) (i32.const 1))) (i32.const 0x5C))
+                     (i32.eqz (i32.and (call $style_of (i32.sub (local.get $e) (i32.const 1))) (global.get $S_CODE))))
+          (then (call $style_set (i32.sub (local.get $e) (i32.const 1)) (local.get $e) (global.get $S_MARK)))))))
 
   (func $unescape (param $s i32) (param $e i32) (local $p i32) (local $a i32)
     (local.set $p (local.get $s))

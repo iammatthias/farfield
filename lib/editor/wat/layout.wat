@@ -31,6 +31,7 @@
   ;; shows its source only while the selection is on it
   (global $laid_lo (mut i32) (i32.const -1))
   (global $laid_hi (mut i32) (i32.const -1))
+  (global $laid_focus (mut i32) (i32.const -1))
 
   ;; css → device px
   (func $dp (param $css i32) (result i32)
@@ -55,7 +56,7 @@
     (local.set $s (i32.and (local.get $st) (i32.const 3))) ;; bold | italic → 0..3
     (if (i32.and (local.get $st) (global.get $S_HEAD))
       (then
-        (local.set $level (i32.and (i32.shr_u (local.get $info) (i32.const 8)) (i32.const 0xFF)))
+        (local.set $level (i32.and (i32.shr_u (local.get $info) (i32.const 8)) (i32.const 0x7F)))
         ;; italic headings keep the italic face
         (if (i32.and (local.get $st) (global.get $S_ITAL)) (then (return (call $slot_ok (local.get $s)))))
         (if (i32.eq (local.get $level) (i32.const 1)) (then (return (call $slot_ok (local.get $s)))))
@@ -68,7 +69,7 @@
   ;; large type should (the brand sets Newsreader display at −0.025em).
   (func $tracking (param $info i32) (param $px i32) (result f32) (local $level i32)
     (if (i32.ne (i32.and (local.get $info) (i32.const 0xFF)) (global.get $K_HEAD)) (then (return (f32.const 0))))
-    (local.set $level (i32.and (i32.shr_u (local.get $info) (i32.const 8)) (i32.const 0xFF)))
+    (local.set $level (i32.and (i32.shr_u (local.get $info) (i32.const 8)) (i32.const 0x7F)))
     (if (i32.eq (local.get $level) (i32.const 1))
       (then (return (f32.mul (f32.convert_i32_s (local.get $px)) (f32.const -0.022)))))
     (if (i32.eq (local.get $level) (i32.const 2))
@@ -91,7 +92,7 @@
       (then (return (global.get $mono_px))))
     (if (i32.eq (local.get $kind) (global.get $K_HEAD))
       (then (return (i32.div_s (i32.mul (global.get $base_px)
-        (call $head_pct (i32.and (i32.shr_u (local.get $info) (i32.const 8)) (i32.const 0xFF)))) (i32.const 100)))))
+        (call $head_pct (i32.and (i32.shr_u (local.get $info) (i32.const 8)) (i32.const 0x7F)))) (i32.const 100)))))
     (global.get $base_px))
 
   ;; $line_px: the size that sets a line's height.
@@ -102,6 +103,10 @@
   ;; A tab is four spaces; a glyph the face lacks comes from $resolve.
   (func $cp_adv (param $cp i32) (param $st i32) (param $info i32) (result f32)
     (local $slot i32) (local $px i32) (local $g i32)
+    ;; syntax on a concealed line (info bit 15) takes no room
+    (if (i32.and (i32.ne (i32.and (local.get $info) (i32.const 0x8000)) (i32.const 0))
+                 (i32.ne (i32.and (local.get $st) (global.get $S_MARK)) (i32.const 0)))
+      (then (return (f32.const 0))))
     (local.set $slot (call $slot_for (local.get $st) (local.get $info)))
     (local.set $px (call $px_for (local.get $st) (local.get $info)))
     (if (i32.eq (local.get $cp) (i32.const 9))
@@ -179,11 +184,13 @@
     (local $x0 i32) (local $avail f32) (local $start i32) (local $i i32) (local $x f32) (local $a f32)
     (local $brk i32) (local $cp i32) (local $cl i32) (local $first i32) (local $kind i32) (local $prevkind i32)
     (if (i32.and (i32.and (i32.eq (global.get $laid_rev) (global.get $revision)) (i32.eq (global.get $laid_w) (global.get $W)))
-                 (i32.or (i32.eqz (global.get $img_n))
+                 (i32.or (global.get $plain)
+                   (i32.and (i32.eq (global.get $laid_focus) (global.get $focused))
                    (i32.and (i32.eq (global.get $laid_lo) (call $line_start (call $sel_lo)))
-                            (i32.eq (global.get $laid_hi) (call $line_start (call $sel_hi))))))
+                            (i32.eq (global.get $laid_hi) (call $line_start (call $sel_hi)))))))
       (then (return)))
     (global.set $laid_lo (call $line_start (call $sel_lo)))
+    (global.set $laid_focus (global.get $focused))
     (global.set $laid_hi (call $line_start (call $sel_hi)))
     (global.set $laid_rev (global.get $revision))
     (global.set $laid_w (global.get $W))
@@ -213,6 +220,16 @@
             (br_if $all_done (i32.ge_u (local.get $le) (global.get $len)))
             (local.set $p (i32.add (local.get $le) (i32.const 1)))
             (br $lines)))
+        ;; a prose line away from the selection reads as the finished text:
+        ;; its Markdown syntax (S_MARK) is concealed — no width, not drawn —
+        ;; and comes back when the caret or selection reaches the line
+        (if (i32.and (i32.eqz (global.get $plain))
+              (i32.and (i32.or (i32.or (i32.eq (local.get $kind) (global.get $K_PARA)) (i32.eq (local.get $kind) (global.get $K_HEAD)))
+                               (i32.or (i32.eq (local.get $kind) (global.get $K_QUOTE))
+                                       (i32.or (i32.eq (local.get $kind) (global.get $K_BULLET)) (i32.eq (local.get $kind) (global.get $K_ORDER)))))
+                       (i32.or (i32.eqz (global.get $focused))
+                         (i32.or (i32.gt_s (call $sel_lo) (local.get $le)) (i32.lt_s (call $sel_hi) (local.get $ls))))))
+          (then (local.set $info (i32.or (local.get $info) (i32.const 0x8000)))))
         ;; a heading gets air above it, unless it opens the document
         (if (i32.and (i32.eq (local.get $kind) (global.get $K_HEAD)) (i32.gt_s (global.get $nlines) (i32.const 0)))
           (then (local.set $y (i32.add (local.get $y) (i32.div_s (call $line_px (local.get $info)) (i32.const 2))))))

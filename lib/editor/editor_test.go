@@ -737,3 +737,72 @@ func TestBlinkRepaintsOnlyTheCaretLine(t *testing.T) {
 		t.Fatalf("blink dirtied %d rows; want one line's strip", h)
 	}
 }
+
+// Markdown syntax is concealed on lines away from the selection — a link
+// shows only its text, a hard-break backslash vanishes — and comes back when
+// the caret reaches the line.
+func TestSyntaxConcealedAwayFromCaret(t *testing.T) {
+	e := newEd(t)
+	src := "[PROJECT](https://pure---internet.com) and more\n- Bard\\\nlast line"
+	e.setText(src)
+	e.call("render")
+	styles, _ := e.m.Memory().Read(0x00DD0000, uint32(len(src)))
+	if styles[strings.Index(src, "https")]&16 == 0 {
+		t.Fatal("a link's destination should be syntax")
+	}
+	if styles[strings.Index(src, "Bard\\")+4]&16 == 0 {
+		t.Fatal("a line-ending backslash should be syntax")
+	}
+	// the right edge of ink in the first line's rows
+	inkRight := func() int {
+		img := e.frame()
+		bg := img.RGBAAt(img.Bounds().Max.X-1, img.Bounds().Max.Y-1)
+		right := 0
+		for y := 60; y < 110; y++ { // the first line's band at dpr 2
+			for x := 0; x < img.Bounds().Max.X; x++ {
+				if img.RGBAAt(x, y) != bg && x > right {
+					right = x
+				}
+			}
+		}
+		return right
+	}
+	e.sel(0, 0) // caret on line one: the URL shows
+	e.call("render")
+	shown := inkRight()
+	e.sel(len(src), len(src)) // caret on the last line: line one is concealed
+	e.call("render")
+	hidden := inkRight()
+	if hidden >= shown {
+		t.Fatalf("line one should shrink when concealed: ink reaches %d, shown %d", hidden, shown)
+	}
+}
+
+// A band render draws exactly what a full render draws in those rows.
+func TestRenderBandMatchesFullRender(t *testing.T) {
+	e := newEd(t)
+	e.call("set_page", 1)
+	e.call("resize", 900, 700, 200)
+	e.setText(PreviewSample)
+	e.call("render")
+	full := e.frame()
+	// scribble over the framebuffer, then redraw a band
+	fb := uint32(e.call("fb_ptr"))
+	junk := make([]byte, 900*700*4)
+	e.m.Memory().Write(fb, junk)
+	if e.call("render_band", 150, 400) == 0 {
+		t.Fatal("render_band drew nothing")
+	}
+	y0, h := int(e.call("dirty_y")), int(e.call("dirty_h"))
+	if y0 > 150 || y0+h < 400 {
+		t.Fatalf("band %d..%d should cover 150..400", y0, y0+h)
+	}
+	band := e.frame()
+	for y := y0; y < y0+h; y++ {
+		for x := 0; x < 900; x++ {
+			if band.RGBAAt(x, y) != full.RGBAAt(x, y) {
+				t.Fatalf("pixel %d,%d differs: band %v full %v", x, y, band.RGBAAt(x, y), full.RGBAAt(x, y))
+			}
+		}
+	}
+}
