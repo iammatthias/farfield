@@ -93,9 +93,9 @@ if (input && out) {
       a.className = "fleet-hit";
       a.href = d.url;
       a.innerHTML =
-        '<span class="badge">' + d.kind + "</span>" +
+        '<span class="tech fleet-hit-kind">' + d.kind + "</span>" +
         '<span class="fleet-hit-main"><strong></strong><small class="muted"></small></span>' +
-        '<span class="fleet-hit-sim mono muted">' + sim.toFixed(2) + "</span>";
+        '<span class="fleet-hit-sim">' + sim.toFixed(2) + "</span>";
       a.querySelector("strong").textContent = d.title || "(untitled)";
       a.querySelector("small").textContent =
         (d.meta ? d.meta + " — " : "") + (d.snippet || "").slice(0, 140);

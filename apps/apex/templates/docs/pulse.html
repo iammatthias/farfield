@@ -4,6 +4,11 @@
 
   <p>The fleet's observability service: uptime monitoring from the outside and traffic analytics from the inside, in one session-gated console. The only public surface is <code>GET /status</code>, which exposes nothing beyond a target count.</p>
 
+  <figure class="screenshot">
+    <img src="assets/pulse.png?v=20260929-v5" alt="Screenshot of the Farfield pulse UI" width="1280" height="800" loading="lazy">
+    <figcaption>Pulse overview: every target's state, recent latency and uptime over 24 hours, 7 days and 30 days.</figcaption>
+  </figure>
+
   <figure class="observation" aria-label="Pulse's two halves: the checker probes the fleet's public URLs from outside through the tunnel and records checks and incidents; the collector sweeps each app's telemetry sidecar and folds it into daily aggregates.">
     <svg viewBox="0 0 700 210" role="img">
       <g style="font-family:var(--font-mono);font-size:11px" fill="currentColor">

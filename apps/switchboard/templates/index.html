@@ -2,8 +2,10 @@
 {{define "content"}}
   {{template "topbar" .}}
 
+  {{/* The setup notice is the one thing worth raising: a half-configured
+       switchboard looks identical to a working one until you text it. */}}
   {{if not .Ready}}
-    <p class="notice">
+    <p class="notice warn">
       Switchboard is not fully wired. It needs
       <code>SWITCHBOARD_WEBHOOK_SECRET</code> (the hook 404s without it),
       <code>SWITCHBOARD_ALLOW</code> (empty ignores every message), and
@@ -12,14 +14,14 @@
     </p>
   {{end}}
 
-  <p class="summary">
-    <span>Messages {{len .Messages}}</span>
-    <span>Allowed senders {{.Senders}}</span>
-  </p>
+  <div class="stats summary">
+    <div class="stat"><div class="value">{{len .Messages}}</div><span class="tech">Messages</span></div>
+    <div class="stat"><div class="value">{{.Senders}}</div><span class="tech">Allowed senders</span></div>
+  </div>
 
   {{if .Messages}}
-    <div class="table-wrap">
-      <table class="admin">
+    <div class="table-wrap stack-wrap">
+      <table class="admin stack">
         <thead>
           <tr>
             <th>When</th>
@@ -32,23 +34,23 @@
         <tbody>
           {{range .Messages}}
             <tr>
-              <td class="when">{{.ReceivedAt}}</td>
-              <td class="ref">{{.Sender}}</td>
-              <td class="body">
+              <td class="when" data-label="When">{{.ReceivedAt}}</td>
+              <td class="ref" data-label="From">{{.Sender}}</td>
+              <td class="body" data-label="Message">
                 {{if .Body}}
                   <div class="text">{{.Body}}</div>
                 {{else}}
-                  <span class="muted">—</span>
+                  <span class="dim">—</span>
                 {{end}}
               </td>
-              <td class="route">
-                {{.Route}}
-                {{if eq .Status "error"}}<span class="badge draft">error</span>
+              <td class="route" data-label="Route">
+                <span>{{.Route}}</span>
+                {{if eq .Status "error"}}<span class="badge bad">error</span>
                 {{else if eq .Status "ignored"}}<span class="badge draft">ignored</span>{{end}}
               </td>
-              <td class="reply">
-                {{if .Ref}}<span class="ref">{{.Ref}}</span><br>{{end}}
-                {{.Reply}}
+              <td class="reply" data-label="Result">
+                <span>{{if .Ref}}<span class="ref">{{.Ref}}</span><br>{{end}}
+                {{.Reply}}</span>
               </td>
             </tr>
           {{end}}
@@ -56,6 +58,9 @@
       </table>
     </div>
   {{else}}
-    <p class="muted">Nothing yet. Text the line and it shows up here.</p>
+    <div class="empty">
+      <p class="line">Nothing yet.</p>
+      <p class="muted">Text the line and it shows up here.</p>
+    </div>
   {{end}}
 {{end}}

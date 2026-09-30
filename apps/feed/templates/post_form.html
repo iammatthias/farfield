@@ -20,8 +20,6 @@
             </div>
           </div>
         </span>
-        <span class="doc-words mono"></span>
-        {{if not .IsNew}}<span class="chip static state-live">live</span>{{end}}
       </div>
       <div class="field doc-fallback">
         <label for="body">Body (markdown)</label>
@@ -30,8 +28,10 @@
       </div>
 
       <div class="doc-pill">
-        <button type="button" data-doc-save>{{if .IsNew}}Post{{else}}Save{{end}}</button>
+        <span class="doc-words"></span>
+        {{if not .IsNew}}<span class="chip static state-live">live</span>{{end}}
         <span class="save-note"></span>
+        <button type="button" data-doc-save>{{if .IsNew}}Post{{else}}Save{{end}}</button>
       </div>
     </div>  </form>
 

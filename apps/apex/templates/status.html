@@ -3,140 +3,69 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
-<meta name="theme-color" content="#0e222d">
+<meta name="theme-color" content="#f3e5d1" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#0e222d" media="(prefers-color-scheme: dark)">
 <meta name="robots" content="noindex">
 <title>Farfield status</title>
 <link rel="icon" href="data:image/svg+xml,<svg%20xmlns='http://www.w3.org/2000/svg'%20viewBox='0%200%2064%2064'><rect%20width='64'%20height='64'%20rx='12'%20fill='%230e222d'/><circle%20cx='32'%20cy='32'%20r='13'%20fill='none'%20stroke='%23f3e5d1'%20stroke-width='2'%20opacity='.8'/><circle%20cx='32'%20cy='32'%20r='3.5'%20fill='%23e59f67'/></svg>">
 <link rel="stylesheet" href="/static/fonts.css?v=__THEME_VERSION__">
+<link rel="stylesheet" href="/static/styles.css?v=__THEME_VERSION__">
 <style>
-  /* Observation mode: a minimal field containing a measurement. The field is
-     Deep Space; the observations are the fleet; orange appears only when a
-     service actually needs attention. */
-  *,*::before,*::after{margin:0;padding:0;box-sizing:border-box}
-  :root{
-    --ff-space:#0e222d;
-    --ff-paper:#f3e5d1;
-    --ff-horizon:#e59f67;
-    --ff-mist:#9babb3;
-    --border:rgba(243,229,209,.14);
-  }
-  body{
-    min-height:100vh;
-    background:var(--ff-space);
-    color:var(--ff-paper);
-    font-family:"Inter",system-ui,sans-serif;
-    display:flex;
-    justify-content:center;
-    padding:clamp(3rem, 12vh, 8rem) clamp(1.25rem, 6vw, 4rem) 4rem;
-  }
-  main{width:100%;max-width:36rem;display:flex;flex-direction:column;gap:2.5rem}
-
-  header{display:flex;flex-direction:column;gap:.9rem;align-items:flex-start}
-  .motif{display:block}
-  h1{
-    font-family:"Newsreader",Georgia,serif;
-    font-weight:400;
-    font-size:clamp(2.2rem, 6vw, 3.2rem);
-    line-height:1.0;
-    letter-spacing:-.025em;
-  }
-  .readout{
-    font-family:"IBM Plex Mono",ui-monospace,monospace;
-    font-size:.72rem;
-    font-weight:500;
-    letter-spacing:.14em;
-    text-transform:uppercase;
-    color:var(--ff-mist);
-  }
-
-  ul{list-style:none;border-top:1px solid var(--border)}
-  li{
-    display:flex;
-    align-items:baseline;
-    gap:1rem;
-    padding:.7rem 0;
-    border-bottom:1px solid var(--border);
-  }
-  .svc{font-weight:500;font-size:.95rem}
-  .svc a{color:inherit;text-decoration:none;border-bottom:1px solid rgba(243,229,209,.25)}
-  .svc a:hover{border-color:rgba(243,229,209,.6)}
-  .svc a:focus-visible{outline:2px solid var(--ff-horizon);outline-offset:2px}
-  .track{
-    flex:1;
-    border-bottom:1px dotted rgba(243,229,209,.18);
-    transform:translateY(-.3em);
-  }
-  .ms{
-    font-family:"IBM Plex Mono",ui-monospace,monospace;
-    font-size:.75rem;
-    color:var(--ff-mist);
-    min-width:5ch;
-    text-align:right;
-  }
-  .state{
-    font-family:"IBM Plex Mono",ui-monospace,monospace;
-    font-size:.75rem;
-    font-weight:500;
-    letter-spacing:.08em;
-    min-width:6ch;
-    display:inline-flex;
-    align-items:center;
-    gap:.5em;
-  }
-  .state .dot{width:6px;height:6px;border-radius:50%}
-  .ok{color:var(--ff-mist)}
-  .ok .dot{background:var(--ff-mist)}
-  .down{color:var(--ff-horizon)}
-  .down .dot{background:var(--ff-horizon)}
-
-  /* On narrow screens the readout drops to its own row instead of crowding
-     the link; the link never breaks after its arrow. */
-  footer{display:flex;flex-wrap:wrap;justify-content:space-between;align-items:baseline;gap:.6rem 1rem}
-  .home{
-    font-size:.9rem;
-    font-weight:500;
-    white-space:nowrap;
-    color:var(--ff-paper);
-    text-decoration:none;
-    border-bottom:1px solid rgba(243,229,209,.35);
-    padding-bottom:1px;
-  }
-  footer .readout{white-space:nowrap}
-  .home:hover{border-color:rgba(243,229,209,.7)}
-  .home:focus-visible{outline:2px solid var(--ff-horizon);outline-offset:3px}
+  /* Observation mode: a measurement of the fleet, nothing else. The theme
+     draws it; this only sets the column and the one moving part — the
+     signal, which glows orange only when a service needs attention. */
+  .container { max-width: calc(40rem + 2 * var(--gutter)); }
+  .signal { display: inline-block; width: 8px; height: 8px; border-radius: 50%;
+    background: var(--good); margin-right: 10px; vertical-align: 2px; }
+  .signal.alert { background: var(--signal); }
+  td.num { width: 1%; white-space: nowrap; }
+  .foot { display: flex; justify-content: space-between; flex-wrap: wrap; gap: var(--s-2) var(--s-4);
+    margin-top: var(--s-5); }
 </style>
 </head>
 <body>
-<main>
-  <header>
-    <svg class="motif" width="28" height="28" viewBox="0 0 28 28" aria-hidden="true">
-      <circle cx="14" cy="14" r="11" fill="none" stroke="#f3e5d1" stroke-width="1" opacity=".5"/>
-      <circle cx="14" cy="14" r="2.5" fill="{{if eq .Up .Total}}#9babb3{{else}}#e59f67{{end}}"/>
-    </svg>
-    <h1>Farfield status</h1>
-    <p class="readout">{{.Up}}/{{.Total}} services up · probed {{.ProbedAt}}</p>
+<main class="container">
+  <header class="bar">
+    <a class="mark" href="/">farfield <span class="app">status</span></a>
+    <nav aria-label="Site">
+      <a href="/docs/">Docs</a>
+    </nav>
   </header>
 
-  <ul>
-    {{range .Observations}}
-    <li>
-      <span class="svc">{{if .Public}}<a href="https://{{.Public}}/">{{.Name}}</a>{{else}}{{.Name}}{{end}}</span>
-      <span class="track" aria-hidden="true"></span>
-      {{if .OK}}
-      <span class="ms">{{if .LatencyMS}}{{.LatencyMS}}ms{{else}}—{{end}}</span>
-      <span class="state ok"><span class="dot"></span>ok</span>
-      {{else}}
-      <span class="ms">—</span>
-      <span class="state down"><span class="dot"></span>down</span>
-      {{end}}
-    </li>
-    {{end}}
-  </ul>
+  <div class="page-head">
+    <div>
+      <h1><span class="signal{{if ne .Up .Total}} alert{{end}}" aria-hidden="true"></span>Fleet status</h1>
+      <div class="readout">
+        <span class="tech">{{.Up}}/{{.Total}} services up</span>
+        <span class="tech">probed {{.ProbedAt}}</span>
+      </div>
+    </div>
+  </div>
 
-  <footer>
-    <a class="home" href="/">&larr; farfield.systems</a>
-    <span class="readout">refreshes each visit</span>
-  </footer>
+  <div class="table-wrap">
+    <table>
+      <thead><tr><th>Service</th><th>State</th><th class="num">Latency</th></tr></thead>
+      <tbody>
+      {{range .Observations}}
+        <tr>
+          <td>{{if .Public}}<a href="https://{{.Public}}/">{{.Name}}</a>{{else}}{{.Name}} <span class="dim">· tailnet</span>{{end}}</td>
+          {{if .OK}}
+          <td><span class="status live">up</span></td>
+          <td class="num mono">{{if .LatencyMS}}{{.LatencyMS}} ms{{else}}—{{end}}</td>
+          {{else}}
+          <td><span class="status bad">down</span></td>
+          <td class="num mono">—</td>
+          {{end}}
+        </tr>
+      {{end}}
+      </tbody>
+    </table>
+  </div>
+
+  <div class="foot">
+    <a href="/">← farfield.systems</a>
+    <span class="tech">refreshes each visit</span>
+  </div>
 </main>
 </body>
 </html>

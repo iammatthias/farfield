@@ -11,8 +11,9 @@
 ;; info = kind | level<<8 | flags<<16, flags: 1 first visual line of its
 ;; logical line, 2 last.
 ;;
-;; Font slots: 0 serif regular, 1 serif bold, 2 serif italic, 3 serif bold
-;; italic, 4 mono regular, 5 mono bold. A missing slot falls back to 0.
+;; Font slots: 0 serif regular, 1 serif semibold, 2 serif italic, 3 serif
+;; semibold italic, 4 mono regular, 5 mono semibold, 6 serif medium (H2).
+;; A missing slot falls back to 0.
 (module
   (global $W (mut i32) (i32.const 0))       ;; surface size, device px
   (global $H (mut i32) (i32.const 0))
@@ -39,13 +40,36 @@
   (func $slot_ok (param $s i32) (result i32)
     (select (local.get $s) (i32.const 0) (call $font_loaded (local.get $s))))
 
-  (func $slot_for (param $st i32) (param $kind i32) (result i32) (local $s i32)
+  ;; $slot_for picks the face for style st on a line of info. Headings follow
+  ;; the brand's weights: a large H1 in Newsreader Regular, H2 in Medium, and
+  ;; SemiBold only at the smaller heading sizes — never a bold display serif.
+  (func $slot_for (param $st i32) (param $info i32) (result i32) (local $s i32) (local $kind i32) (local $level i32)
+    (local.set $kind (i32.and (local.get $info) (i32.const 0xFF)))
     (if (i32.or (i32.and (local.get $st) (global.get $S_CODE))
                 (i32.or (i32.eq (local.get $kind) (global.get $K_CODE)) (i32.eq (local.get $kind) (global.get $K_FENCE))))
       (then (return (call $slot_ok (select (i32.const 5) (i32.const 4) (i32.and (local.get $st) (global.get $S_BOLD)))))))
     (local.set $s (i32.and (local.get $st) (i32.const 3))) ;; bold | italic → 0..3
-    (if (i32.and (local.get $st) (global.get $S_HEAD)) (then (local.set $s (i32.or (local.get $s) (i32.const 1)))))
+    (if (i32.and (local.get $st) (global.get $S_HEAD))
+      (then
+        (local.set $level (i32.and (i32.shr_u (local.get $info) (i32.const 8)) (i32.const 0xFF)))
+        ;; italic headings keep the italic face
+        (if (i32.and (local.get $st) (global.get $S_ITAL)) (then (return (call $slot_ok (local.get $s)))))
+        (if (i32.eq (local.get $level) (i32.const 1)) (then (return (call $slot_ok (local.get $s)))))
+        (if (i32.eq (local.get $level) (i32.const 2))
+          (then (return (call $slot_ok (select (i32.const 1) (i32.const 6) (i32.and (local.get $st) (global.get $S_BOLD)))))))
+        (local.set $s (i32.or (local.get $s) (i32.const 1)))))
     (call $slot_ok (local.get $s)))
+
+  ;; $tracking: letter-spacing in px for a line — display sizes tighten, as
+  ;; large type should (the brand sets Newsreader display at −0.025em).
+  (func $tracking (param $info i32) (param $px i32) (result f32) (local $level i32)
+    (if (i32.ne (i32.and (local.get $info) (i32.const 0xFF)) (global.get $K_HEAD)) (then (return (f32.const 0))))
+    (local.set $level (i32.and (i32.shr_u (local.get $info) (i32.const 8)) (i32.const 0xFF)))
+    (if (i32.eq (local.get $level) (i32.const 1))
+      (then (return (f32.mul (f32.convert_i32_s (local.get $px)) (f32.const -0.022)))))
+    (if (i32.eq (local.get $level) (i32.const 2))
+      (then (return (f32.mul (f32.convert_i32_s (local.get $px)) (f32.const -0.014)))))
+    (f32.const 0))
 
   ;; heading scale, percent, by level
   (func $head_pct (param $level i32) (result i32)
@@ -74,13 +98,14 @@
   ;; A tab is four spaces; a glyph the face lacks comes from $resolve.
   (func $cp_adv (param $cp i32) (param $st i32) (param $info i32) (result f32)
     (local $slot i32) (local $px i32) (local $g i32)
-    (local.set $slot (call $slot_for (local.get $st) (i32.and (local.get $info) (i32.const 0xFF))))
+    (local.set $slot (call $slot_for (local.get $st) (local.get $info)))
     (local.set $px (call $px_for (local.get $st) (local.get $info)))
     (if (i32.eq (local.get $cp) (i32.const 9))
       (then (return (f32.mul (f32.const 4)
         (call $advance (local.get $slot) (call $glyph_id (local.get $slot) (i32.const 0x20)) (local.get $px))))))
     (local.set $g (call $resolve (local.get $slot) (local.get $cp)))
-    (call $advance (global.get $res_slot) (local.get $g) (local.get $px)))
+    (f32.add (call $advance (global.get $res_slot) (local.get $g) (local.get $px))
+             (call $tracking (local.get $info) (local.get $px))))
 
   ;; $resolve finds a glyph for cp: in the requested slot, else the serif,
   ;; else the mono (which carries arrows and symbols the serif lacks). The
@@ -131,7 +156,7 @@
     (local.set $r (call $rec (global.get $nlines)))
     (local.set $px (call $line_px (local.get $info)))
     (local.set $slot (call $slot_for (select (global.get $S_HEAD) (i32.const 0)
-      (i32.eq (i32.and (local.get $info) (i32.const 0xFF)) (global.get $K_HEAD))) (i32.and (local.get $info) (i32.const 0xFF))))
+      (i32.eq (i32.and (local.get $info) (i32.const 0xFF)) (global.get $K_HEAD))) (local.get $info)))
     (local.set $asc (call $ascent (local.get $slot) (local.get $px)))
     (local.set $desc (call $descent (local.get $slot) (local.get $px)))
     (i32.store offset=0 (local.get $r) (local.get $s))

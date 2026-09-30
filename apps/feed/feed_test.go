@@ -145,52 +145,36 @@ func newTestServer(t *testing.T) (*httptest.Server, *http.Cookie) {
 	return srv, &http.Cookie{Name: "session", Value: tok}
 }
 
-// TestPreviewRendersHardWraps confirms the editor's live-preview endpoint is
-// session-gated and renders markdown with feed's hard-wrap semantics — a
-// single newline stays a visible line break.
-func TestPreviewRendersHardWraps(t *testing.T) {
+// Feed posts are chat-like: a single newline stays a visible line break in the
+// stream, where the content app's documents would fold it into one paragraph.
+func TestStreamRendersHardWraps(t *testing.T) {
 	srv, cookie := newTestServer(t)
 	client := &http.Client{CheckRedirect: func(*http.Request, []*http.Request) error {
 		return http.ErrUseLastResponse
 	}}
-
-	post := func(withSession bool) *http.Response {
-		req, _ := http.NewRequest("POST", srv.URL+"/preview",
-			strings.NewReader(`{"body":"line one\nline two"}`))
-		req.Header.Set("Content-Type", "application/json")
-		if withSession {
-			req.AddCookie(cookie)
-		}
-		resp, err := client.Do(req)
-		if err != nil {
-			t.Fatalf("POST /preview: %v", err)
-		}
-		return resp
+	form := url.Values{"body": {"line one\nline two"}}
+	req, _ := http.NewRequest("POST", srv.URL+"/posts", strings.NewReader(form.Encode()))
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	req.AddCookie(cookie)
+	resp, err := client.Do(req)
+	if err != nil {
+		t.Fatalf("POST /posts: %v", err)
 	}
-
-	// No session → redirect to login, never rendered HTML.
-	resp := post(false)
 	resp.Body.Close()
-	if resp.StatusCode != http.StatusSeeOther {
-		t.Fatalf("/preview without session = %d, want 303", resp.StatusCode)
+	if resp.StatusCode >= 400 {
+		t.Fatalf("POST /posts = %d", resp.StatusCode)
 	}
 
-	resp = post(true)
+	req, _ = http.NewRequest("GET", srv.URL+"/", nil)
+	req.AddCookie(cookie)
+	resp, err = client.Do(req)
+	if err != nil {
+		t.Fatalf("GET /: %v", err)
+	}
 	defer resp.Body.Close()
-	if resp.StatusCode != http.StatusOK {
-		t.Fatalf("/preview with session = %d, want 200", resp.StatusCode)
-	}
-	var out struct {
-		HTML string `json:"html"`
-	}
-	if err := json.NewDecoder(resp.Body).Decode(&out); err != nil {
-		t.Fatalf("decode preview response: %v", err)
-	}
-	if !strings.Contains(out.HTML, "<br>") {
-		t.Errorf("preview HTML missing hard-wrap <br>:\n%s", out.HTML)
-	}
-	if !strings.Contains(out.HTML, "line one") || !strings.Contains(out.HTML, "line two") {
-		t.Errorf("preview HTML missing body text:\n%s", out.HTML)
+	body, _ := io.ReadAll(resp.Body)
+	if !strings.Contains(string(body), "line one<br>") {
+		t.Errorf("stream should keep the newline as <br>:\n%s", body)
 	}
 }
 
@@ -218,7 +202,7 @@ func TestComposerRendersDocumentFirst(t *testing.T) {
 	page := string(raw)
 	for _, want := range []string{
 		`data-async`,
-		`data-band`,     // the meta band replaced the sidebar
+		`data-band`, // the meta band replaced the sidebar
 		`doc-fallback`,
 		`<textarea id="body"`,
 		`data-doc-save`, // the floating pill's save

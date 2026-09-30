@@ -8,7 +8,7 @@
   </div>
 
   {{if .Orphans}}
-    <p class="muted">
+    <p class="notice warn">
       {{.Orphans}} target{{if ne .Orphans 1}}s point{{else}} points{{end}} at a
       farfield hostname the registry no longer serves. Seeding never removes a
       target, so these keep probing a name whose DNS is gone — delete them, or
@@ -16,8 +16,8 @@
     </p>
   {{end}}
   {{if .Targets}}
-    <div class="table-wrap">
-      <table class="telemetry">
+    <div class="table-wrap stack-wrap">
+      <table class="telemetry stack">
         <thead>
           <tr>
             <th>Name</th>
@@ -26,24 +26,26 @@
             <th class="num">Expect</th>
             <th class="num">Interval</th>
             <th>Enabled</th>
-            <th>Actions</th>
+            <th class="actions"></th>
           </tr>
         </thead>
         <tbody>
           {{range .Targets}}
             <tr>
-              <td>{{.Name}}{{if .Orphaned}} <span class="badge alarm" title="No service in the fleet registry serves this hostname any more">not in the registry</span>{{end}}</td>
-              <td class="mono">{{.URL}}</td>
-              <td class="mono">{{.Method}}</td>
-              <td class="num">{{.ExpectedStatus}}</td>
-              <td class="num">{{.IntervalS}}s</td>
-              <td>{{if .Enabled}}<span class="badge draft">On</span>{{else}}<span class="muted">off</span>{{end}}</td>
-              <td class="actions">
-                <a href="/targets/{{.ID}}/edit">Edit</a>
-                <form method="post" action="/targets/{{.ID}}/delete"
-                      onsubmit="return confirm('Delete this target and its history?')">
-                  <button type="submit">Delete</button>
-                </form>
+              <td data-label="Name">{{.Name}}{{if .Orphaned}} <span class="badge bad" title="No service in the fleet registry serves this hostname any more">not in the registry</span>{{end}}</td>
+              <td data-label="URL" class="mono">{{.URL}}</td>
+              <td data-label="Method" class="mono">{{.Method}}</td>
+              <td data-label="Expect" class="num">{{.ExpectedStatus}}</td>
+              <td data-label="Interval" class="num">{{.IntervalS}}s</td>
+              <td data-label="Enabled">{{if .Enabled}}<span class="badge on">On</span>{{else}}<span class="badge off">Off</span>{{end}}</td>
+              <td data-label="" class="actions">
+                <span class="action-row">
+                  <a href="/targets/{{.ID}}/edit">Edit</a>
+                  <form method="post" action="/targets/{{.ID}}/delete"
+                        onsubmit="return confirm('Delete this target and its history?')">
+                    <button type="submit" class="danger">Delete</button>
+                  </form>
+                </span>
               </td>
             </tr>
           {{end}}
@@ -51,6 +53,9 @@
       </table>
     </div>
   {{else}}
-    <p class="muted">No targets yet. <a href="/targets/new">Add one.</a></p>
+    <div class="empty">
+      <p class="line">No targets yet.</p>
+      <p class="muted"><a href="/targets/new">Add one</a> and pulse starts probing it.</p>
+    </div>
   {{end}}
 {{end}}

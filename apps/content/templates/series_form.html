@@ -31,7 +31,6 @@
           <span class="chip static">series://{{.Series.Slug}}</span>
           <span class="chip-note">immutable</span>
         {{end}}
-        <span class="doc-words mono"></span>
       </div>
 
       {{if not .IsNew}}
@@ -50,8 +49,9 @@
       </div>
 
       <div class="doc-pill">
-        <button type="button" data-doc-save>{{if .IsNew}}Create series{{else}}Save{{end}}</button>
+        <span class="doc-words"></span>
         <span class="save-note"></span>
+        <button type="button" data-doc-save>{{if .IsNew}}Create series{{else}}Save{{end}}</button>
       </div>
     </div>  </form>
 

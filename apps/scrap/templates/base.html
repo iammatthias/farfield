@@ -3,133 +3,108 @@
 
 {{define "styles"}}
   <style>
-    .container { max-width: 60rem; }
-
-    .summary {
-      display: flex; flex-wrap: wrap; gap: 0.4rem 1.5rem;
-      margin: 0.6rem 0 1.5rem;
-      font: 0.78rem/1 var(--font-mono); opacity: 0.65;
+    /* technical readouts in a row: counts on manage, facts under a title */
+    .summary, .meta {
+      display: flex; flex-wrap: wrap; gap: var(--s-1) var(--s-4); align-items: baseline;
     }
+    .summary { margin: 0 0 var(--s-3); }
+    .meta { margin-top: var(--s-2); font: 0.78rem/1.4 var(--font-mono); color: var(--ink-2); }
+    .meta .ttl { color: var(--warn); }
 
-    /* paste meta line under the title */
-    .meta {
-      display: flex; flex-wrap: wrap; gap: 0.3rem 1.1rem; align-items: baseline;
-      margin-top: 0.4rem;
-      font: 0.75rem/1.4 var(--font-mono); opacity: 0.65;
-    }
-    .meta .ttl { color: var(--accent); opacity: 1; }
-
-    /* authed token controls on the view page — small mono actions */
-    .token-controls { display: flex; gap: 1.1rem; margin-top: 0.5rem; }
+    /* authed token controls on the view page — quiet link-verbs */
+    .token-controls { display: flex; flex-wrap: wrap; gap: var(--s-1) var(--s-5); margin-top: var(--s-3); }
     .token-controls form { margin: 0; }
-    .token-controls button.linklike {
-      font: 0.75rem/1.4 var(--font-mono); color: var(--accent);
-    }
+    .token-controls button.linklike { font-size: 0.85rem; color: var(--ink-2); }
+    .token-controls button.linklike:hover { color: var(--accent); }
 
-    /* code view — the instrument readout */
+    /* code view — a wash well, no frame. The chroma palette is fixed light-
+       mode hex in highlight.go, so the tokens are re-inked here from the theme
+       and follow dark mode. */
     .code-wrap {
-      margin-top: 1.25rem;
-      background: var(--panel);
-      border: 1px solid var(--hairline); border-radius: var(--r-m);
-      box-shadow: var(--shadow-s);
+      margin-top: var(--s-5);
+      background: var(--wash); border-radius: var(--r-s);
       overflow-x: auto;
     }
     .code-wrap pre.chroma {
-      margin: 0; padding: 0.9rem 1rem 0.9rem 0;
-      background: var(--panel);
-      font-size: 0.82rem; line-height: 1.55;
+      margin: 0; padding: var(--s-4) var(--s-4) var(--s-4) 0;
+      background: transparent; color: var(--ink);
+      font-size: 0.82rem; line-height: 1.6;
     }
-    .chroma .line { display: block; width: 100%; }
-    /* gutter: right-aligned numbers behind a hairline */
-    .chroma .ln, .chroma .lnt {
+    .code-wrap .chroma .line { display: block; width: 100%; }
+    /* gutter: right-aligned numbers, receded in ink-3 */
+    .code-wrap .chroma .ln, .code-wrap .chroma .lnt {
       display: inline-block; min-width: 3.2ch;
-      margin-right: 1ch; padding: 0 0.7ch 0 0.9ch;
-      text-align: right;
-      border-right: 1px solid var(--hairline);
+      margin-right: 1.5ch; padding: 0 0.7ch 0 1.5ch;
+      text-align: right; color: var(--ink-3);
       user-select: none;
     }
-    .chroma .lnlinks { text-decoration: none; color: inherit; }
+    .code-wrap .chroma .lnlinks { text-decoration: none; color: inherit; }
+    .code-wrap .chroma .k, .code-wrap .chroma .kt, .code-wrap .chroma .kc,
+    .code-wrap .chroma .kd, .code-wrap .chroma .kn, .code-wrap .chroma .kp,
+    .code-wrap .chroma .kr, .code-wrap .chroma .nf, .code-wrap .chroma .nc,
+    .code-wrap .chroma .nt, .code-wrap .chroma .nb, .code-wrap .chroma .o { color: var(--ink); }
+    .code-wrap .chroma .na, .code-wrap .chroma .p, .code-wrap .chroma .gi,
+    .code-wrap .chroma .s, .code-wrap .chroma .s1, .code-wrap .chroma .s2,
+    .code-wrap .chroma .sa, .code-wrap .chroma .sb, .code-wrap .chroma .sc,
+    .code-wrap .chroma .sd, .code-wrap .chroma .sh, .code-wrap .chroma .sx,
+    .code-wrap .chroma .sr, .code-wrap .chroma .ss, .code-wrap .chroma .dl { color: var(--ink-2); }
+    .code-wrap .chroma .c, .code-wrap .chroma .c1, .code-wrap .chroma .cm,
+    .code-wrap .chroma .cs, .code-wrap .chroma .ch, .code-wrap .chroma .cp,
+    .code-wrap .chroma .cpf, .code-wrap .chroma .nd, .code-wrap .chroma .gu { color: var(--ink-3); }
+    .code-wrap .chroma .se, .code-wrap .chroma .si, .code-wrap .chroma .m,
+    .code-wrap .chroma .mi, .code-wrap .chroma .mf, .code-wrap .chroma .mh,
+    .code-wrap .chroma .mo, .code-wrap .chroma .mb, .code-wrap .chroma .il { color: var(--accent); }
+    .code-wrap .chroma .err, .code-wrap .chroma .gd { color: var(--bad); background: transparent; }
     /* #L10 single-line highlight (CSS only) + JS-applied range highlight */
-    .chroma .line:target { background: color-mix(in srgb, var(--accent) 10%, transparent); }
-    .chroma .line.hl { background: color-mix(in srgb, var(--accent) 10%, transparent); }
-    .chroma .line:has([id]:target) { background: color-mix(in srgb, var(--accent) 10%, transparent); }
-
-    /* link-shaped buttons in the masthead nav */
-    button.linklike {
-      border: 0; background: transparent; padding: 0;
-      color: var(--ink); text-decoration: underline;
-      text-underline-offset: 0.2em;
-      font: inherit; cursor: pointer;
-    }
-    button.linklike:hover { background: transparent; color: var(--ink);
-      text-decoration-thickness: 2px; }
+    .code-wrap .chroma .line:target, .code-wrap .chroma .line.hl,
+    .code-wrap .chroma .line:has([id]:target) { background: var(--select); }
 
     /* manage table */
-    table.admin { font-size: 0.85rem; }
     table.admin td.id, table.admin td.lang, table.admin td.num {
-      font-family: var(--font-mono); font-size: 0.78rem; opacity: 0.7;
+      font-family: var(--font-mono); font-size: 0.78rem; color: var(--ink-2);
     }
     table.admin td { vertical-align: middle; }
     table.admin td.title {
       max-width: 18rem;
       overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
     }
-    table.admin td.actions { white-space: nowrap; }
-    table.admin td.actions form { display: inline-flex; margin: 0; }
-    table.admin td.actions form + form { margin-left: 0.9rem; }
-    table.admin td.actions button {
-      border: 0; background: transparent; padding: 0;
-      color: var(--accent); text-decoration: underline;
-      text-underline-offset: 0.2em; font: 0.78rem/1.3 var(--font-mono);
-      cursor: pointer;
-    }
-    table.admin td.actions button:hover { background: transparent;
-      text-decoration-thickness: 2px; }
+    table.admin td.actions { text-align: left; }
+    @media (max-width: 46rem) { table.admin td.title { max-width: none; white-space: normal; } }
 
-    /* manage filter bar */
+    /* manage filter bar: controls size to their content */
     form.filter-bar { align-items: center; }
-    form.filter-bar select, form.filter-bar input[type="search"] {
-      width: auto; padding: 0.25rem 0.45rem;
-      font: 0.78rem var(--font-mono);
-    }
-    form.filter-bar button { padding: 0.25rem 0.8rem; font-size: 0.78rem; }
+    form.filter-bar select { width: auto; }
+    form.filter-bar input[type="search"] { width: auto; flex: 1 1 12rem; max-width: 20rem; }
 
-    /* locked shell */
-    .locked { max-width: 26rem; margin: 3rem auto; }
-    .locked h1 { font-size: 1.15rem; margin-top: 0.4rem; }
-
-    /* create confirmation — the one-time secret handoff */
-    .created .warn { color: var(--accent); font-size: 0.85rem; margin: 0.5rem 0 1.4rem; }
+    /* create confirmation — the one-time secret handoff, rows on hairlines */
     .created .share-row {
-      display: flex; flex-wrap: wrap; align-items: baseline; gap: 0.3rem 1rem;
-      padding: 0.6rem 0;
-      border-top: 1px solid var(--hairline);
+      display: flex; flex-wrap: wrap; align-items: baseline; gap: var(--s-1) var(--s-4);
+      padding: var(--s-3) 0;
+      border-top: 1px solid var(--rule);
     }
-    .created .share-row:last-of-type { border-bottom: 1px solid var(--hairline); }
+    .created .share-row:last-of-type { border-bottom: 1px solid var(--rule); }
     .created .share-row > .label { flex: 0 0 6.5rem; margin: 0; }
     .created .share-row code {
       flex: 1 1 16rem; min-width: 0;
       font-size: 0.8rem; word-break: break-all; user-select: all;
     }
-    .created .share-row button.copy { font-size: 0.78rem; }
 
     /* compose */
     .compose textarea { min-height: 16rem; }
     .compose .controls {
-      display: grid; gap: 0 1.5rem;
+      display: grid; gap: 0 var(--s-5);
       grid-template-columns: repeat(auto-fit, minmax(min(11rem, 100%), 1fr));
     }
-    .compose fieldset {
-      border: 0; padding: 0; margin: 1.1rem 0 0;
-    }
+    .compose fieldset { border: 0; padding: 0; margin: var(--s-5) 0 0; }
     .compose fieldset legend {
-      padding: 0; margin-bottom: 0.3rem;
-      font-size: 0.8rem; font-weight: 500; opacity: 0.62;
+      padding: 0; margin-bottom: var(--s-2);
+      font-size: 0.8rem; font-weight: 500; color: var(--ink-2);
     }
-    .compose .radio-row { display: flex; flex-wrap: wrap; gap: 0.35rem 1.1rem; }
+    .compose .radio-row { display: flex; flex-wrap: wrap; gap: var(--s-2) var(--s-5); }
     .compose .radio-row label {
-      display: inline-flex; align-items: center; gap: 0.35rem;
-      font-size: 0.85rem;
+      display: inline-flex; align-items: center; gap: var(--s-2);
+      min-height: 40px; font-size: 0.9rem;
     }
+    .compose .check { margin-top: var(--s-2); min-height: 40px; }
   </style>
 {{end}}

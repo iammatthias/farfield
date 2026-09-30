@@ -7,25 +7,25 @@
     </nav>
     {{.FleetNav}}
   </header>
-  <p class="label">Public pastes</p>
+  <div class="section-head"><h2>Public pastes</h2></div>
   {{if .Pastes}}
-    <div class="table-wrap" style="margin-top:0.75rem">
-      <table>
+    <div class="table-wrap stack-wrap">
+      <table class="stack">
         <thead>
           <tr><th>Title</th><th>Lang</th><th class="nowrap">Age</th></tr>
         </thead>
         <tbody>
           {{range .Pastes}}
             <tr>
-              <td><a href="/{{.ID}}">{{if .Title}}{{.Title}}{{else}}<span class="mono">{{.ID}}</span>{{end}}</a></td>
-              <td class="mono">{{if .Lang}}{{.Lang}}{{else}}<span class="muted">plain</span>{{end}}</td>
-              <td class="mono nowrap">{{relAge .CreatedAt}}</td>
+              <td data-label="Title"><a href="/{{.ID}}">{{if .Title}}{{.Title}}{{else}}<span class="mono">{{.ID}}</span>{{end}}</a></td>
+              <td data-label="Lang" class="mono">{{if .Lang}}{{.Lang}}{{else}}<span class="muted">plain</span>{{end}}</td>
+              <td data-label="Age" class="mono nowrap muted">{{relAge .CreatedAt}}</td>
             </tr>
           {{end}}
         </tbody>
       </table>
     </div>
   {{else}}
-    <p class="muted" style="margin-top:0.75rem">Nothing public yet.</p>
+    <div class="empty"><p class="line">Nothing public yet.</p></div>
   {{end}}
 {{end}}

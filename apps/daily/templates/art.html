@@ -3,10 +3,7 @@
 {{define "head"}}
   <style>
     /* art — one survey plate a day, derived from the date alone */
-    .art-plate {
-      background: var(--panel); border: 1px solid var(--hairline);
-      border-radius: var(--r-m); box-shadow: var(--shadow-s); overflow: hidden;
-    }
+    .art-plate > div { border-radius: var(--r-s); overflow: hidden; }
     .art-plate svg { width: 100%; height: auto; }
 
     /* the plate is the SVG until art.js swaps in its live fabric sheet;
@@ -18,10 +15,7 @@
       touch-action: none; cursor: grab;
     }
     #plate-canvas canvas:active { cursor: grabbing; }
-    .art-plate figcaption {
-      padding: 0.55rem 0.8rem; border-top: 1px solid var(--hairline);
-      font-size: 0.75rem; font-weight: 500; opacity: 0.7;
-    }
+    .art-plate figcaption { padding-top: var(--s-2); font-size: 0.8rem; line-height: 1.4; color: var(--ink-2); }
   </style>
 {{end}}
 
@@ -29,7 +23,7 @@
   {{template "masthead" .}}
 
   <div class="label source-eyebrow">
-    <span>ART · ONE CELL PER DAY</span>
+    <span>Art · one cell per day</span>
     <nav class="actions">
       <a href="/art/structure">Structure</a>
       <a href="{{.SVGURL}}">SVG</a>
@@ -44,13 +38,7 @@
     <figcaption>{{.Date}} · day {{.N}} · {{.Biome}} · {{.Zone}}</figcaption>
   </figure>
 
-  <nav class="stepper">
-    {{if .PrevURL}}<a href="{{.PrevURL}}">← Previous</a>
-    {{else}}<span class="muted">← Previous</span>{{end}}
-    <span class="muted">{{.Date}}</span>
-    {{if .NextURL}}<a href="{{.NextURL}}">Next →</a>
-    {{else}}<span class="muted">Next →</span>{{end}}
-  </nav>
+  {{template "stepper" .}}
 
   <footer class="cal-foot">
     <span>farfield · daily · art</span>

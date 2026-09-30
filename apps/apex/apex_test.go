@@ -37,7 +37,7 @@ func TestRoutes(t *testing.T) {
 		t.Errorf("sidebar rendered %d times, want exactly 1", n)
 	}
 	for _, want := range []string{
-		`farfield · docs`,
+		`farfield <span class="app">docs</span>`,
 		`<a href="library" aria-current="page">Library</a>`,
 		`<a href="blobs">Blobs</a>`,
 		`library.farfield.systems`, // page content

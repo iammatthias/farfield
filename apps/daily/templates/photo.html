@@ -32,15 +32,15 @@
         <div class="placeholder">{{.Title}}</div>
       {{end}}
       <figcaption>
-        <span>{{.Date}}</span>
-        <span class="muted">{{.MediaType}}{{if .Placeholder}} · placeholder{{end}}</span>
+        <span class="mono">{{.Date}}</span>
+        <span>{{.MediaType}}{{if .Placeholder}} · placeholder{{end}}</span>
       </figcaption>
     </figure>
 
-    <div class="cal-body">
+    <div class="cal-body prose">
       <h2>{{.Title}}</h2>
       {{with .Explanation}}<p>{{.}}</p>{{end}}
-      <p class="cal-credit muted">
+      <p class="cal-credit">
         {{with .Credit}}Credit: {{.}} · {{end}}
         {{with .ImageURL}}<a href="{{.}}" target="_blank" rel="noopener">Media file ↗</a> · {{end}}
         <a href="{{.SourceURL}}" target="_blank" rel="noopener">APOD page ↗</a>
@@ -52,13 +52,7 @@
     responds.</p>
   {{end}}
 
-  <nav class="stepper">
-    {{if .PrevURL}}<a href="{{.PrevURL}}">← Previous</a>
-    {{else}}<span class="muted">← Previous</span>{{end}}
-    <span class="muted">{{.Date}}</span>
-    {{if .NextURL}}<a href="{{.NextURL}}">Next →</a>
-    {{else}}<span class="muted">Next →</span>{{end}}
-  </nav>
+  {{template "stepper" .}}
 
   {{template "foot" .}}
 {{end}}

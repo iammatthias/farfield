@@ -4,6 +4,11 @@
 
   <p>The fleet's iMessage front door. Photon delivers an inbound iMessage to a signed webhook here; switchboard authenticates it, works out what the message meant, dispatches it to the app that owns that job, and replies in the same thread. It holds the sibling API keys so the phone never has to — and deliberately holds no blobs key, because feed owns blob uploads.</p>
 
+  <figure class="screenshot">
+    <img src="assets/switchboard.png?v=20260929-v5" alt="Screenshot of the Farfield switchboard UI" width="1280" height="800" loading="lazy">
+    <figcaption>Switchboard's log, here on an unconfigured instance: it names the settings it still needs.</figcaption>
+  </figure>
+
   <h2>Message grammar</h2>
   <p>The default is capture, so the common case needs no syntax: type a thought, send it. A message that is <em>only</em> a URL becomes a bookmark instead, because that is what sharing a bare link means. Photos sent together arrive as one message and become one post.</p>
   <div class="endpoint"><span class="method">text</span><span class="path">any words</span><div class="returns">A feed post. Trailing <code>#hashtags</code> become tags.</div></div>

@@ -15,11 +15,16 @@
 ;;   15 select all  16 rule  17 select word  18 select line
 (module
   (global $goal_x (mut i32) (i32.const -1)) ;; remembered x for vertical motion
+  ;; page mode: the host page is the document. The column fills the surface
+  ;; (the page supplies margins), there is no scrollbar, and the host drives
+  ;; $scroll from the window's own scroll position.
+  (global $page_mode (mut i32) (i32.const 0))
 
   ;; ── setup ────────────────────────────────────────────────────────────────
 
   (func (export "init")
     (call $default_palette)
+    (call $gamma_init)
     (call $gcache_clear)
     (global.set $len (i32.const 0))
     (global.set $sel_a (i32.const 0))
@@ -49,10 +54,12 @@
     ;; a reading measure: ~70 characters, centred, never tighter than the
     ;; gutters allow on a phone
     (local.set $measure (call $dp (i32.const 700)))
-    (global.set $col_w (call $min (local.get $measure) (i32.sub (local.get $w) (i32.mul (call $dp (i32.const 20)) (i32.const 2)))))
+    (if (global.get $page_mode) (then (local.set $measure (local.get $w))))
+    (global.set $col_w (call $min (local.get $measure)
+      (i32.sub (local.get $w) (i32.mul (call $dp (select (i32.const 0) (i32.const 20) (global.get $page_mode))) (i32.const 2)))))
     (global.set $col_w (call $max (global.get $col_w) (call $dp (i32.const 120))))
     (global.set $col_x (i32.div_s (i32.sub (local.get $w) (global.get $col_w)) (i32.const 2)))
-    (global.set $pad_top (call $dp (i32.const 28)))
+    (global.set $pad_top (call $dp (select (i32.const 6) (i32.const 28) (global.get $page_mode))))
     (global.set $laid_w (i32.const -1))
     (global.set $dirty (i32.const 1))
     (call $layout)
@@ -897,6 +904,16 @@
     (global.set $scroll (i32.add (global.get $scroll) (local.get $dy)))
     (call $clamp_scroll))
 
+  (func (export "set_scroll") (param $y i32)
+    (call $layout)
+    (if (i32.ne (local.get $y) (global.get $scroll)) (then (global.set $dirty (i32.const 1))))
+    (global.set $scroll (local.get $y))
+    (call $clamp_scroll))
+  ;; set_page turns page mode on or off; the host calls resize() after.
+  (func (export "set_page") (param $on i32)
+    (global.set $page_mode (local.get $on))
+    (global.set $dirty (i32.const 1)))
+
   (func (export "scroll_top") (result i32) (global.get $scroll))
   (func (export "doc_height") (result i32) (call $layout) (global.get $doc_h))
 
@@ -915,6 +932,31 @@
     (if (i32.lt_u (i32.sub (local.get $ms) (global.get $last_edit_ms)) (i32.const 600)) (then (local.set $on (i32.const 1))))
     (if (i32.ne (local.get $on) (global.get $caret_on))
       (then (global.set $caret_on (local.get $on)) (global.set $dirty (i32.const 1)))))
+
+  ;; sel_rect writes the selection's bounds in surface pixels to STATIC+0x210:
+  ;; x of its start, top of its first line, x of its end, bottom of its last
+  ;; line — where the host floats its selection bar. Returns the address.
+  (func (export "sel_rect") (result i32) (local $o i32) (local $a i32) (local $b i32)
+    (call $layout)
+    (local.set $o (i32.add (global.get $CARET_OUT) (i32.const 16)))
+    (local.set $a (call $rec (call $line_of (call $sel_lo))))
+    (local.set $b (call $rec (call $line_of (call $sel_hi))))
+    (i32.store offset=0 (local.get $o) (call $x_of (call $sel_lo)))
+    (i32.store offset=4 (local.get $o) (i32.sub (i32.load offset=8 (local.get $a)) (global.get $scroll)))
+    (i32.store offset=8 (local.get $o) (call $x_of (call $sel_hi)))
+    (i32.store offset=12 (local.get $o)
+      (i32.sub (i32.add (i32.load offset=8 (local.get $b)) (i32.load offset=12 (local.get $b))) (global.get $scroll)))
+    (local.get $o))
+
+  ;; caret_line copies the text of the caret's line, up to the caret, into IO
+  ;; and returns its length; line_start is where that line begins. Together
+  ;; they let a host notice "/…" typed at the start of a line.
+  (func (export "caret_line") (result i32) (local $s i32) (local $n i32)
+    (local.set $s (call $line_start (global.get $sel_h)))
+    (local.set $n (i32.sub (global.get $sel_h) (local.get $s)))
+    (memory.copy (global.get $IO) (i32.add (global.get $TEXT) (local.get $s)) (local.get $n))
+    (local.get $n))
+  (func (export "line_start") (result i32) (call $line_start (global.get $sel_h)))
 
   ;; caret_rect writes the caret's surface rectangle (x, y, w, h) to STATIC so
   ;; the host can put its input sink — and the IME's candidate window — there.

@@ -93,7 +93,7 @@ func run(host, port string) error {
 			ReadKey:      store.Env("FEED_READ_KEY", ""),
 			CookieSecure: store.Env("COOKIE_SECURE", "false") == "true",
 		},
-		rd: &web.Renderer{Templates: tmpl, AssetVer: theme.Version,
+		rd: &web.Renderer{Templates: tmpl, AssetVer: theme.Version, Funcs: tmplFuncs,
 			App: "feed", Mark: "fe",
 			Nav: []web.NavItem{
 				{Label: "New post", URL: "/new"},
@@ -137,8 +137,6 @@ func (s *Server) routes() http.Handler {
 
 	// Editor rendering endpoints — session-gated, used by the document editor
 	// for its live preview and its markdown→editable-HTML round trips.
-	mux.HandleFunc("POST /preview", s.auth.RequireSession(s.handlePreview))
-	mux.HandleFunc("POST /editdoc", s.auth.RequireSession(s.handleEditdoc))
 
 	// Login — public HTML.
 	mux.HandleFunc("GET /login", s.handleLoginForm)
@@ -320,42 +318,6 @@ func (s *Server) handleDeletePost(w http.ResponseWriter, r *http.Request) {
 	http.Redirect(w, r, "/", http.StatusSeeOther)
 }
 
-// ── editor rendering endpoints ─────────────────────────────────────────────
-
-// maxPreviewBody caps the preview/editdoc request body — far above any real
-// post, well below abuse.
-const maxPreviewBody = 2 << 20
-
-// handlePreview renders posted markdown to HTML for the editor's live
-// preview. Session-gated: it renders exactly what the feed would.
-func (s *Server) handlePreview(w http.ResponseWriter, r *http.Request) {
-	var req struct {
-		Body string `json:"body"`
-	}
-	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, maxPreviewBody)).Decode(&req); err != nil {
-		web.WriteError(w, http.StatusBadRequest, "invalid JSON")
-		return
-	}
-	web.WriteJSON(w, http.StatusOK, map[string]any{
-		"html": string(s.md.Render(r.Context(), req.Body)),
-	})
-}
-
-// handleEditdoc renders posted markdown to the constrained editable HTML the
-// document editor manipulates in place. Session-gated like the preview.
-func (s *Server) handleEditdoc(w http.ResponseWriter, r *http.Request) {
-	var req struct {
-		Body string `json:"body"`
-	}
-	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, maxPreviewBody)).Decode(&req); err != nil {
-		web.WriteError(w, http.StatusBadRequest, "invalid JSON")
-		return
-	}
-	web.WriteJSON(w, http.StatusOK, map[string]any{
-		"html": string(s.md.RenderEditable(r.Context(), req.Body)),
-	})
-}
-
 // ── login ──────────────────────────────────────────────────────────────────
 
 func (s *Server) handleLoginForm(w http.ResponseWriter, r *http.Request) {
@@ -510,15 +472,6 @@ func splitTags(s string) []string {
 	return out
 }
 
-// bodyHTML renders a stored body for the edit page's document card; an empty
-// body stays empty so the template shows the placeholder.
-func (s *Server) bodyHTML(r *http.Request, body string) template.HTML {
-	if strings.TrimSpace(body) == "" {
-		return ""
-	}
-	return s.md.Render(r.Context(), body)
-}
-
 // wordCount is the edit page's initial word count; the editor recounts live.
 func wordCount(body string) int {
 	return len(strings.Fields(body))
@@ -529,7 +482,7 @@ func (s *Server) renderPostForm(w http.ResponseWriter, r *http.Request, p *Post,
 		"Post": p, "IsNew": isNew, "Action": action, "Error": errMsg,
 		"TagsText":    strings.Join(p.Tags, ", "),
 		"BlobsPublic": s.blobsPublic, "ContentPublic": s.contentPublic,
-		"BodyHTML": s.bodyHTML(r, p.Body), "Words": wordCount(p.Body),
+		"Words": wordCount(p.Body),
 	})
 }
 

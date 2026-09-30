@@ -81,6 +81,24 @@
           (i32.mul (i32.and (i32.shr_u (local.get $c) (i32.const 16)) (i32.const 0xFF)) (local.get $a))) (i32.const 127)) (i32.const 255)) (i32.const 16))
         (i32.const 0xFF000000))))
 
+  ;; $gamma_init builds the coverage curve glyphs are drawn through. Blending
+  ;; raw coverage linearly leaves antialiased text thin and grey beside the
+  ;; browser's own; browsers lift coverage before compositing. This lifts it by
+  ;; x^0.6875 (= x^½ · x^⅛ · x^1/16 — three square roots, no pow in wasm),
+  ;; which darkens edges without thickening a stem's solid core.
+  (func $gamma_init (local $i i32) (local $x f32) (local $r f32)
+    (block $done
+      (loop $each
+        (br_if $done (i32.gt_u (local.get $i) (i32.const 255)))
+        (local.set $x (f32.div (f32.convert_i32_u (local.get $i)) (f32.const 255)))
+        (local.set $r (f32.sqrt (local.get $x)))
+        (local.set $r (f32.mul (local.get $r) (f32.sqrt (f32.sqrt (local.get $r)))))
+        (local.set $r (f32.mul (local.get $r) (f32.sqrt (f32.sqrt (f32.sqrt (f32.sqrt (local.get $x)))))))
+        (i32.store8 (i32.add (global.get $GAMMA) (local.get $i))
+          (i32.trunc_f32_u (f32.add (f32.mul (local.get $r) (f32.const 255)) (f32.const 0.5))))
+        (local.set $i (i32.add (local.get $i) (i32.const 1)))
+        (br $each))))
+
   ;; $draw_glyph blends a cached glyph with its origin at (x, baseline).
   (func $draw_glyph (param $e i32) (param $x i32) (param $base i32) (param $c i32)
     (local $w i32) (local $h i32) (local $bm i32) (local $gx i32) (local $gy i32) (local $i i32) (local $j i32)
@@ -102,7 +120,8 @@
               (loop $cols
                 (br_if $cols_done (i32.ge_s (local.get $i) (local.get $w)))
                 (local.set $sx (i32.add (local.get $gx) (local.get $i)))
-                (local.set $a (i32.load8_u (i32.add (local.get $bm) (i32.add (i32.mul (local.get $j) (local.get $w)) (local.get $i)))))
+                (local.set $a (i32.load8_u (i32.add (global.get $GAMMA)
+                  (i32.load8_u (i32.add (local.get $bm) (i32.add (i32.mul (local.get $j) (local.get $w)) (local.get $i)))))))
                 (if (i32.and (i32.ne (local.get $a) (i32.const 0))
                       (i32.and (i32.ge_s (local.get $sx) (i32.const 0)) (i32.lt_s (local.get $sx) (global.get $W))))
                   (then
@@ -194,7 +213,7 @@
         (local.set $cp (call $cp_at (local.get $p)))
         (local.set $cl (global.get $dec_len))
         (local.set $st (call $style_of (local.get $p)))
-        (local.set $slot (call $slot_for (local.get $st) (local.get $kind)))
+        (local.set $slot (call $slot_for (local.get $st) (local.get $info)))
         (local.set $px (call $px_for (local.get $st) (local.get $info)))
         (local.set $a (call $cp_adv (local.get $cp) (local.get $st) (local.get $info)))
         (local.set $xi (i32.trunc_sat_f32_s (f32.nearest (local.get $x))))
@@ -226,7 +245,7 @@
         (local.set $cp (call $cp_at (local.get $p)))
         (local.set $cl (global.get $dec_len))
         (local.set $st (call $style_of (local.get $p)))
-        (local.set $slot (call $slot_for (local.get $st) (local.get $kind)))
+        (local.set $slot (call $slot_for (local.get $st) (local.get $info)))
         (local.set $px (call $px_for (local.get $st) (local.get $info)))
         (local.set $a (call $cp_adv (local.get $cp) (local.get $st) (local.get $info)))
         (local.set $xi (i32.trunc_sat_f32_s (f32.nearest (local.get $x))))
@@ -290,7 +309,7 @@
         (call $fill (local.get $cx) (i32.sub (i32.load offset=8 (local.get $r)) (global.get $scroll))
           (call $max (call $dp (i32.const 2)) (i32.const 1)) (i32.load offset=12 (local.get $r)) (call $color (i32.const 6)))))
     ;; the scrollbar, when there is anything to scroll
-    (if (i32.gt_s (global.get $doc_h) (global.get $H))
+    (if (i32.and (i32.gt_s (global.get $doc_h) (global.get $H)) (i32.eqz (global.get $page_mode)))
       (then
         (local.set $th (call $max (call $dp (i32.const 24))
           (i32.div_s (i32.mul (global.get $H) (global.get $H)) (global.get $doc_h))))

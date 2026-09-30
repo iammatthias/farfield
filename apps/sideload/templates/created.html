@@ -3,14 +3,14 @@
   {{template "topbar" .}}
 
   <a class="back" href="/b/{{.Build.ID}}">← {{if .Build.AppName}}{{.Build.AppName}}{{else}}{{.Build.BundleID}}{{end}}</a>
-  <h1 style="font-size:1.2rem;margin-top:0.5rem">Share link created</h1>
-  <p class="muted" style="margin-top:0.3rem">
+  <h1 class="page-title">Share link created</h1>
+  <p class="muted">
     Send this link to install on one registered device off the tailnet.
     {{if .ExpiresAt}}It expires at {{.ExpiresAt}}.{{end}}
     {{if eq .Max 1}}It self-revokes after one install.{{else if gt .Max 0}}It allows up to {{.Max}} installs.{{else}}It allows unlimited installs until it expires.{{end}}
   </p>
 
-  <div style="margin-top:1.2rem">
+  <div class="spaced">
     {{with .Label}}
     <div class="share-row">
       <p class="label">Label</p>
@@ -23,7 +23,7 @@
     </div>
   </div>
 
-  <p class="meta" style="margin-top:1.2rem">
+  <p class="spaced">
     <a href="/shares">Manage shares →</a>
   </p>
 {{end}}

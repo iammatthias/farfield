@@ -1,7 +1,7 @@
 {{define "title"}}Backups · farfield{{end}}
 {{define "content"}}
   {{template "topbar" .}}
-  {{with .Notice}}<p class="muted">{{.}}</p>{{end}}
+  {{with .Notice}}<p class="notice">{{.}}</p>{{end}}
 
   <div class="section-head">
     <h2>Snapshots</h2>
@@ -15,19 +15,19 @@
   </p>
 
   {{if .Backups}}
-    <div class="table-wrap">
-      <table class="rows">
+    <div class="table-wrap stack-wrap">
+      <table class="stack">
         <thead>
-          <tr><th>App</th><th>CID</th><th>Size</th><th>Taken</th><th></th></tr>
+          <tr><th>App</th><th>CID</th><th class="num">Size</th><th>Taken</th><th class="actions"></th></tr>
         </thead>
         <tbody>
           {{range .Backups}}
             <tr>
-              <td>{{.App}}</td>
-              <td class="mono">{{slice .CID 0 20}}…</td>
-              <td>{{humanSize .Size}}</td>
-              <td class="muted">{{slice .CreatedAt 0 16}}</td>
-              <td>
+              <td data-label="App">{{.App}}</td>
+              <td data-label="CID" class="mono">{{slice .CID 0 20}}…</td>
+              <td data-label="Size" class="num">{{humanSize .Size}}</td>
+              <td data-label="Taken" class="mono muted nowrap">{{slice .CreatedAt 0 16}}</td>
+              <td data-label="" class="actions">
                 <form method="post" action="/backups/{{.ID}}/delete"
                       onsubmit="return confirm('Delete this snapshot?')">
                   <button class="danger" type="submit">Delete</button>
@@ -39,6 +39,9 @@
       </table>
     </div>
   {{else}}
-    <p class="muted">No snapshots yet. Hit “Snapshot now” to take the first.</p>
+    <div class="empty">
+      <p class="line">No snapshots yet.</p>
+      <p class="muted">Hit “Snapshot now” to take the first.</p>
+    </div>
   {{end}}
 {{end}}

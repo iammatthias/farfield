@@ -4,26 +4,33 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
 <title>{{.Title}}</title>
-<link rel="icon" href="data:image/svg+xml,<svg%20xmlns='http://www.w3.org/2000/svg'%20viewBox='0%200%2064%2064'><rect%20width='64'%20height='64'%20rx='8'%20fill='%2317265c'/><text%20x='32'%20y='42'%20font-family='ui-monospace,Menlo,monospace'%20font-size='26'%20font-weight='600'%20text-anchor='middle'%20fill='%23f7f3e8'>ff</text></svg>">
+<meta name="theme-color" content="#f3e5d1" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#0e222d" media="(prefers-color-scheme: dark)">
+<link rel="icon" href="data:image/svg+xml,<svg%20xmlns='http://www.w3.org/2000/svg'%20viewBox='0%200%2064%2064'><rect%20width='64'%20height='64'%20rx='12'%20fill='%230e222d'/><circle%20cx='32'%20cy='32'%20r='13'%20fill='none'%20stroke='%23f3e5d1'%20stroke-width='2'%20opacity='.8'/><circle%20cx='32'%20cy='32'%20r='3.5'%20fill='%23e59f67'/></svg>">
 <meta name="description" content="{{.Label}} — documentation for the farfield fleet of small, single-binary Go services.">
 <meta property="og:type" content="article">
 <meta property="og:site_name" content="farfield">
 <meta property="og:title" content="{{.Title}}">
 <meta property="og:description" content="Documentation for the farfield fleet of small, single-binary Go services.">
 <meta name="twitter:card" content="summary">
+<link rel="stylesheet" href="/static/fonts.css?v={{.FontsVer}}">
 <link rel="stylesheet" href="/static/styles.css?v={{.AssetVer}}">
-<link rel="stylesheet" href="style.css?v=20260815-docs7">
-<script src="docs.js?v=20260815-docs7" defer></script>
+<link rel="stylesheet" href="style.css?v={{.DocsVer}}">
+<script src="docs.js?v={{.DocsVer}}" defer></script>
 </head>
 <body>
 <input type="checkbox" id="nav-toggle" class="nav-toggle">
 <header class="bar">
-  <a href="/" class="brand">farfield · docs</a>
-  <label for="nav-toggle" class="nav-burger" aria-label="Toggle navigation"><span></span></label>
+  <a class="mark" href="/">farfield <span class="app">docs</span></a>
+  <nav aria-label="Site">
+    <a href="/status">Status</a>
+  </nav>
+  <label for="nav-toggle" class="nav-burger" aria-label="Toggle the docs index"><span></span></label>
 </header>
 <div class="docs-layout">
 <aside class="sidebar">
-  <nav class="docs-nav" aria-label="Docs navigation">
+  <nav class="docs-nav" aria-label="Docs index">
+  <span class="tech">Index</span>
   {{- range .Nav}}
   <a href="{{.Href}}"{{if eq .Key $.Active}} aria-current="page"{{end}}>{{.Label}}</a>
   {{- end}}

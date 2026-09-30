@@ -20,8 +20,10 @@
       {{end}}
     </div>
   {{else}}
-    <p class="muted">No collections yet.
-      <a href="/collections/new">Create one</a> to start adding entries.</p>
+    <div class="empty">
+      <p class="line">No collections yet.</p>
+      <p class="muted"><a href="/collections/new">Create one</a> to start adding entries.</p>
+    </div>
   {{end}}
 
   <div class="section-head">
@@ -31,9 +33,9 @@
   {{if .Entries}}
     {{template "entry_table" .}}
     {{if gt .TotalCount 12}}
-      <p style="margin-top:1rem"><a href="/entries">All {{.TotalCount}} entries →</a></p>
+      <nav class="pager"><span></span><a href="/entries">All {{.TotalCount}} entries →</a></nav>
     {{end}}
   {{else}}
-    <p class="muted">No entries yet.</p>
+    <div class="empty"><p class="line">No entries yet.</p></div>
   {{end}}
 {{end}}

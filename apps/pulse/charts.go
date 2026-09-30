@@ -11,10 +11,10 @@ import (
 // and day strings are server-generated YYYY-MM-DD.
 //
 // Ink comes from the theme, not from hex literals: data draws in
-// currentColor (the page's --ink, so charts read in both light and dark) at
+// currentColor (--ink for sparklines, --accent for bars, set in CSS) at
 // the observation weight, axes recede to a hairline, and only a failure
-// takes the alarm plate — field, observation, signal. CSS variables are not
-// valid in SVG presentation attributes, so the alarm fill rides a style="".
+// takes --bad — field, observation, signal. CSS variables are not
+// valid in SVG presentation attributes, so the failure fill rides a style="".
 
 // sparkline renders a target's recent latencies as a small polyline. Failed
 // checks are marked with alarm-red ticks at their position. checks is
@@ -38,7 +38,7 @@ func sparkline(checks []Check) template.HTML {
 		fmt.Fprintf(&pts, "%.1f,%.1f ", x, y)
 		if !c.OK {
 			fmt.Fprintf(&fails,
-				`<rect x="%.1f" y="0" width="2" height="%.0f" style="fill:var(--alarm)"/>`,
+				`<rect x="%.1f" y="0" width="2" height="%.0f" style="fill:var(--bad)"/>`,
 				x-1, h)
 		}
 	}

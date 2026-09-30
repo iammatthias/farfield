@@ -75,21 +75,22 @@
           </div>
         </span>
 
-        <span class="doc-words mono"></span>
+      </div>
 
-        {{/* Publication is state, not ceremony: the chip IS the checkbox,
-             and save commits it — the same semantics the form always had. */}}
-        <input type="checkbox" id="published" name="published" value="1"
-          {{if .Entry.Published}}checked{{end}}
-          style="position: absolute; width: 1px; height: 1px; opacity: 0; pointer-events: none;">
-        <button type="button" data-state-chip
-          class="chip {{if .Entry.Published}}state-live{{else}}state-draft{{end}}"
-          title="{{if .Entry.Published}}public — tap to unpublish on save{{else}}goes public on save · the site rebuilds{{end}}">
-          {{if .Entry.Published}}published{{else}}draft{{end}}</button>
+      {{/* The page is the editor: the writing surface mounts here. */}}
+      <div class="field doc-fallback">
+        <label for="body">Body (markdown)</label>
+        <textarea id="body" name="body" data-editor data-editor-upload="/embed/blob">{{.Entry.Body}}</textarea>
+        <p class="hint">Reference images as blob://&lt;cid&gt;.</p>
+      </div>
 
+      {{/* The corner pill carries the publishing decision: how long it is,
+           its history, whether it is public, and the save that commits it. */}}
+      <div class="doc-pill">
+        <span class="doc-words"></span>
         {{if .Revisions}}
-          <span class="chip-wrap pop-right">
-            <button type="button" class="chip" data-chip="history">history ▾</button>
+          <span class="chip-wrap pop-up">
+            <button type="button" class="chip" data-chip="history">history</button>
             <div class="chip-pop" hidden>
               <ul class="rev-list">
                 {{range .Revisions}}
@@ -106,23 +107,20 @@
             </div>
           </span>
         {{end}}
-
         {{if .SiteURL}}
           <a class="chip-note" href="{{.SiteURL}}" target="_blank" rel="noopener">view ↗</a>
         {{end}}
-      </div>
-
-      {{/* The page is the editor: the writing surface mounts here. */}}
-      <div class="field doc-fallback">
-        <label for="body">Body (markdown)</label>
-        <textarea id="body" name="body" data-editor data-editor-upload="/embed/blob">{{.Entry.Body}}</textarea>
-        <p class="hint">Reference images as blob://&lt;cid&gt;.</p>
-      </div>
-
-      <div class="doc-pill">
-        <button type="button" data-doc-save>{{if .IsNew}}Create entry{{else}}Save{{end}}</button>
-        <span class="save-note"></span>
+        {{/* Publication is state, not ceremony: the chip IS the checkbox,
+             and save commits it — the same semantics the form always had. */}}
+        <input type="checkbox" id="published" name="published" value="1"
+          {{if .Entry.Published}}checked{{end}} class="visually-hidden" tabindex="-1">
+        <button type="button" data-state-chip
+          class="chip {{if .Entry.Published}}state-live{{else}}state-draft{{end}}"
+          title="{{if .Entry.Published}}public — tap to unpublish on save{{else}}goes public on save · the site rebuilds{{end}}">
+          {{if .Entry.Published}}published{{else}}draft{{end}}</button>
         <span data-pub-note></span>
+        <span class="save-note"></span>
+        <button type="button" data-doc-save>{{if .IsNew}}Create entry{{else}}Save{{end}}</button>
       </div>
     </div>  </form>
 

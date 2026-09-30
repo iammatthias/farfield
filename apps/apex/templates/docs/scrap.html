@@ -4,6 +4,11 @@
 
   <p>A pastebin: text and code snippets with syntax highlighting, optional expiry, and three visibilities — public, unlisted, and token-locked. A locked paste is shareable by URL but opens only with its access token, which can be rolled or removed at any time without changing the URL.</p>
 
+  <figure class="screenshot">
+    <img src="assets/scrap.png?v=20260929-v5" alt="Screenshot of the Farfield scrap manage page" width="1280" height="800" loading="lazy">
+    <figcaption>Scrap's manage view: every paste with its visibility, views, expiry and token controls.</figcaption>
+  </figure>
+
   <h2>Public surface</h2>
   <div class="endpoint"><span class="method">GET</span><span class="path">/pastes</span><div class="returns">The public paste index.</div></div>
   <div class="endpoint"><span class="method">GET</span><span class="path">/{id}</span><div class="returns">A paste, rendered with syntax highlighting. Unlisted pastes resolve here but are not indexed; locked pastes prompt for their token.</div></div>

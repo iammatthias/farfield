@@ -4,7 +4,7 @@
   <section class="created">
     <p class="label">{{if .Label}}{{.Label}}{{else}}Paste created{{end}}</p>
     <h1>{{if .Title}}{{.Title}}{{else}}<span class="mono">{{.ID}}</span>{{end}}</h1>
-    <p class="warn">Shown once — the token is stored hashed and cannot be recovered.</p>
+    <p class="notice warn">Shown once — the token is stored hashed and cannot be recovered.</p>
     <div class="share-row">
       <span class="label">Paste URL</span>
       <code id="share-url">{{.PasteURL}}</code>

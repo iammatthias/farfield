@@ -44,6 +44,7 @@
   ;; STATIC sub-regions
   (global $PALETTE i32 (i32.const 0x0100)) ;; 16 colours × u32 (RGBA bytes)
   (global $CARET_OUT i32 (i32.const 0x0200)) ;; x, y, w, h (device px) for the host
+  (global $GAMMA i32 (i32.const 0x0300))    ;; 256-byte glyph coverage curve
   (global $FONTREC i32 (i32.const 0x0400)) ;; 8 font slots × 64 bytes
 
   ;; ── small helpers ────────────────────────────────────────────────────────

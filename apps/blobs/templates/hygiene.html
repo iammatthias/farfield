@@ -56,7 +56,7 @@
                 <td>{{humanSize .Size}}</td>
                 <td>{{shortDate .CreatedAt}}</td>
                 <td><span class="badge">no references</span></td>
-                <td>
+                <td class="actions">
                   {{if $.Report.SourcesOK}}
                     <form method="post" action="/blobs/{{.CID}}/delete"
                           onsubmit="return confirm('Delete this blob? It is removed from the store.')">

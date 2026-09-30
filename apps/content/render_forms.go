@@ -23,7 +23,7 @@ func (s *Server) renderEntryForm(w http.ResponseWriter, r *http.Request, e *Entr
 		"Entry": e, "Collections": collections, "IsNew": isNew,
 		"Action": action, "Error": errMsg, "TagsText": strings.Join(e.Tags, ", "),
 		"BlobsPublic": s.blobsPublic, "ContentPublic": s.contentPublic,
-		"BodyHTML": s.bodyHTML(r, e.Body), "Words": wordCount(e.Body),
+		"Words":     wordCount(e.Body),
 		"Revisions": s.revisionViews(e), "SiteURL": s.siteURL(e),
 	})
 }

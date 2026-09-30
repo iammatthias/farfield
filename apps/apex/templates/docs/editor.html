@@ -1,0 +1,69 @@
+{{define "content"}}
+  <h1>editor</h1>
+  <p class="meta"><code>lib/editor</code> · <code>lib/wat</code> · <code>apps/desk</code></p>
+
+  <p>The writing surface in content, feed and scrap. A rich Markdown editor written by hand in WebAssembly text — the document, the Markdown styling, a TrueType rasterizer, line layout and every pixel it shows. The page supplies input and a surface; it never draws text with the DOM. The same module runs in a browser on a <code>&lt;canvas&gt;</code> and on the desktop under wazero.</p>
+
+  <figure class="screenshot">
+    <img src="assets/editor.png?v=20260929-v5b" alt="Screenshot of the Farfield editor on a content entry" width="1280" height="800" loading="lazy">
+    <figcaption>An entry in the content app: the title, the meta band, the command strip, then the document, drawn entirely by the WebAssembly editor.</figcaption>
+  </figure>
+
+  <figure class="observation" aria-label="Editor architecture: hand-written .wat sources are assembled in pure Go at server start into one WebAssembly module, which a browser host and a desktop host both run.">
+    <svg viewBox="0 0 700 190" role="img">
+      <g style="font-family:var(--font-mono);font-size:11px" fill="currentColor">
+        <circle cx="52" cy="95" r="4.5"/>
+        <text x="52" y="121" text-anchor="middle" opacity="0.6">.wat sources</text>
+        <line x1="60" y1="95" x2="216" y2="95" stroke="currentColor" stroke-width="0.75" opacity="0.25"/>
+        <text x="138" y="85" text-anchor="middle" opacity="0.6">lib/wat · at start</text>
+        <circle cx="230" cy="95" r="11" fill="none" stroke="var(--accent)" stroke-width="1.2" opacity="0.9"/>
+        <circle cx="230" cy="95" r="3" fill="var(--accent)"/>
+        <text x="230" y="125" text-anchor="middle" opacity="0.7">editor.wasm</text>
+        <g stroke="currentColor" stroke-width="0.75" opacity="0.25" fill="none">
+          <line x1="243" y1="95" x2="420" y2="95"/>
+          <line x1="420" y1="55" x2="420" y2="135"/>
+          <line x1="420" y1="55" x2="434" y2="55"/>
+          <line x1="420" y1="135" x2="434" y2="135"/>
+        </g>
+        <g opacity="0.85">
+          <circle cx="440" cy="55" r="3.5"/>
+          <text x="452" y="59">browser · canvas + host.js</text>
+          <circle cx="440" cy="135" r="3.5"/>
+          <text x="452" y="139">desktop · wazero + ebitengine</text>
+        </g>
+      </g>
+    </svg>
+    <figcaption>Observation · one module, two hosts</figcaption>
+  </figure>
+
+  <h2>Writing</h2>
+  <ul>
+    <li>Markdown styles itself as you type: headings, emphasis, inline code, links, lists, quotes, code blocks and rules. The markers stay visible, dimmed, so the source is always the truth.</li>
+    <li>A quiet strip of commands sits above the text; a small bar floats over any selection; type <code>/</code> at the start of a line for a menu of blocks.</li>
+    <li>Paste or drop an image to upload it to blobs as <code>blob://&lt;cid&gt;</code>.</li>
+    <li><kbd>⌘S</kbd> saves in place. Undo groups by word. Lists continue on Enter; Tab nests.</li>
+    <li>Scrap uses a plain mode with no Markdown styling.</li>
+  </ul>
+
+  <h2>Pieces</h2>
+  <table>
+    <tr><th>Source</th><th>Job</th></tr>
+    <tr><td><code>mem.wat</code></td><td>The memory map: fixed regions for text, fonts, glyph cache, layout and the framebuffer</td></tr>
+    <tr><td><code>text.wat</code></td><td>The UTF-8 buffer, words and positions</td></tr>
+    <tr><td><code>font.wat</code></td><td>A TrueType reader and a signed-area rasterizer — checked against <code>x/image/vector</code> to within 0.3% of ink</td></tr>
+    <tr><td><code>markdown.wat</code></td><td>Line classes and per-byte inline styles</td></tr>
+    <tr><td><code>layout.wat</code></td><td>Wrapping at a reading measure, heading weights and tracking</td></tr>
+    <tr><td><code>render.wat</code></td><td>The software renderer into an RGBA framebuffer</td></tr>
+    <tr><td><code>edit.wat</code></td><td>The host API: keys, commands, pointer, selection, undo, page scroll</td></tr>
+  </table>
+
+  <p>The whole engine is about 20&nbsp;KB of WebAssembly; the brand faces (Newsreader, IBM Plex Mono) are the weight and are cached for a year. No binary is committed: <code>lib/wat</code> assembles the text format in pure Go at start, in milliseconds.</p>
+
+  <h2>Using it</h2>
+  <p>An app serves the assets with <code>editor.Handler("/static/editor/")</code> and marks a field:</p>
+  <pre class="record-shape">&lt;textarea name="body" data-editor data-editor-upload="/embed/blob"&gt;…&lt;/textarea&gt;
+&lt;link rel="stylesheet" href="/static/editor/host.css?v={{"{{"}}editorVer{{"}}"}}"&gt;
+&lt;script src="/static/editor/host.js?v={{"{{"}}editorVer{{"}}"}}" defer&gt;&lt;/script&gt;
+&lt;script src="/static/editor/mount.js?v={{"{{"}}editorVer{{"}}"}}" defer&gt;&lt;/script&gt;</pre>
+  <p>The textarea stays in the form and posts as always — without JavaScript, or if the module fails to load, the page still edits plain Markdown. <code>go run ./lib/editor/cmd/preview</code> serves the component gallery with the live editor on a document page.</p>
+{{end}}

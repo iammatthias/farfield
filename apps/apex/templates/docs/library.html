@@ -4,6 +4,11 @@
 
   <p>A self-hosted OPDS e-book catalog. Upload EPUBs through the admin UI and browse them from any OPDS reader — KOReader, Thorium, Foliate, Cantook. Title, author, language, and cover are read from each EPUB's OPF on upload. Book and cover bytes are content-addressed (CIDv1 sha-256) and stored on Cloudflare R2; metadata lives in SQLite. Books are organised into folders (collections), surfaced as a navigation feed the reader browses.</p>
 
+  <figure class="screenshot">
+    <img src="assets/library.png?v=20260929-v5" alt="Screenshot of the Farfield library UI" width="1280" height="800" loading="lazy">
+    <figcaption>The library admin in the logged-in state: books grouped into folders, with covers read from each EPUB.</figcaption>
+  </figure>
+
   <h2>Connecting a reader</h2>
   <p>Point an OPDS reader at the catalog root and authenticate with HTTP Basic Auth — any username, the catalog key as the password:</p>
 <pre class="record-shape">URL:      https://library.farfield.systems/opds

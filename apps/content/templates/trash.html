@@ -4,14 +4,14 @@
 
   <div class="section-head">
     <h2>Trash</h2>
-    <a href="/entries">← Entries</a>
+    <a class="muted" href="/entries">← Entries</a>
   </div>
 
   {{if .Entries}}
     <p class="muted">Deleted entries stay here for {{.RetentionDays}} days, then
       they are purged for good.</p>
-    <div class="table-wrap entries-wrap">
-      <table class="rows entries">
+    <div class="table-wrap stack-wrap">
+      <table class="rows entries stack">
         <thead>
           <tr><th>Title</th><th>Collection</th>
             <th class="nowrap">Deleted</th><th></th></tr>
@@ -20,12 +20,12 @@
           {{range .Entries}}
             <tr>
               <td data-label="Title">{{.Title}}</td>
-              <td data-label="Collection">{{.Collection}}</td>
+              <td data-label="Collection" class="muted">{{.Collection}}</td>
               <td data-label="Deleted" class="nowrap muted">{{slice .DeletedAt 0 10}}</td>
-              <td data-label="" class="nowrap">
+              <td data-label="" class="actions">
                 {{/* per-row forms are fine here — this page has no outer
                      form, and forms must never nest */}}
-                <div class="trash-actions">
+                <div class="action-row">
                   <form method="post" action="/entries/{{.Slug}}/restore">
                     <button type="submit">Restore</button>
                   </form>
@@ -41,6 +41,6 @@
       </table>
     </div>
   {{else}}
-    <p class="muted">The trash is empty.</p>
+    <div class="empty"><p class="line">The trash is empty.</p></div>
   {{end}}
 {{end}}

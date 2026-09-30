@@ -2,50 +2,57 @@
 {{define "content"}}
   {{template "topbar" .}}
 
-  <p class="summary">
-    <span>{{len .Apps}} app{{if ne (len .Apps) 1}}s{{end}}</span>
-    <span>{{.Total}} version{{if ne .Total 1}}s{{end}}</span>
-  </p>
+  <div class="stats summary">
+    <div class="stat"><div class="value">{{len .Apps}}</div><span class="tech">App{{if ne (len .Apps) 1}}s{{end}}</span></div>
+    <div class="stat"><div class="value">{{.Total}}</div><span class="tech">Version{{if ne .Total 1}}s{{end}}</span></div>
+  </div>
 
   {{with .Error}}<p class="error">{{.}}</p>{{end}}
 
   {{if .Apps}}
-  <div class="app-list">
+  <div class="list">
     {{range .Apps}}
-    <a class="app-row" href="/app/{{.BundleID}}">
-      <span class="name">{{if .AppName}}{{.AppName}}{{else}}{{.BundleID}}{{end}}</span>
-      <span class="bundle">{{.BundleID}}</span>
-      <span class="ver">{{.Latest.Version}} ({{.Latest.BuildNumber}})</span>
-      <span class="count">{{.Count}} version{{if ne .Count 1}}s{{end}}</span>
+    <a class="item" href="/app/{{.BundleID}}">
+      <span>
+        <span class="title">{{if .AppName}}{{.AppName}}{{else}}{{.BundleID}}{{end}}</span>
+        <span class="sub mono">{{.BundleID}}</span>
+      </span>
+      <span class="side">
+        <span class="mono">{{.Latest.Version}} ({{.Latest.BuildNumber}})</span>
+        <span class="hint">{{.Count}} version{{if ne .Count 1}}s{{end}}</span>
+      </span>
     </a>
     {{end}}
   </div>
   {{else}}
-  <p class="muted" style="margin:1.4rem 0">No apps yet. Upload a signed ad-hoc <code>.ipa</code> below — each upload becomes a version of its app, grouped by bundle id.</p>
+  <div class="empty">
+    <p class="line">No apps yet.</p>
+    <p class="muted">Upload a signed ad-hoc <code>.ipa</code> below — each upload becomes a version of its app, grouped by bundle id.</p>
+  </div>
   {{end}}
 
-  <section class="panel">
-    <h2>Upload a build</h2>
+  <section>
+    <div class="section-head"><h2>Upload a build</h2></div>
     <form method="post" action="/upload" enctype="multipart/form-data">
       <div class="field">
         <label for="ipa">Signed ad-hoc .ipa</label>
         <input type="file" id="ipa" name="ipa" accept=".ipa" required>
       </div>
-      <div class="inline-form">
+      <div class="form-row">
         <div class="field">
           <label for="commit">Git commit (optional)</label>
           <input type="text" id="commit" name="commit" placeholder="a1b2c3d">
         </div>
-        <div class="field" style="flex:1 1 16rem">
+        <div class="field" style="flex:2 1 16rem">
           <label for="notes">Notes (optional)</label>
           <input type="text" id="notes" name="notes" placeholder="what changed">
         </div>
         <button type="submit">Upload</button>
       </div>
     </form>
-    <p class="meta" style="margin-top:0.9rem">
+    <p class="meta spaced">
       <span>or via the API:</span>
-      <span class="mono">curl --data-binary @app.ipa -H "X-API-Key: …" .../api/builds</span>
+      <span>curl --data-binary @app.ipa -H "X-API-Key: …" .../api/builds</span>
     </p>
   </section>
 {{end}}

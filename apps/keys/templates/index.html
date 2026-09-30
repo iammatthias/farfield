@@ -1,13 +1,13 @@
 {{define "title"}}Keys · farfield keys{{end}}
 {{define "content"}}
   {{template "topbar" .}}
-  <p class="summary">
+  <p class="summary tech">
     <span>Total {{.Total}}</span>
     <span>Active {{.Active}}</span>
   </p>
   {{if .Keys}}
-    <div class="table-wrap">
-      <table class="admin">
+    <div class="table-wrap stack-wrap">
+      <table class="admin stack">
         <thead>
           <tr>
             <th>Name</th>
@@ -18,24 +18,24 @@
             <th>Expires</th>
             <th>Last used</th>
             <th>Status</th>
-            <th>Actions</th>
+            <th class="actions">Actions</th>
           </tr>
         </thead>
         <tbody>
           {{range .Keys}}
             <tr>
-              <td>{{.Name}}</td>
-              <td class="mono">{{.App}}</td>
-              <td class="mono">{{.Scope}}</td>
-              <td class="mono">{{.Hint}}…</td>
-              <td class="mono">{{day .CreatedAt}}</td>
-              <td class="mono">{{if .ExpiresAt}}{{day .ExpiresAt}}{{else}}—{{end}}</td>
-              <td class="mono">{{if .LastUsed}}{{day .LastUsed}}{{else}}never{{end}}</td>
-              <td>
+              <td data-label="Name">{{.Name}}</td>
+              <td class="mono" data-label="App">{{.App}}</td>
+              <td class="mono" data-label="Scope">{{.Scope}}</td>
+              <td class="mono" data-label="Key">{{.Hint}}…</td>
+              <td class="mono" data-label="Created">{{day .CreatedAt}}</td>
+              <td class="mono" data-label="Expires">{{if .ExpiresAt}}{{day .ExpiresAt}}{{else}}—{{end}}</td>
+              <td class="mono" data-label="Last used">{{if .LastUsed}}{{day .LastUsed}}{{else}}never{{end}}</td>
+              <td data-label="Status">
                 {{if eq .Status "Active"}}<span class="badge live">Active</span>
                 {{else}}<span class="badge draft">{{.Status}}</span>{{end}}
               </td>
-              <td class="actions">
+              <td class="actions" data-label="">
                 {{if eq .Status "Active"}}
                   <form method="post" action="/keys/{{.ID}}/revoke"
                         onsubmit="return confirm('Revoke this key? Anything using it stops working immediately.')">
@@ -54,6 +54,9 @@
       </table>
     </div>
   {{else}}
-    <p class="muted">No keys yet. <a href="/new">Issue one.</a></p>
+    <div class="empty">
+      <p class="line">No keys issued yet.</p>
+      <p class="muted"><a href="/new">Issue one.</a></p>
+    </div>
   {{end}}
 {{end}}

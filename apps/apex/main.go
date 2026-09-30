@@ -53,6 +53,7 @@ var docPages = []doc{
 	{"switchboard", "switchboard", "Switchboard", "Switchboard — Farfield Docs"},
 	{"pulse", "pulse", "Pulse", "Pulse — Farfield Docs"},
 	{"backup", "backup", "Backup", "Backup — Farfield Docs"},
+	{"editor", "editor", "Editor", "Editor — Farfield Docs"},
 	{"skills", "skills", "Skills", "Skills — Farfield Docs"},
 }
 
@@ -87,6 +88,10 @@ type pageData struct {
 	Active   string
 	Nav      []doc
 	AssetVer string
+	FontsVer string
+	// DocsVer fingerprints the docs' own style.css and docs.js, which are
+	// served immutable when versioned.
+	DocsVer string
 }
 
 func main() {
@@ -152,6 +157,15 @@ func (p page) serve(w http.ResponseWriter, r *http.Request) {
 // renderDocs executes the shared layout over each docs page once, at startup.
 func renderDocs() (map[string]page, error) {
 	pages := make(map[string]page, len(docPages))
+	css, err := webFS.ReadFile("web/docs/style.css")
+	if err != nil {
+		return nil, err
+	}
+	js, err := webFS.ReadFile("web/docs/docs.js")
+	if err != nil {
+		return nil, err
+	}
+	docsVer := cid.Of(append(css, js...))[:16]
 	for _, d := range docPages {
 		t, err := template.New(d.Key).ParseFS(tmplFS,
 			"templates/docs/layout.html", "templates/docs/"+d.Key+".html")
@@ -160,7 +174,7 @@ func renderDocs() (map[string]page, error) {
 		}
 		var buf bytes.Buffer
 		if err := t.ExecuteTemplate(&buf, "layout",
-			pageData{Title: d.Title, Label: d.Label, Active: d.Key, Nav: docPages, AssetVer: theme.Version}); err != nil {
+			pageData{Title: d.Title, Label: d.Label, Active: d.Key, Nav: docPages, AssetVer: theme.Version, FontsVer: theme.FontsVersion, DocsVer: docsVer}); err != nil {
 			return nil, err
 		}
 		body := buf.Bytes()

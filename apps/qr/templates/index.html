@@ -1,14 +1,14 @@
 {{define "title"}}Codes · farfield qr{{end}}
 {{define "content"}}
   {{template "topbar" .}}
-  <p class="summary">
+  <p class="summary tech">
     <span>Total {{.Total}}</span>
     <span>Public {{.Public}}</span>
     <span>Enabled {{.Enabled}}</span>
   </p>
   {{if .Codes}}
-    <div class="table-wrap">
-      <table class="admin">
+    <div class="table-wrap stack-wrap">
+      <table class="admin stack">
         <thead>
           <tr>
             <th>ID</th>
@@ -16,17 +16,17 @@
             <th>Mode</th>
             <th>Payload</th>
             <th>Visibility</th>
-            <th>Actions</th>
+            <th class="actions">Actions</th>
           </tr>
         </thead>
         <tbody>
           {{range .Codes}}
             <tr>
-              <td class="id">{{.ID}}</td>
-              <td>{{if .Label}}{{.Label}}{{else}}<span class="muted">—</span>{{end}}</td>
-              <td class="mode">{{.Mode}} · {{.EC}}</td>
-              <td class="payload" title="{{.Target}}">{{if .Target}}{{.Target}}{{else}}<span class="muted">—</span>{{end}}</td>
-              <td>
+              <td class="id mono" data-label="ID">{{.ID}}</td>
+              <td data-label="Label">{{if .Label}}{{.Label}}{{else}}<span class="muted">—</span>{{end}}</td>
+              <td class="mode mono" data-label="Mode">{{.Mode}} · {{.EC}}</td>
+              <td class="payload mono" data-label="Payload" title="{{.Target}}">{{if .Target}}{{.Target}}{{else}}<span class="muted">—</span>{{end}}</td>
+              <td data-label="Visibility">
                 {{if and .Public .Enabled}}
                   <span class="badge live">Public</span>
                 {{else if .Enabled}}
@@ -35,7 +35,7 @@
                   <span class="badge draft">Disabled</span>
                 {{end}}
               </td>
-              <td class="actions">
+              <td class="actions" data-label="">
                 <div class="action-row">
                   <a href="/codes/{{.ID}}/edit">Edit</a>
                   <a href="/codes/{{.ID}}/preview">Preview</a>
@@ -51,6 +51,9 @@
       </table>
     </div>
   {{else}}
-    <p class="muted">No codes yet. <a href="/new">Add one.</a></p>
+    <div class="empty">
+      <p class="line">No codes made yet.</p>
+      <p class="muted"><a href="/new">Add one.</a></p>
+    </div>
   {{end}}
 {{end}}

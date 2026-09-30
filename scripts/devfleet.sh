@@ -6,10 +6,17 @@
 # Binaries come from ./bin (make build). Data lives in ./tmp/dev — never the
 # production /data layout. Every admin app uses password "demo" and the API
 # keys below, so the apps can talk to each other locally.
+#
+#   PREVIEW_HOST=<name> scripts/devfleet.sh start
+#
+# serves the same fleet for viewing from another device (e.g. a tailnet name):
+# browser-facing links use that host, internal calls stay on loopback, and the
+# apps still bind 127.0.0.1 — forward the ports with `tailscale serve --tcp`.
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
 DATA=tmp/dev
+PUB=${PREVIEW_HOST:-127.0.0.1}
 LOGS=$DATA/logs
 mkdir -p "$DATA/blobs-data" "$LOGS"
 
@@ -33,7 +40,7 @@ start() {
     [ -x "bin/$app" ] || { echo "missing bin/$app — run make build"; exit 1; }
     envname=$(echo "$app" | tr 'a-z-' 'A-Z_')
     env HOST=127.0.0.1 PASSWORD=demo COOKIE_SECURE=false \
-      FARFIELD_FLEET=local SESSION_SECRET=dev-fleet-secret \
+      FARFIELD_FLEET=local FARFIELD_FLEET_HOST="$PUB" SESSION_SECRET=dev-fleet-secret \
       FARFIELD_DEV_TEMPLATES="$PWD/apps/$app" \
       FARFIELD_DEV_THEME="$PWD/lib/theme" \
       "${envname}_PORT=$port" \
@@ -43,9 +50,9 @@ start() {
       SIDELOAD_DIR="$DATA/sideload-blobs" LIBRARY_TUS_DIR="$DATA/tus-staging" \
       BLOBS_SPOOL_DIR="$DATA/blob-spool" \
       BLOBS_URL=http://127.0.0.1:8789 BLOBS_API_KEY=dev-blobs-key \
-      BLOBS_PUBLIC_URL=http://127.0.0.1:8789 \
+      BLOBS_PUBLIC_URL="http://$PUB:8789" \
       CONTENT_URL=http://127.0.0.1:8787 CONTENT_API_KEY=dev-content-key \
-      CONTENT_PUBLIC_URL=http://127.0.0.1:8787 \
+      CONTENT_PUBLIC_URL="http://$PUB:8787" \
       "bin/$app" serve > "$LOGS/$app.log" 2>&1 &
   done
   sleep 1.5
@@ -60,7 +67,7 @@ start() {
   done
   echo "$ok/15 services up (password: demo)"
   [ -z "$down" ] || echo "DOWN:$down — see $LOGS/"
-  echo "content admin: http://127.0.0.1:8787"
+  echo "content admin: http://$PUB:8787"
 }
 
 case "${1:-start}" in

@@ -4,7 +4,7 @@
 
   <div class="section-head">
     <h2>Traffic</h2>
-    <span class="label">{{.D.From}} → {{.D.To}} · {{.TotalHits}} hits</span>
+    <span class="tech">{{.D.From}} → {{.D.To}} · {{.TotalHits}} hits</span>
   </div>
 
   <form class="filters" method="get" action="/traffic">
@@ -41,7 +41,7 @@
       them, so a visitor who touched several paths counts once per path.</p>
   </section>
 
-  <div class="grid" style="margin-top:2rem">
+  <div class="grid traffic-cols">
     <section>
       <div class="section-head"><h2>Top paths</h2></div>
       {{if .D.Paths}}

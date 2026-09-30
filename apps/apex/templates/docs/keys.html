@@ -4,6 +4,11 @@
 
   <p>The credential admin — the one place API keys for every farfield app are <strong>issued, scoped, and revoked</strong>. Keys minted here land in a shared SQLite store (<code>keys.sqlite</code> on the <code>/data</code> volume) that every keyed app reads through <code>lib/keys</code>: a new key works within a request, a revoked key stops within a request, no restarts, no redeploys.</p>
 
+  <figure class="screenshot">
+    <img src="assets/keys.png?v=20260929-v5" alt="Screenshot of the Farfield keys UI" width="1280" height="800" loading="lazy">
+    <figcaption>The keys admin in the logged-in state. A minted key is shown once, then only its scope and state.</figcaption>
+  </figure>
+
   <p>Admin-issued keys are deliberately <strong>opaque random tokens, not JWTs</strong>. Everything runs on one host over one bind mount, so a database row gives instant revocation, per-key audit (created / last used), and scoping with zero new dependencies — where a signed token would need TTLs, refresh flows, or a revocation list to approximate the same thing. Only each token's SHA-256 is stored; the plaintext is shown exactly once, at mint time.</p>
 
   <h2>Scopes</h2>

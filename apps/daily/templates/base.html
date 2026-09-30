@@ -7,110 +7,84 @@
 
 {{define "styles"}}
   <style>
-    /* photo — a single-plate viewer, one image at a time */
+    /* daily sits in a narrower column than the consoles */
     .container { max-width: 60rem; }
 
-    /* masthead nav — the current section reads full ink */
-    .bar nav a.on { opacity: 1; text-decoration: underline; }
-
-    figure.plate {
-      background: var(--panel); border: 1px solid var(--hairline);
-      border-radius: var(--r-m); box-shadow: var(--shadow-s); overflow: hidden;
-    }
-    /* aspect-ratio reserves the plate's space before the image loads (no CLS);
-       contain letterboxes odd shapes inside the 3:2 plate, like archive's .frame */
-    figure.plate img { width: 100%; display: block; aspect-ratio: 3 / 2; object-fit: contain; }
-    figure.plate video { width: 100%; display: block; background: #000; }
-    figure.plate a { display: block; }
-    figure.plate .placeholder {
-      display: flex; align-items: center; justify-content: center;
-      min-height: 16rem; padding: 2rem; text-align: center;
-      font-size: 0.85rem; opacity: 0.45;
-    }
-    figure.plate figcaption {
-      display: flex; justify-content: space-between; gap: 1rem;
-      padding: 0.55rem 0.8rem; border-top: 1px solid var(--hairline);
-      font-size: 0.75rem; font-weight: 500; opacity: 0.7;
-    }
-
-    /* the page meta line — eyebrow text left, page actions right */
+    /* the page meta line — a caption left, page links right */
     .source-eyebrow {
       display: flex; justify-content: space-between; align-items: baseline;
-      gap: 0.35rem 1.5rem; flex-wrap: wrap; margin-bottom: 0.85rem;
+      gap: var(--s-1) var(--s-5); flex-wrap: wrap; margin-bottom: var(--s-4);
     }
-    .source-eyebrow .actions { display: flex; gap: 1rem; }
-    .source-eyebrow .actions a { text-decoration: none; }
-    .source-eyebrow .actions a:hover { color: var(--accent); }
+    .source-eyebrow .actions { display: flex; gap: var(--s-4); margin: 0; }
+    .source-eyebrow .actions a { color: var(--ink-2); text-decoration: none; }
+    .source-eyebrow .actions a:hover { color: var(--ink); }
 
-    .cal-body { margin-top: 1.5rem; }
-    .cal-body h2 { margin-bottom: 0.5rem; }
-    .cal-body p { margin-top: 0.9rem; }
-    .cal-credit { margin-top: 1.1rem; font-size: 0.85rem; }
-
-    .notice {
-      margin-top: 1.25rem; padding: 0.55rem 0.75rem;
-      background: var(--wash); border-radius: var(--r-s);
-      font-size: 0.82rem; opacity: 0.75;
-    }
-
-    .stepper {
-      display: flex; justify-content: space-between; gap: 1rem;
-      margin-top: 1.75rem; padding-top: 0.85rem;
-      border-top: 1px solid var(--hairline);
-      font-family: var(--font-mono); font-size: 0.8rem;
-    }
-    .stepper a { text-decoration: none; }
-    .stepper a:hover { color: var(--accent); }
-    .stepper .muted { opacity: 0.3; }
-
-    /* archive — a soft grid of day plates */
-    .archive {
-      display: grid; gap: 0.9rem;
-      grid-template-columns: repeat(auto-fill, minmax(13rem, 1fr));
-      margin-top: 1.5rem;
-    }
-    .archive a {
-      text-decoration: none; color: inherit;
-      background: var(--panel); border: 1px solid var(--hairline);
-      border-radius: var(--r-m); box-shadow: var(--shadow-s); overflow: hidden;
-      transition: border-color 0.15s ease-out, box-shadow 0.15s ease-out;
-    }
-    .archive a:hover { border-color: var(--line-strong); box-shadow: var(--shadow-m); }
-    .archive .frame { position: relative; aspect-ratio: 3 / 2; background: var(--wash); }
-    .archive .frame img { width: 100%; height: 100%; object-fit: cover; }
-    .archive .frame .placeholder {
-      width: 100%; height: 100%;
+    /* an image frame: a wash well that holds the space before the image lands */
+    .frame { position: relative; aspect-ratio: 3 / 2; background: var(--wash);
+      border-radius: var(--r-s); overflow: hidden; }
+    .frame img { width: 100%; height: 100%; object-fit: cover; }
+    .placeholder {
       display: flex; align-items: center; justify-content: center;
-      font-size: 0.8rem; opacity: 0.4;
-    }
-    .media-tag {
-      position: absolute; left: 0.35rem; bottom: 0.35rem;
-      padding: 0.22rem 0.5rem; border-radius: 999px;
-      background: var(--ink); color: var(--surface);
-      font-size: 0.62rem; font-weight: 500; line-height: 1;
-    }
-    .archive .cap { padding: 0.5rem 0.65rem; border-top: 1px solid var(--hairline); }
-    .archive .cap .date {
-      font: 500 0.68rem/1 var(--font-mono); opacity: 0.55;
-    }
-    .archive .cap .ttl {
-      display: block; margin-top: 0.25rem; font-size: 0.85rem;
-      white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+      width: 100%; height: 100%; padding: var(--s-4); text-align: center;
+      font-size: 0.85rem; color: var(--ink-3);
     }
 
-    .pager {
-      display: flex; gap: 1.5rem; justify-content: center; align-items: baseline;
-      margin-top: 2rem; font-family: var(--font-mono); font-size: 0.8rem;
+    /* photo — the day's image, flush on the page */
+    figure.plate img { width: 100%; aspect-ratio: 3 / 2; object-fit: contain;
+      background: var(--wash); border-radius: var(--r-s); }
+    figure.plate video { width: 100%; background: #000; border-radius: var(--r-s); }
+    figure.plate a { display: block; }
+    figure.plate > .placeholder { min-height: 16rem; background: var(--wash); border-radius: var(--r-s); }
+    figure.plate figcaption {
+      display: flex; justify-content: space-between; gap: var(--s-4);
+      padding-top: var(--s-2); font-size: 0.8rem; color: var(--ink-2);
     }
+    .cal-body { margin-top: var(--s-6); }
+    .cal-credit { font-family: var(--font-ui); font-size: 0.85rem; color: var(--ink-2); }
+
+    /* archive — a grid of days set off by space */
+    .archive {
+      display: grid; gap: var(--s-5) var(--s-4);
+      grid-template-columns: repeat(auto-fill, minmax(min(13rem, 100%), 1fr));
+      margin-top: var(--s-5);
+    }
+    .archive a { display: block; color: inherit; text-decoration: none; }
+    .archive a:hover .ttl { color: var(--accent); }
+    .media-tag {
+      position: absolute; left: var(--s-2); bottom: var(--s-2);
+      padding: 3px 7px; border-radius: var(--r-s);
+      background: var(--ink); color: var(--paper);
+      font-size: 0.7rem; font-weight: 500; line-height: 1.2;
+    }
+    .cap { display: grid; gap: 2px; padding-top: var(--s-2); }
+    .cap .ttl { font-size: 0.9rem; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+
+    /* the day stepper — the theme pager, under a horizon */
+    .stepper { margin-top: var(--s-6); padding-top: var(--s-3); border-top: 1px solid var(--rule); }
+    .stepper a, .stepper span { min-height: 40px; display: inline-flex; align-items: center; }
+
+    /* a definition list of readouts — rows on hairlines */
+    .meta-list { margin-top: var(--s-6); border-top: 1px solid var(--rule); }
+    .meta-list > div {
+      display: flex; gap: var(--s-4); padding: var(--s-2) 0;
+      border-bottom: 1px solid var(--rule);
+    }
+    .meta-list dt { flex: 0 0 6.5rem; font-size: 0.8rem; font-weight: 500; line-height: 1.6; color: var(--ink-2); }
+    .meta-list dd { margin: 0; font-family: var(--font-mono); font-size: 0.8rem; line-height: 1.6; overflow-wrap: anywhere; }
+
+    /* game status lines */
+    .game-status { font-size: 0.85rem; color: var(--ink-2); min-height: 1.2rem; }
+    .game-status.alert { color: var(--bad); }
 
     .cal-foot {
       display: flex; justify-content: space-between; align-items: baseline;
-      gap: 1rem; margin-top: 2.5rem; padding-top: 0.85rem;
-      border-top: 1px solid var(--hairline);
-      font-size: 0.78rem; font-weight: 500; opacity: 0.7;
+      flex-wrap: wrap; gap: var(--s-1) var(--s-4);
+      margin-top: var(--s-7); padding-top: var(--s-3);
+      border-top: 1px solid var(--rule);
+      font-size: 0.8rem; color: var(--ink-2);
     }
-    .cal-foot a { text-decoration: none; }
-    .cal-foot a:hover { color: var(--accent); }
+    .cal-foot a { color: inherit; text-decoration: none; }
+    .cal-foot a:hover { color: var(--ink); }
   </style>
 {{end}}
 
@@ -125,6 +99,17 @@
     </nav>
   </header>
 {{end}}{{end}}
+
+{{/* Previous / date / next — one day at a time. Expects .PrevURL, .NextURL, .Date. */}}
+{{define "stepper"}}
+  <nav class="pager stepper" aria-label="days">
+    {{if .PrevURL}}<a href="{{.PrevURL}}">← Previous</a>
+    {{else}}<span class="muted">← Previous</span>{{end}}
+    <span class="mono dim">{{.Date}}</span>
+    {{if .NextURL}}<a href="{{.NextURL}}">Next →</a>
+    {{else}}<span class="muted">Next →</span>{{end}}
+  </nav>
+{{end}}
 
 {{define "foot"}}
   <footer class="cal-foot">

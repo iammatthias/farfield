@@ -5,8 +5,8 @@
   <p>Self-hosted ad-hoc iOS distribution — one-tap installs of signed <code>.ipa</code> builds onto a registered iPhone, no cable and no laptop in reach. Upload a build and sideload content-addresses it, extracts its metadata from <code>Info.plist</code> and the embedded provisioning profile, generates the OTA manifest iOS expects, and serves a one-tap install page.</p>
 
   <figure class="screenshot">
-    <img src="assets/sideload.png?v=20260618" alt="Screenshot of the Farfield sideload install page" width="1120" height="1180" loading="lazy">
-    <figcaption>A build's install page: identity and profile-expiry banner, the one-tap install button, and a QR for desktop→phone handoff.</figcaption>
+    <img src="assets/sideload.png?v=20260929-v5" alt="Screenshot of the Farfield sideload builds page" width="1280" height="800" loading="lazy">
+    <figcaption>The builds page in the logged-in state: apps and their latest versions, and the upload form. Each build also has a public install page with a one-tap install and a QR for desktop→phone handoff.</figcaption>
   </figure>
 
   <figure class="observation" aria-label="OTA install flow: an iPhone opens a one-tap capability link, sideload serves the manifest and then the IPA with range requests; the bytes live in R2 with a local cache.">

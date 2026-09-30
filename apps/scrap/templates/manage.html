@@ -1,7 +1,7 @@
 {{define "title"}}Manage · farfield scrap{{end}}
 {{define "content"}}
   {{template "topbar" .}}
-  <p class="summary">
+  <p class="summary tech">
     <span>Total {{.Total}}</span>
     <span>Shown {{.Shown}}</span>
   </p>
@@ -26,36 +26,36 @@
     {{if or .Visibility .Lang .Q}}<a href="/manage">clear</a>{{end}}
   </form>
   {{if .Pastes}}
-    <div class="table-wrap">
-      <table class="admin">
+    <div class="table-wrap stack-wrap">
+      <table class="admin stack">
         <thead>
           <tr>
             <th>Title / ID</th>
             <th>Lang</th>
             <th class="nowrap">Age</th>
             <th>Visibility</th>
-            <th class="nowrap">Views</th>
+            <th class="num nowrap">Views</th>
             <th class="nowrap">Expiry</th>
-            <th>Token</th>
-            <th>Actions</th>
+            <th class="actions">Token</th>
+            <th class="actions">Actions</th>
           </tr>
         </thead>
         <tbody>
           {{range .Pastes}}
             <tr>
-              <td class="title">
+              <td data-label="Title" class="title">
                 <a href="/{{.ID}}">{{if .Title}}{{.Title}}{{else}}<span class="mono">{{.ID}}</span>{{end}}</a>
               </td>
-              <td class="lang">{{if .Lang}}{{.Lang}}{{else}}<span class="muted">—</span>{{end}}</td>
-              <td class="num nowrap">{{relAge .CreatedAt}}</td>
-              <td>
+              <td data-label="Lang" class="lang">{{if .Lang}}{{.Lang}}{{else}}<span class="muted">—</span>{{end}}</td>
+              <td data-label="Age" class="nowrap">{{relAge .CreatedAt}}</td>
+              <td data-label="Visibility">
                 {{if eq .Visibility "public"}}<span class="badge live">Public</span>
                 {{else if eq .Visibility "private"}}<span class="badge draft">Private</span>
                 {{else}}<span class="badge draft">Unlisted</span>{{end}}
               </td>
-              <td class="num nowrap">{{.Views}}</td>
-              <td class="num nowrap">{{with ttl .ExpiresAt}}{{.}}{{else}}<span class="muted">never</span>{{end}}</td>
-              <td class="actions">
+              <td data-label="Views" class="num nowrap">{{.Views}}</td>
+              <td data-label="Expiry" class="nowrap">{{with ttl .ExpiresAt}}{{.}}{{else}}<span class="muted">never</span>{{end}}</td>
+              <td data-label="Token" class="actions"><div class="action-row">
                 {{if .HasToken}}
                   <form method="post" action="/pastes/{{.ID}}/token/roll"
                         onsubmit="return confirm('Roll the token? This invalidates the current secret.')">
@@ -70,11 +70,11 @@
                     <button type="submit">Add token</button>
                   </form>
                 {{end}}
-              </td>
-              <td class="actions">
+              </div></td>
+              <td data-label="" class="actions">
                 <form method="post" action="/pastes/{{.ID}}/delete"
                       onsubmit="return confirm('Delete this paste?')">
-                  <button type="submit">Delete</button>
+                  <button class="danger" type="submit">Delete</button>
                 </form>
               </td>
             </tr>
@@ -83,7 +83,10 @@
       </table>
     </div>
   {{else}}
-    <p class="muted">No pastes match. <a href="/">Compose one.</a></p>
+    <div class="empty">
+      <p class="line">No pastes match.</p>
+      <p class="muted"><a href="/">Compose one.</a></p>
+    </div>
   {{end}}
   <div class="actions">
     <form method="post" action="/pastes/expired/delete"

@@ -1,30 +1,25 @@
-{{/* library: the shared layout supplies the shell and masthead;
-    only this app's own styles and partials live here. */}}
+{{/* library: the shared layout supplies the shell and masthead, and the
+    theme supplies tables, table.stack and td.actions; only this app's own
+    styles and partials live here. */}}
 
 {{define "styles"}}
   <style>
     /* opds admin — full-width, for the catalogue table */
     .container { max-width: 72rem; }
 
-    table.books { width: 100%; }
     table.books th { white-space: nowrap; }
     table.books td { vertical-align: middle; }
-    table.books td.shrink { width: 1%; white-space: nowrap; }
+    /* a cover is the image itself on the page — no frame */
     .cover {
       width: 40px; height: 56px; max-width: none; object-fit: cover; display: block;
-      border: 1px solid var(--hairline); border-radius: 3px; background: var(--wash);
+      border-radius: var(--r-s); background: var(--paper-2);
     }
     .cover.placeholder {
       display: flex; align-items: center; justify-content: center;
-      font-size: 0.62rem; font-weight: 500; opacity: 0.4;
+      font: 500 0.6rem/1 var(--font-mono); letter-spacing: 0.06em;
+      text-transform: uppercase; color: var(--ink-3);
     }
     td.title { font-weight: 500; }
-    td.meta { font-size: 0.85rem; opacity: 0.75; }
-    td.actions { white-space: nowrap; font-family: var(--font-mono); font-size: 0.78rem; }
-    td.actions form { display: inline; }
-    td.actions button {
-      background: none; border: 0; padding: 0; margin: 0;
-      font: inherit; color: var(--accent); cursor: pointer; text-decoration: underline;
-    }
+    td.meta { font-size: 0.85rem; color: var(--ink-2); }
   </style>
 {{end}}

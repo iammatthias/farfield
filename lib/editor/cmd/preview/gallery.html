@@ -1,0 +1,374 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Farfield Components</title>
+<style>{{.Fonts}}</style>
+<style>{{.UI}}</style>
+<style>{{.HostCSS}}</style>
+<style>
+/* gallery-only scaffolding: never shipped to an app */
+.view[hidden] { display: none !important; }
+.g-intro { max-width: 40rem; display: grid; gap: var(--s-3); }
+.g-intro .lede { font: 400 22px/1.35 var(--font-doc); letter-spacing: -0.01em; }
+.g-grid { display: grid; gap: var(--s-6) var(--s-7); grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); margin-top: var(--s-5); }
+.g-label { display: block; margin-bottom: var(--s-3); }
+.g-row { display: flex; gap: var(--s-2) var(--s-3); flex-wrap: wrap; align-items: center; }
+.g-note { font-size: 13px; color: var(--ink-2); margin-top: var(--s-3); max-width: 36rem; }
+.g-swatches { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: var(--s-4); }
+.g-swatch { display: grid; gap: 6px; }
+.g-swatch .g-chip { height: 56px; border-radius: var(--r-s); }
+.g-swatch .g-chip.edge { box-shadow: inset 0 0 0 1px var(--rule); }
+.type-spec { display: grid; gap: var(--s-5); }
+.type-spec .line { display: grid; grid-template-columns: 120px 1fr; gap: var(--s-4); align-items: baseline; padding-bottom: var(--s-4); border-bottom: 1px solid var(--rule); }
+.type-spec .line:last-child { border-bottom: 0; }
+@media (max-width: 640px) { .type-spec .line { grid-template-columns: 1fr; gap: var(--s-1); } }
+.art { width: 100%; height: 100%; display: block; }
+.g-float-demo { position: relative; min-height: 220px; }
+.g-float-demo .menu { position: absolute; left: 0; top: 0; }
+.g-toast { position: static; transform: none; display: inline-block; }
+.login-frame { background: var(--paper-2); border-radius: var(--r-m); }
+.login-frame .login { min-height: 520px; }
+.section { margin-top: var(--s-8); }
+.section > .section-head { margin-top: 0; }
+.media { display: grid; grid-template-columns: repeat(auto-fill, minmax(168px, 1fr)); gap: var(--s-5) var(--s-4); }
+.media figure { margin: 0; display: grid; gap: var(--s-2); }
+.media .frame { aspect-ratio: 4 / 3; border-radius: var(--r-s); overflow: hidden; background: var(--paper-2); }
+.media figcaption { display: flex; justify-content: space-between; gap: var(--s-2); }
+</style>
+</head>
+<body>
+
+<main class="container">
+<header class="bar">
+	<a class="mark" href="#components">farfield <span class="app">content</span></a>
+	<nav aria-label="Gallery">
+		<a href="#components" data-view="components" aria-current="page">Components</a>
+		<a href="#document" data-view="document">Document</a>
+		<a href="#signin" data-view="signin">Sign in</a>
+		<button type="button" class="btn quiet" id="theme" aria-label="Switch theme">Theme</button>
+	</nav>
+</header>
+
+<!-- ══ components ══════════════════════════════════════════════════════════ -->
+<div class="view" id="components">
+	<div class="page-head">
+		<div>
+			<h1 class="title">Components</h1>
+			<div class="readout">
+				<span class="tech">ui.css · v5</span>
+				<span class="tech">brand · far field</span>
+			</div>
+		</div>
+		<div class="actions">
+			<a class="btn" href="#document">Open the editor</a>
+		</div>
+	</div>
+
+	<div class="g-intro">
+		<p class="lede">An instrument on paper. Space does the grouping; lines run the full width, like horizons.</p>
+		<p class="muted">Borders mark only what they mean: an input's edge, keyboard focus. Shadows belong to things that float. Blue carries action in light, Horizon in dark, and the orange signal stays rare.</p>
+	</div>
+
+	<!-- type -->
+	<section class="section" id="type">
+		<div class="section-head"><h2>Type</h2><span class="tech">three faces, three jobs</span></div>
+		<div class="type-spec" style="margin-top: var(--s-5)">
+			<div class="line">
+				<span class="tech">Inter · UI</span>
+				<div>
+					<div style="font-size:26px;font-weight:500;letter-spacing:-0.012em">Entries</div>
+					<div style="font-size:15px">Buttons, labels, lists, tables, navigation — everything you operate.</div>
+				</div>
+			</div>
+			<div class="line">
+				<span class="tech">Newsreader · documents</span>
+				<div>
+					<div style="font:400 38px/1.1 var(--font-doc);letter-spacing:-0.022em">Field notes from the edge</div>
+					<div style="font:400 19px/1.55 var(--font-doc)">Only inside what you write and read: titles, bodies, the empty-state line. Headlines at 400, never bold.</div>
+				</div>
+			</div>
+			<div class="line">
+				<span class="tech">Plex Mono · readouts</span>
+				<div class="g-row">
+					<span class="tech">2026-09-29 14:02</span>
+					<span class="tech">bafkrei…q4xa</span>
+					<span class="tech">8787 · 12 ms</span>
+				</div>
+			</div>
+		</div>
+	</section>
+
+	<!-- colour -->
+	<section class="section" id="colour">
+		<div class="section-head"><h2>Colour</h2><span class="tech">tokens · light and dark</span></div>
+		<div class="g-swatches" style="margin-top: var(--s-5)">
+			<div class="g-swatch"><div class="g-chip edge" style="background:var(--paper)"></div><span class="tech">--paper</span></div>
+			<div class="g-swatch"><div class="g-chip" style="background:var(--paper-2)"></div><span class="tech">--paper-2</span></div>
+			<div class="g-swatch"><div class="g-chip" style="background:var(--ink)"></div><span class="tech">--ink</span></div>
+			<div class="g-swatch"><div class="g-chip" style="background:var(--ink-2)"></div><span class="tech">--ink-2</span></div>
+			<div class="g-swatch"><div class="g-chip" style="background:var(--accent)"></div><span class="tech">--accent</span></div>
+			<div class="g-swatch"><div class="g-chip" style="background:var(--signal)"></div><span class="tech">--signal</span></div>
+			<div class="g-swatch"><div class="g-chip" style="background:var(--good)"></div><span class="tech">--good</span></div>
+			<div class="g-swatch"><div class="g-chip" style="background:var(--bad)"></div><span class="tech">--bad</span></div>
+		</div>
+	</section>
+
+	<!-- actions and forms -->
+	<section class="section" id="controls">
+		<div class="section-head"><h2>Actions and fields</h2></div>
+		<div class="g-grid">
+			<div>
+				<span class="tech g-label">Buttons</span>
+				<div class="g-row">
+					<button class="btn primary" type="button">Publish</button>
+					<button class="btn" type="button">Save draft</button>
+					<button class="btn quiet" type="button">Cancel</button>
+					<button class="quiet" type="submit">Save changelog</button>
+					<button class="btn danger" type="button">Delete</button>
+				</div>
+				<p class="g-note">One primary per view. Secondary actions are text that gains a wash on hover — no outlines.</p>
+			</div>
+			<form class="form" onsubmit="return false">
+				<div class="field">
+					<label for="g-title">Title</label>
+					<input id="g-title" type="text" value="Flower Dreams">
+				</div>
+				<div class="field">
+					<label for="g-slug">Slug</label>
+					<input id="g-slug" type="text" value="flower-dreams">
+					<span class="hint">farfield.systems/content/flower-dreams</span>
+				</div>
+				<div class="field">
+					<label for="g-kind">Kind</label>
+					<select id="g-kind"><option>Post</option><option>Recipe</option><option>Series</option></select>
+				</div>
+				<div class="choices">
+					<label class="check"><input type="checkbox" checked> Listed</label>
+					<label class="check"><input type="checkbox"> Pinned</label>
+				</div>
+			</form>
+		</div>
+	</section>
+
+	<!-- lists -->
+	<section class="section" id="lists">
+		<div class="section-head"><h2>Lists</h2><span class="tech">rows on hairlines</span></div>
+		<nav class="tabs" aria-label="Filter" style="margin-top: var(--s-4)">
+			<a href="#lists" aria-current="true">All <span class="count">214</span></a>
+			<a href="#lists">Posts <span class="count">168</span></a>
+			<a href="#lists">Recipes <span class="count">31</span></a>
+			<a href="#lists">Drafts <span class="count">15</span></a>
+		</nav>
+		<div class="list">
+			<a class="item" href="#lists">
+				<div>
+					<div class="title">Text your tools</div>
+					<div class="sub">Farfield answers iMessages now: a photo and a caption become a feed post, and "undo" takes it back.</div>
+				</div>
+				<div class="side"><span class="status live">Published</span><span class="tech">Aug 27</span></div>
+			</a>
+			<a class="item" href="#lists">
+				<div>
+					<div class="title">Flower Dreams</div>
+					<div class="sub">Seventeen Vimeo embeds that predate the renderer, waiting on a video block.</div>
+				</div>
+				<div class="side"><span class="status draft">Draft</span><span class="tech">Mar 12</span></div>
+			</a>
+			<a class="item" href="#lists">
+				<div>
+					<div class="title">Brown butter chocolate chip cookies</div>
+					<div class="sub">Makes 24 · 45 min · scales by weight.</div>
+					<div class="tags" style="margin-top:6px"><span>recipe</span><span>baking</span></div>
+				</div>
+				<div class="side"><span class="status live">Published</span><span class="tech">Jan 04</span></div>
+			</a>
+		</div>
+		<div class="pager"><a href="#lists">← Newer</a><span class="tech">1 – 3 of 214</span><a href="#lists">Older →</a></div>
+	</section>
+
+	<!-- readouts -->
+	<section class="section" id="readouts">
+		<div class="section-head"><h2>Readouts</h2><span class="tech">pulse · last 24 h</span></div>
+		<div class="summary" style="margin-top: var(--s-5)"><span class="tech">total 214</span><span class="tech">public 168</span><span class="tech">drafts 15</span></div>
+		<div class="stats" style="margin-top: var(--s-5)">
+			<div class="stat">
+				<div class="value">99.98<small>%</small></div>
+				<span class="tech">uptime</span>
+				<svg class="spark" viewBox="0 0 120 28" preserveAspectRatio="none" aria-hidden="true"><polyline fill="none" stroke="currentColor" stroke-width="1.5" vector-effect="non-scaling-stroke" points="0,6 10,6 20,5 30,6 40,6 50,6 60,22 70,6 80,5 90,6 100,6 110,6 120,6"/></svg>
+			</div>
+			<div class="stat">
+				<div class="value">1,284</div>
+				<span class="tech">visits</span>
+				<svg class="spark" viewBox="0 0 120 28" preserveAspectRatio="none" aria-hidden="true"><polyline fill="none" stroke="currentColor" stroke-width="1.5" vector-effect="non-scaling-stroke" points="0,20 10,18 20,21 30,15 40,16 50,11 60,13 70,8 80,12 90,9 100,6 110,10 120,7"/></svg>
+			</div>
+			<div class="stat">
+				<div class="value">14<small>ms</small></div>
+				<span class="tech">median response</span>
+				<svg class="spark" viewBox="0 0 120 28" preserveAspectRatio="none" aria-hidden="true"><polyline fill="none" stroke="currentColor" stroke-width="1.5" vector-effect="non-scaling-stroke" points="0,14 10,15 20,13 30,14 40,16 50,14 60,12 70,14 80,15 90,13 100,14 110,15 120,14"/></svg>
+			</div>
+			<div class="stat">
+				<div class="value">15<small>/ 15</small></div>
+				<span class="tech">apps healthy</span>
+			</div>
+		</div>
+
+		<dl class="kv" style="margin-top: var(--s-7)"><dt>cid</dt><dd class="mono">bafkreigr4pcohr4qlxz…</dd><dt>size</dt><dd>24.0 KB</dd><dt>taken</dt><dd class="mono">2026-09-29 17:20</dd></dl>
+		<div class="table-wrap" style="margin-top: var(--s-7)">
+			<table>
+				<thead><tr><th>App</th><th>Status</th><th class="num">Port</th><th class="num">p50</th><th class="num">Uptime</th></tr></thead>
+				<tbody>
+					<tr><td>content</td><td><span class="status live">Up</span></td><td class="num">8787</td><td class="num">11 ms</td><td class="num">100.00%</td></tr>
+					<tr><td>feed</td><td><span class="status live">Up</span></td><td class="num">8788</td><td class="num">9 ms</td><td class="num">100.00%</td></tr>
+					<tr><td>blobs</td><td><span class="status warn">Slow</span></td><td class="num">8789</td><td class="num">212 ms</td><td class="num">99.91%</td></tr>
+					<tr><td>library</td><td><span class="status live">Up</span></td><td class="num">8797</td><td class="num">13 ms</td><td class="num">100.00%</td></tr>
+					<tr><td>backup</td><td><span class="status bad">Down</span></td><td class="num">8791</td><td class="num">—</td><td class="num">98.20%</td></tr>
+				</tbody>
+			</table>
+		</div>
+	</section>
+
+	<!-- media -->
+	<section class="section" id="media">
+		<div class="section-head"><h2>Media</h2><span class="tech">blobs</span></div>
+		<div class="media" style="margin-top: var(--s-5)">
+			<figure><div class="frame"><svg class="art" viewBox="0 0 160 120" preserveAspectRatio="xMidYMid slice" aria-hidden="true"><rect width="160" height="120" fill="#0d3560"/><rect y="78" width="160" height="42" fill="#0e222d"/><circle cx="112" cy="70" r="16" fill="#e59f67"/></svg></div><figcaption><span class="tech">IMG_2041.jpg</span><span class="tech">1.8 MB</span></figcaption></figure>
+			<figure><div class="frame"><svg class="art" viewBox="0 0 160 120" preserveAspectRatio="xMidYMid slice" aria-hidden="true"><rect width="160" height="120" fill="#c9b79c"/><path d="M0 90 L40 60 L70 80 L110 40 L160 85 L160 120 L0 120Z" fill="#4c5456"/></svg></div><figcaption><span class="tech">ridge.heic → jpg</span><span class="tech">2.4 MB</span></figcaption></figure>
+			<figure><div class="frame"><svg class="art" viewBox="0 0 160 120" preserveAspectRatio="xMidYMid slice" aria-hidden="true"><rect width="160" height="120" fill="#f3e5d1"/><circle cx="80" cy="60" r="34" fill="none" stroke="#0e222d" stroke-width="1"/><circle cx="80" cy="60" r="18" fill="none" stroke="#0e222d" stroke-width="1"/><circle cx="80" cy="60" r="3" fill="#e59f67"/></svg></div><figcaption><span class="tech">dish.png</span><span class="tech">640 KB</span></figcaption></figure>
+			<figure><div class="frame"><svg class="art" viewBox="0 0 160 120" preserveAspectRatio="xMidYMid slice" aria-hidden="true"><rect width="160" height="120" fill="#132f3d"/><g fill="#f3e5d1"><circle cx="20" cy="20" r="1"/><circle cx="60" cy="34" r="1"/><circle cx="130" cy="16" r="1.4"/><circle cx="96" cy="52" r="1"/><circle cx="36" cy="70" r="1"/></g></svg></div><figcaption><span class="tech">night.jpg</span><span class="tech">3.1 MB</span></figcaption></figure>
+		</div>
+	</section>
+
+	<!-- feedback -->
+	<section class="section" id="feedback">
+		<div class="section-head"><h2>Feedback</h2></div>
+		<div class="g-grid">
+			<div style="display:grid;gap:var(--s-4)">
+				<span class="tech">Notices</span>
+				<div class="notice">Saved. The site shows it after the next rebuild.</div>
+				<div class="notice good">Key minted. It is shown once — copy it now.</div>
+				<div class="notice bad">Upload failed: the edge caps a request at 100 MB.</div>
+				<span class="tech" style="margin-top:var(--s-4)">Status</span>
+				<div class="g-row"><span class="status live">Live</span><span class="status draft">Draft</span><span class="status warn">Slow</span><span class="status bad">Down</span><span class="status signal">New</span></div>
+				<span class="tech" style="margin-top:var(--s-4)">Toast</span>
+				<div><div class="toast g-toast">Post removed · <a href="#feedback" style="color:inherit">Undo</a></div></div>
+			</div>
+			<div>
+				<span class="tech">Empty state</span>
+				<div class="empty">
+					<p class="line">Nothing in the field yet.</p>
+					<p class="muted">Bookmarks you save from the share sheet land here.</p>
+					<div><a class="btn primary" href="#feedback">Add a bookmark</a></div>
+				</div>
+			</div>
+			<div>
+				<span class="tech g-label">Menu</span>
+				<div class="g-float-demo">
+					<div class="menu" role="menu">
+						<a href="#feedback">content <span class="tech">8787</span></a>
+						<a href="#feedback">feed <span class="tech">8788</span></a>
+						<a href="#feedback" aria-selected="true">library <span class="tech">8797</span></a>
+						<hr>
+						<a href="#feedback">All apps</a>
+					</div>
+				</div>
+			</div>
+		</div>
+	</section>
+
+	<!-- code -->
+	<section class="section" id="code">
+		<div class="section-head"><h2>Code</h2></div>
+		<pre class="code" style="margin-top: var(--s-5)">ssh iam@homelab.local 'ff-deploy farfield'
+curl -s https://content.farfield.systems/status</pre>
+	</section>
+</div>
+
+<!-- ══ the document page ═══════════════════════════════════════════════════ -->
+<div class="view" id="document" hidden><div class="doc-page">
+	<form id="doc-form" onsubmit="return false">
+		<div class="field">
+			<input class="title-input" type="text" name="title" value="Field notes" placeholder="Untitled" aria-label="Title">
+		</div>
+		<div class="meta-band">
+			<span class="chip-wrap"><button type="button" class="chip filled" data-chip="collection">Field Notes</button></span>
+			<span class="chip-wrap"><button type="button" class="chip filled" data-chip="slug">field-notes-editor</button></span>
+			<span class="chip-wrap"><button type="button" class="chip empty" data-chip="tags">+ tags</button></span>
+			<span class="chip-wrap"><button type="button" class="chip empty" data-chip="excerpt" data-filled-label="excerpt ✓">+ excerpt</button></span>
+		</div>
+		<div class="field doc-fallback">
+			<label for="body">Body (markdown)</label>
+			<textarea id="body" name="body" data-editor>{{html .Sample}}</textarea>
+		</div>
+		<div class="doc-pill">
+			<span class="doc-words"></span>
+			<span class="chip-wrap pop-up"><button type="button" class="chip" data-chip="history">history</button></span>
+			<button type="button" class="chip state-draft">draft</button>
+			<span class="save-note"></span>
+			<button type="button" data-doc-save>Save</button>
+		</div>
+	</form>
+</div></div>
+
+<!-- ══ sign in ═════════════════════════════════════════════════════════════ -->
+<div class="view" id="signin" hidden>
+	<div class="login-frame">
+		<div class="login">
+			<div style="display:grid;gap:var(--s-3)">
+				<span class="mark">farfield <span class="app">content</span></span>
+				<p class="muted">Sign in to write.</p>
+			</div>
+			<form class="form" onsubmit="return false">
+				<div class="field">
+					<label for="g-pw">Password</label>
+					<input id="g-pw" type="password" autocomplete="off">
+				</div>
+				<div><button class="btn primary" type="submit" style="width:100%">Sign in</button></div>
+			</form>
+		</div>
+	</div>
+</div>
+</main>
+
+{{.Assets}}
+<script>{{.HostJS}}</script>
+<script>{{.MountJS}}</script>
+<script>
+(function () {
+	var views = document.querySelectorAll(".view");
+	var links = document.querySelectorAll("[data-view]");
+	function show(name) {
+		if (!document.getElementById(name)) name = "components";
+		views.forEach(function (v) { v.hidden = v.id !== name; });
+		links.forEach(function (a) {
+			if (a.getAttribute("data-view") === name) a.setAttribute("aria-current", "page");
+			else a.removeAttribute("aria-current");
+		});
+		window.scrollTo(0, 0);
+		window.dispatchEvent(new Event("resize"));
+	}
+	links.forEach(function (a) {
+		a.addEventListener("click", function (e) { e.preventDefault(); show(a.getAttribute("data-view")); try { history.replaceState(null, "", "#" + a.getAttribute("data-view")); } catch (_) {} });
+	});
+	document.querySelectorAll('a[href="#document"]:not([data-view])').forEach(function (a) {
+		a.addEventListener("click", function (e) { e.preventDefault(); show("document"); });
+	});
+	var start = (location.hash || "").slice(1);
+	show(start === "document" || start === "signin" ? start : "components");
+	document.getElementById("theme").onclick = function () {
+		var r = document.documentElement;
+		var dark = r.dataset.theme ? r.dataset.theme === "dark" : matchMedia("(prefers-color-scheme: dark)").matches;
+		r.dataset.theme = dark ? "light" : "dark";
+	};
+	document.getElementById("doc-form").addEventListener("submit", function () {
+		var at = new Date();
+		document.querySelectorAll(".save-note").forEach(function (n) {
+			n.classList.remove("bad");
+			n.textContent = "Saved " + at.getHours() + ":" + String(at.getMinutes()).padStart(2, "0") + " · preview only";
+		});
+	});
+})();
+</script>
+</body>
+</html>

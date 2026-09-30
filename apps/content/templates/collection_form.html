@@ -4,7 +4,7 @@
   <h2 class="page-title">{{if .IsNew}}New collection{{else}}Edit collection{{end}}</h2>
   {{with .Error}}<p class="error">{{.}}</p>{{end}}
 
-  <form method="post" action="{{.Action}}" class="prose">
+  <form method="post" action="{{.Action}}" class="measure">
     <div class="field">
       <label for="name">Name</label>
       <input type="text" id="name" name="name" value="{{.Collection.Name}}" required>
@@ -27,13 +27,12 @@
     </div>
     <div class="actions">
       <button type="submit">{{if .IsNew}}Create collection{{else}}Save changes{{end}}</button>
-      <a href="/">Cancel</a>
+      <a class="muted" href="/">Cancel</a>
     </div>
   </form>
 
   {{if not .IsNew}}
-    <form method="post" action="/collections/{{.Collection.Slug}}/delete" class="prose"
-          style="margin-top:1.25rem"
+    <form method="post" action="/collections/{{.Collection.Slug}}/delete" class="actions measure"
           onsubmit="return confirm('Delete this collection and ALL of its entries?')">
       <button class="danger" type="submit">Delete collection</button>
     </form>

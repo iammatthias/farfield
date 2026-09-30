@@ -3,8 +3,6 @@ package main
 import (
 	"context"
 	"database/sql"
-	"encoding/json"
-	"html/template"
 	"net/http"
 	"strings"
 	"unicode/utf8"
@@ -30,49 +28,6 @@ func newRenderer(db *sql.DB, blobsURL, blobsPublic string) *markdown.Renderer {
 			return string(inner.Render(ctx, se.Body)), true
 		},
 	}
-}
-
-// maxPreviewBody caps the preview endpoint's request body — far above any
-// real entry, well below abuse.
-const maxPreviewBody = 2 << 20
-
-// handlePreview renders posted markdown to HTML for the editor's live
-// preview. Session-gated: it renders exactly what the edit page would.
-func (s *Server) handlePreview(w http.ResponseWriter, r *http.Request) {
-	var req struct {
-		Body string `json:"body"`
-	}
-	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, maxPreviewBody)).Decode(&req); err != nil {
-		web.WriteError(w, http.StatusBadRequest, "invalid JSON")
-		return
-	}
-	web.WriteJSON(w, http.StatusOK, map[string]any{
-		"html": string(s.md.Render(r.Context(), req.Body)),
-	})
-}
-
-// handleEditdoc renders posted markdown to the constrained editable HTML the
-// document editor manipulates in place. Session-gated like the preview.
-func (s *Server) handleEditdoc(w http.ResponseWriter, r *http.Request) {
-	var req struct {
-		Body string `json:"body"`
-	}
-	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, maxPreviewBody)).Decode(&req); err != nil {
-		web.WriteError(w, http.StatusBadRequest, "invalid JSON")
-		return
-	}
-	web.WriteJSON(w, http.StatusOK, map[string]any{
-		"html": string(s.md.RenderEditable(r.Context(), req.Body)),
-	})
-}
-
-// bodyHTML renders a stored body for the edit page's document card; an empty
-// body stays empty so the template shows the placeholder.
-func (s *Server) bodyHTML(r *http.Request, body string) template.HTML {
-	if strings.TrimSpace(body) == "" {
-		return ""
-	}
-	return s.md.Render(r.Context(), body)
 }
 
 // wordCount is the edit page's initial word count; the editor recounts live.

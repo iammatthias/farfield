@@ -119,7 +119,7 @@ func (s *Server) renderSeriesForm(w http.ResponseWriter, r *http.Request, se *Se
 	s.rd.Render(w, "series_form.html", map[string]any{
 		"Series": se, "IsNew": isNew, "Action": action, "Error": errMsg,
 		"BlobsPublic": s.blobsPublic, "ContentPublic": s.contentPublic,
-		"BodyHTML": s.bodyHTML(r, se.Body), "Words": wordCount(se.Body),
+		"Words": wordCount(se.Body),
 	})
 }
 

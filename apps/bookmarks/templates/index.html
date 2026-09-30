@@ -1,37 +1,37 @@
 {{define "title"}}Bookmarks · farfield{{end}}
 {{define "content"}}
   {{template "topbar" .}}
-  <p class="summary">
+  <p class="summary tech">
     <span>Total {{.Total}}</span>
     <span>Public {{.Public}}</span>
     <span>Private {{.Private}}</span>
   </p>
   {{if .Bookmarks}}
-    <div class="table-wrap">
-      <table class="admin">
+    <div class="table-wrap stack-wrap">
+      <table class="admin stack">
         <thead>
           <tr>
             <th>Title</th>
             <th>URL</th>
             <th>Category</th>
             <th>Visibility</th>
-            <th>Actions</th>
+            <th class="actions">Actions</th>
           </tr>
         </thead>
         <tbody>
           {{range .Bookmarks}}
             <tr>
-              <td>{{if .Title}}{{.Title}}{{else}}<span class="muted">—</span>{{end}}</td>
-              <td class="url"><a href="{{.URL}}" rel="noopener noreferrer">{{.URL}}</a></td>
-              <td class="cat">{{if .Category}}{{.Category}}{{else}}<span class="muted">—</span>{{end}}</td>
-              <td>
+              <td data-label="Title">{{if .Title}}{{.Title}}{{else}}<span class="muted">—</span>{{end}}</td>
+              <td class="url" data-label="URL"><a href="{{.URL}}" rel="noopener noreferrer">{{.URL}}</a></td>
+              <td class="cat mono" data-label="Category">{{if .Category}}{{.Category}}{{else}}<span class="muted">—</span>{{end}}</td>
+              <td data-label="Visibility">
                 {{if .Public}}
                   <span class="badge live">Public</span>
                 {{else}}
                   <span class="badge draft">Private</span>
                 {{end}}
               </td>
-              <td class="actions">
+              <td class="actions" data-label="">
                 <div class="action-row">
                   <a href="/bookmarks/{{.ID}}/edit">Edit</a>
                   <form method="post" action="/bookmarks/{{.ID}}/refetch">
@@ -49,6 +49,9 @@
       </table>
     </div>
   {{else}}
-    <p class="muted">No bookmarks yet. <a href="/new">Add one.</a></p>
+    <div class="empty">
+      <p class="line">No bookmarks saved yet.</p>
+      <p class="muted"><a href="/new">Add one.</a></p>
+    </div>
   {{end}}
 {{end}}

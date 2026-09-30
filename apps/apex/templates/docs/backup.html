@@ -7,7 +7,7 @@
   <p>Backups are taken on a schedule (every six hours) and stored under the CIDv1 hash of the snapshot bytes. Because the hash is content-addressed, an unchanged database hashes to a snapshot already on record and uploads nothing — request telemetry lives outside the app databases precisely so quiet apps stay byte-identical between real changes. Snapshots age out on a retention ladder: everything for 48 hours, daily for 30 days, weekly for 90, and each app's newest forever.</p>
 
   <figure class="screenshot">
-    <img src="assets/backup.png?v=20260520-loggedin" alt="Screenshot of the Farfield backup UI" width="1280" height="800" loading="lazy">
+    <img src="assets/backup.png?v=20260929-v5" alt="Screenshot of the Farfield backup UI" width="1280" height="800" loading="lazy">
     <figcaption>Backup dashboard in the logged-in state on the private/internal route.</figcaption>
   </figure>
 

@@ -1,403 +1,244 @@
-/* Farfield Docs — overlay on the shared theme (/static/styles.css).
-   The shared lib/theme provides tokens, type, code, tables, and base styles.
-   Only docs-specific layout + components live here.
+/* Farfield Docs — a layer over the shared v5 theme (/static/styles.css).
 
-   The register is BRAND.md's plate mode: printed research material. Air is
-   structural — a reference page should read like a survey sheet, not a
-   wall: generous section spacing, one fine rule per horizon, endpoints as
-   instrument rows rather than stacked boxes. */
+   The theme supplies tokens, type, the top bar, tables, code and status. Only
+   what documentation needs lives here: the index sidebar, the reading column,
+   endpoint rows, record shapes, figures and screenshots.
 
-html, body { overflow-x: hidden; }
+   The register is BRAND.md's plate mode — printed research material: a
+   reference page reads like a survey sheet, with air between sections and
+   one fine rule per horizon. Headings are Newsreader because a docs page is
+   a document; everything you operate stays Inter. No boxes. */
 
-/* ── Top bar: the farfield masthead, aligned with the layout below ── */
-.bar {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 1rem;
-  max-width: 78rem;
-  margin: 0 auto;
-  padding: 1.5rem clamp(1.25rem, 3vw, 2.5rem) 1rem;
-  border-bottom: 1px solid var(--hairline);
-}
-
-/* ── Layout: left sidebar + content ── */
+/* ── Layout: the index on the left, the reading column beside it ── */
 .docs-layout {
-  display: grid;
-  grid-template-columns: 14rem minmax(0, 1fr);
-  gap: clamp(2.5rem, 5vw, 5rem);
-  max-width: 78rem;
-  margin: 0 auto;
-  padding: 0 clamp(1.25rem, 3vw, 2.5rem);
-  align-items: start;
+	display: grid;
+	grid-template-columns: 13rem minmax(0, 1fr);
+	gap: clamp(2.5rem, 5vw, 5rem);
+	max-width: calc(78rem + 2 * var(--gutter));
+	margin: 0 auto;
+	padding: 0 var(--gutter);
+	align-items: start;
 }
+/* The top bar is the theme's; here it isn't inside a .container, so its
+   bottom margin gives way to the layout's own rhythm. */
+body > .bar { margin-bottom: 0; padding-inline: max(var(--gutter), calc(50vw - 39rem)); }
 
-.page {
-  max-width: 46rem;
-  padding: 3.5rem 0 6rem;
-}
+.page { max-width: var(--measure); padding: var(--s-8) 0 var(--s-9); }
 .page > :first-child { margin-top: 0; }
 
-/* ── Sidebar: a quiet index, not a second page ── */
+/* ── The index: a quiet column of words; the current one in ink ── */
 .sidebar {
-  position: sticky;
-  top: 0;
-  height: 100vh;
-  overflow-y: auto;
-  padding: 3.5rem 1.5rem 2rem 0;
+	position: sticky;
+	top: var(--top-h);
+	max-height: calc(100vh - var(--top-h));
+	overflow-y: auto;
+	padding: var(--s-8) 0 var(--s-6);
 }
-
-.brand {
-  font: 500 1.1rem/1.5 var(--font-sans);
-  letter-spacing: -0.01em;
-  text-decoration: none;
-  color: var(--ink);
-}
-.brand:hover { opacity: 0.7; }
-
-.docs-nav { display: flex; flex-direction: column; gap: 0.1rem; }
-.docs-nav::before {
-  content: "Index";
-  font-family: var(--font-mono);
-  font-size: 0.66rem;
-  font-weight: 500;
-  letter-spacing: 0.14em;
-  text-transform: uppercase;
-  opacity: 0.5;
-  margin-bottom: 0.9rem;
-}
+.docs-nav { display: flex; flex-direction: column; }
+.docs-nav .tech { margin-bottom: var(--s-3); }
 .docs-nav a {
-  font: 400 0.9rem/1.5 var(--font-sans);
-  color: var(--ink);
-  text-decoration: none;
-  opacity: 0.55;
-  padding: 0.32rem 0.6rem;
-  border-radius: 4px;
+	padding: 5px 0 5px var(--s-3);
+	border-left: 2px solid transparent;
+	color: var(--ink-2);
+	font-size: 0.9rem;
+	text-decoration: none;
 }
-.docs-nav a:hover { opacity: 1; background: var(--wash); }
-.docs-nav a[aria-current="page"] {
-  opacity: 1;
-  font-weight: 500;
-  background: var(--wash);
-}
+.docs-nav a:hover { color: var(--ink); }
+.docs-nav a[aria-current="page"] { color: var(--ink); font-weight: 500; border-left-color: var(--ink); }
 
-/* Hamburger — mobile only (see media query). */
+/* The burger shows only on phones, where the index folds away. The checkbox
+   stays visually hidden rather than `hidden`, so the label keeps focus. */
 .nav-burger { display: none; }
-
-/* The nav checkbox is visually hidden, not `hidden`: the attribute removes it
-   from the tab order, which makes the burger unreachable by keyboard. */
 .nav-toggle {
-  position: absolute;
-  width: 1px;
-  height: 1px;
-  margin: -1px;
-  padding: 0;
-  border: 0;
-  overflow: hidden;
-  clip-path: inset(50%);
-  white-space: nowrap;
+	position: absolute; width: 1px; height: 1px; margin: -1px; padding: 0;
+	border: 0; overflow: hidden; clip-path: inset(50%); white-space: nowrap;
 }
-#nav-toggle:focus-visible ~ .bar .nav-burger {
-  outline: 2px solid var(--line-strong);
-  outline-offset: 3px;
-}
+#nav-toggle:focus-visible ~ .bar .nav-burger { outline: 2px solid var(--signal); outline-offset: 3px; }
 
-/* ── Docs prose, atop the theme's type ── */
+/* ── The reading column ── */
 
-/* The page opens editorial: a Newsreader title with room to breathe. */
+/* A docs page opens editorial: a Newsreader title with room to breathe. */
 .page h1 {
-  font-family: var(--font-serif);
-  font-weight: 500;
-  font-size: clamp(2rem, 4vw, 2.6rem);
-  line-height: 1.05;
-  letter-spacing: -0.02em;
-  margin-bottom: 1.4rem;
+	font: 400 clamp(2rem, 4vw, 2.6rem)/1.05 var(--font-doc);
+	letter-spacing: -0.022em;
+	margin-bottom: var(--s-5);
 }
-
-/* Every h2 is a horizon: the rule sits above it, the section hangs below,
-   and the space between sections is where the page gets its air. */
+/* Every h2 is a horizon: the rule above it, the section hanging below, and
+   the air between sections is where the page gets its structure. */
 .page h2 {
-  font-family: var(--font-serif);
-  font-weight: 500;
-  font-size: 1.45rem;
-  letter-spacing: -0.015em;
-  line-height: 1.15;
-  margin-top: 4rem;
-  padding-top: 2rem;
-  border-top: 1px solid var(--hairline);
-  border-bottom: 0;
+	font: 500 1.45rem/1.15 var(--font-doc);
+	letter-spacing: -0.014em;
+	margin-top: var(--s-8);
+	padding-top: var(--s-6);
+	border-top: 1px solid var(--rule);
 }
-.page h3 { margin-top: 2.4rem; }
+.page h3 { margin-top: var(--s-6); }
 .page > * + * { margin-top: 1.1rem; }
 .page > h2 + *, .page > h3 + * { margin-top: 0.9rem; }
 .page p, .page li { max-width: 44rem; line-height: 1.65; }
 .page ul, .page ol { padding-left: 1.5rem; }
 .page li { margin-top: 0.45rem; }
-.page li::marker { color: var(--ink); opacity: 0.4; }
-
-/* Docs tables can be wide — let them scroll instead of stretching. */
+.page li::marker { color: var(--ink-3); }
+/* Wide tables scroll inside the column instead of stretching the page. */
 .page table { display: block; overflow-x: auto; -webkit-overflow-scrolling: touch; }
 
-/* ── Intro hero (overview) ── */
-.hero { margin-bottom: 2rem; }
-.hero p {
-  font-size: 1.15rem;
-  line-height: 1.6;
-  opacity: 0.85;
-  max-width: 40rem;
+.hero { margin-bottom: var(--s-6); }
+.hero p { font-size: 1.1rem; line-height: 1.6; color: var(--ink-2); max-width: 40rem; }
+
+/* A meta line under a title: technical readouts. */
+.meta {
+	font: 500 0.72rem/1.5 var(--font-mono);
+	letter-spacing: 0.06em; text-transform: uppercase;
+	color: var(--ink-2);
 }
+
+/* ── The apps on the overview: groups set off by a rule, not tiles ── */
+.app-grid {
+	display: grid;
+	gap: var(--s-1) var(--s-6);
+	grid-template-columns: repeat(auto-fill, minmax(14rem, 1fr));
+}
+.app-card {
+	display: block; min-width: 0;
+	padding: var(--s-4) 0;
+	border-top: 1px solid var(--rule);
+	color: var(--ink); text-decoration: none;
+}
+.app-card .name { font-weight: 500; }
+.app-card:hover .name { color: var(--accent); }
+.app-card .url {
+	font: 0.72rem var(--font-mono); color: var(--ink-3);
+	margin: 0.25rem 0 0.5rem; overflow-wrap: anywhere;
+}
+.app-card .desc { font-size: 0.9rem; color: var(--ink-2); line-height: 1.5; }
+
+/* ── API endpoints: instrument rows on hairlines ── */
+.endpoint {
+	padding: var(--s-3) 0;
+	border-bottom: 1px solid var(--rule);
+	overflow-wrap: break-word;
+}
+.endpoint + .endpoint { margin-top: 0; }
+.endpoint:first-of-type { border-top: 1px solid var(--rule); }
+.endpoint .method {
+	display: inline-block; min-width: 3.6rem; margin-right: 0.6rem;
+	font: 500 0.72rem var(--font-mono); letter-spacing: 0.06em;
+	color: var(--accent);
+}
+.endpoint .path { font: 0.88rem var(--font-mono); overflow-wrap: anywhere; }
+.endpoint .returns {
+	margin-top: 0.3rem; padding-left: 4.2rem;
+	font-size: 0.88rem; line-height: 1.55; color: var(--ink-2);
+}
+@media (max-width: 640px) { .endpoint .returns { padding-left: 0; } }
+
+/* ── A record's shape: source on a wash, no frame ── */
+.record-shape {
+	font: 0.8125rem/1.65 var(--font-mono);
+	background: var(--wash); padding: var(--s-4) var(--s-5);
+	border-radius: var(--r-s);
+	overflow-x: auto; white-space: pre; max-width: 100%;
+}
+
+/* ── Skills page: sections separated by rules ── */
+.skill-section { padding-bottom: var(--s-6); border-bottom: 1px solid var(--rule); }
+.skill-section:last-child { border-bottom: 0; }
+.skill-section h3 { margin-top: 0; }
+
+/* ── Screenshots: the image itself, on the page ── */
+.screenshot { max-width: 100%; margin-top: var(--s-5); }
+.screenshot img {
+	display: block; width: 100%; max-width: 100%; height: auto;
+	border-radius: var(--r-s); background: var(--paper-2);
+}
+.screenshot figcaption { margin-top: var(--s-2); font-size: 0.85rem; line-height: 1.5; color: var(--ink-2); }
 
 /* ── Observation figures: inline SVG diagrams in the §21 language ──
-   The idiom, so every figure reads as one instrument:
    - mono 11px labels; names at .85, annotations at .6
-   - filled dot r=3.5 = a thing; hollow dot = a thing set apart
+   - filled dot = a thing; hollow dot = a thing set apart
    - the signal-in-field node (accent ring + core) = the subject
    - dashed = a trajectory (tunnel, async); dotted = private (tailnet)
-   - plumbing lines: .75 width at ~.25 opacity, routed so they NEVER
-     cross a label — buses and stubs, not fans through text
-   Motion follows the brand's two speeds. Atmospheric: dashes drift along
-   trajectories, the subject's ring breathes; dotted private lines hold
-   still — motion means traffic, and the tailnet doesn't advertise.
-   Interface: the full-view dialog opens in 160ms. Reduced motion stills
-   the plate entirely.
-   The figure always fits its column; legibility at small sizes comes from
-   the full-view toggle (docs.js), which opens the plate at reading scale
-   in a pannable dialog rather than scrolling inline. */
-.observation { margin: 2.2rem 0 0; }
+   - plumbing lines are faint and never cross a label
+   Motion follows the brand's two speeds: dashes drift, the subject's ring
+   breathes; the full-view dialog opens in 160ms. Reduced motion stills it. */
+.observation { margin: var(--s-6) 0 0; }
 .observation svg { display: block; width: 100%; height: auto; }
 .observation figcaption {
-  font-family: var(--font-mono);
-  font-size: 0.7rem;
-  font-weight: 500;
-  letter-spacing: 0.1em;
-  text-transform: uppercase;
-  opacity: 0.55;
-  margin-top: 0.9rem;
+	margin-top: var(--s-3);
+	font: 500 0.7rem var(--font-mono); letter-spacing: 0.08em; text-transform: uppercase;
+	color: var(--ink-2);
 }
 
-/* The toggle rides its own line above the plate, right-aligned, so it can
-   never sit over a label at any width. Injected by docs.js. */
-.obs-expand {
-  display: block;
-  margin: 0 0 0.5rem auto;
-  font-family: var(--font-mono);
-  font-size: 0.66rem;
-  font-weight: 500;
-  letter-spacing: 0.12em;
-  text-transform: uppercase;
-  color: var(--ink);
-  opacity: 0.55;
-  background: var(--panel);
-  border: 1px solid var(--hairline);
-  border-radius: var(--r-s);
-  padding: 0.32rem 0.6rem;
-  cursor: pointer;
-  transition: opacity 0.12s ease-out, border-color 0.12s ease-out;
+/* The full-view toggle rides its own line above the plate (docs.js). */
+.obs-expand, .obs-close {
+	min-height: 28px; padding: 0 8px;
+	background: none; color: var(--ink-2);
+	font: 500 0.68rem var(--font-mono); letter-spacing: 0.08em; text-transform: uppercase;
 }
-.obs-expand:hover { opacity: 1; border-color: var(--line-strong); }
-.obs-expand:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.obs-expand { display: flex; margin: 0 0 var(--s-2) auto; }
+.obs-expand:hover, .obs-close:hover { background: var(--wash); color: var(--ink); }
 
-/* Atmospheric motion (brand §motion: 8–40s, reward attention, never glow).
-   Selectors are structural — the dash pattern IS the trajectory — so the
-   modal clone animates too without extra classes. */
 @keyframes obs-drift { to { stroke-dashoffset: -32; } }
 .observation svg [stroke-dasharray="4 4"],
-.obs-pan svg [stroke-dasharray="4 4"] {
-  animation: obs-drift 14s linear infinite;
-}
+.obs-pan svg [stroke-dasharray="4 4"] { animation: obs-drift 14s linear infinite; }
 @keyframes obs-breathe { 0%, 100% { opacity: 0.9; } 50% { opacity: 0.5; } }
 .observation svg circle[stroke="var(--accent)"],
-.obs-pan svg circle[stroke="var(--accent)"] {
-  animation: obs-breathe 6s ease-in-out infinite;
-}
+.obs-pan svg circle[stroke="var(--accent)"] { animation: obs-breathe 6s ease-in-out infinite; }
 
-/* ── Full view: the plate at reading scale, pannable ── */
+/* The full view floats: the one surface here allowed to lift. */
 .obs-dialog {
-  margin: auto; /* the theme's global reset removes the UA centering */
-  padding: 0;
-  border: 1px solid var(--hairline);
-  border-radius: var(--r-m);
-  background: var(--panel);
-  color: var(--ink);
-  box-shadow: var(--shadow-m);
-  width: min(94vw, 72rem);
-  max-height: 90vh;
+	margin: auto; padding: 0; border: 0;
+	width: min(94vw, 72rem); max-height: 90vh;
+	background: var(--float); color: var(--ink);
+	border-radius: var(--r-m); box-shadow: var(--shadow);
 }
-.obs-dialog::backdrop { background: rgba(10, 16, 24, 0.5); }
-.obs-dialog[open] { animation: obs-dialog-in 0.16s ease-out; }
-@keyframes obs-dialog-in {
-  from { opacity: 0; transform: scale(0.985); }
-}
+.obs-dialog::backdrop { background: color-mix(in srgb, var(--ink) 40%, transparent); }
+.obs-dialog[open] { animation: obs-dialog-in 0.16s var(--ease); }
+@keyframes obs-dialog-in { from { opacity: 0; transform: scale(0.985); } }
 .obs-dialog-bar {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 1rem;
-  padding: 0.7rem 1.25rem;
-  border-bottom: 1px solid var(--hairline);
+	display: flex; align-items: center; justify-content: space-between; gap: var(--s-4);
+	padding: var(--s-2) var(--s-2) var(--s-2) var(--s-5);
+	border-bottom: 1px solid var(--rule);
 }
 .obs-dialog-title {
-  font-family: var(--font-mono);
-  font-size: 0.7rem;
-  font-weight: 500;
-  letter-spacing: 0.1em;
-  text-transform: uppercase;
-  opacity: 0.55;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+	font: 500 0.7rem var(--font-mono); letter-spacing: 0.08em; text-transform: uppercase;
+	color: var(--ink-2);
+	overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
 }
-.obs-close {
-  font-family: var(--font-mono);
-  font-size: 0.66rem;
-  font-weight: 500;
-  letter-spacing: 0.12em;
-  text-transform: uppercase;
-  color: var(--ink);
-  opacity: 0.55;
-  background: none;
-  border: 1px solid var(--hairline);
-  border-radius: var(--r-s);
-  padding: 0.32rem 0.6rem;
-  cursor: pointer;
-  transition: opacity 0.12s ease-out, border-color 0.12s ease-out;
-}
-.obs-close:hover { opacity: 1; border-color: var(--line-strong); }
-.obs-close:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 .obs-pan {
-  overflow: auto;
-  -webkit-overflow-scrolling: touch;
-  max-height: calc(90vh - 3.4rem);
-  padding: 1.25rem 1.25rem 1.5rem;
-  cursor: grab;
+	overflow: auto; -webkit-overflow-scrolling: touch;
+	max-height: calc(90vh - 3.2rem);
+	padding: var(--s-5);
+	cursor: grab;
 }
 .obs-pan.dragging { cursor: grabbing; user-select: none; }
 .obs-pan svg { display: block; height: auto; }
 @media (max-width: 640px) {
-  .obs-dialog {
-    width: 100vw;
-    max-width: 100vw;
-    height: 100dvh;
-    max-height: 100dvh;
-    border: 0;
-    border-radius: 0;
-  }
-  .obs-pan { max-height: calc(100dvh - 3.4rem); }
+	.obs-dialog { width: 100vw; max-width: 100vw; height: 100dvh; max-height: 100dvh; border-radius: 0; }
+	.obs-pan { max-height: calc(100dvh - 3.2rem); }
 }
-
 @media (prefers-reduced-motion: reduce) {
-  .observation svg *, .obs-pan svg * { animation: none !important; }
-  .obs-dialog[open] { animation: none; }
+	.observation svg *, .obs-pan svg * { animation: none !important; }
+	.obs-dialog[open] { animation: none; }
 }
 
-/* ── App cards (overview) ── */
-.app-grid {
-  display: grid;
-  gap: 0.9rem;
-  grid-template-columns: repeat(auto-fill, minmax(15rem, 1fr));
-}
-.app-card {
-  border: 1px solid var(--hairline); border-radius: var(--r-m);
-  padding: 1.1rem 1.2rem;
-  min-width: 0;
-  text-decoration: none;
-  color: var(--ink);
-  display: block;
-  transition: background 0.12s ease-out, border-color 0.12s ease-out;
-}
-.app-card:hover { background: var(--wash); border-color: var(--line-strong); }
-.app-card .name { font-weight: 500; font-size: 1rem; }
-.app-card .url {
-  font-family: var(--font-mono); font-size: 0.72rem; opacity: 0.5;
-  margin: 0.3rem 0 0.55rem; overflow-wrap: anywhere;
-}
-.app-card .desc { font-size: 0.9rem; opacity: 0.7; line-height: 1.5; }
-
-/* ── API endpoints: instrument rows, not stacked boxes ──
-   Same markup as ever (.endpoint > .method/.path/.returns); the box walls
-   become one hairline per row, the way the status page plots services. */
-.endpoint {
-  border: 0;
-  border-bottom: 1px solid var(--hairline);
-  padding: 0.85rem 0;
-  overflow-wrap: break-word;
-}
-.endpoint + .endpoint { margin-top: 0; }
-.endpoint:first-of-type { border-top: 1px solid var(--hairline); }
-.endpoint .method {
-  display: inline-block;
-  min-width: 3.6rem;
-  font-family: var(--font-mono); font-size: 0.72rem; font-weight: 500;
-  letter-spacing: 0.06em;
-  color: var(--accent); margin-right: 0.6rem;
-}
-.endpoint .path { font-family: var(--font-mono); font-size: 0.88rem; overflow-wrap: anywhere; }
-.endpoint .returns {
-  font-size: 0.88rem; opacity: 0.65; line-height: 1.55;
-  margin-top: 0.3rem; padding-left: 4.2rem;
-}
+/* ── Phones: the index folds under the top bar ── */
 @media (max-width: 640px) {
-  .endpoint .returns { padding-left: 0; }
-}
-
-/* ── Record-shape block ── */
-.record-shape {
-  font-family: var(--font-mono); font-size: 0.8125rem; line-height: 1.65;
-  background: var(--wash); padding: 1.1rem 1.25rem;
-  border: 1px solid var(--hairline); border-radius: var(--r-m);
-  overflow-x: auto; white-space: pre; max-width: 100%;
-}
-
-/* ── Skills page ── */
-.skill-section { padding-bottom: 2rem; border-bottom: 1px solid var(--hairline); }
-.skill-section:last-child { border-bottom: none; }
-.skill-section h3 { margin-top: 0; }
-
-/* ── Meta line ── */
-.meta {
-  font-family: var(--font-mono);
-  font-size: 0.75rem;
-  letter-spacing: 0.06em;
-  opacity: 0.6;
-}
-
-/* ── Screenshots ── */
-.screenshot { max-width: 100%; margin-top: 1.6rem; }
-.screenshot img {
-  display: block; width: 100%; max-width: 100%; height: auto;
-  border: 1px solid var(--hairline); border-radius: var(--r-m); background: #fff;
-}
-.screenshot figcaption {
-  font-family: var(--font-mono); font-size: 0.72rem; letter-spacing: 0.06em;
-  opacity: 0.6; margin-top: 0.6rem;
-}
-.screenshot-placeholder {
-  border: 1px solid var(--hairline); border-radius: var(--r-m); min-height: 12rem;
-  display: flex; align-items: center; justify-content: center;
-  font-family: var(--font-mono); font-size: 0.875rem; opacity: 0.5;
-  background: repeating-linear-gradient(45deg, var(--wash), var(--wash) 10px, transparent 10px, transparent 20px);
-}
-
-/* ── Mobile: top bar + dropdown nav ── */
-@media (max-width: 640px) {
-  .bar { padding: 0.875rem 1rem; }
-  .docs-layout { display: block; max-width: 100%; padding: 0; }
-  .sidebar {
-    position: static; height: auto; overflow: visible;
-    padding: 0; border-right: none;
-  }
-  .nav-burger {
-    display: inline-flex; flex-direction: column; justify-content: center;
-    gap: 5px; width: 1.6rem; height: 1.4rem; cursor: pointer;
-  }
-  .nav-burger::before, .nav-burger::after, .nav-burger span {
-    content: ""; display: block; width: 100%; height: 2px; background: var(--ink);
-  }
-  .docs-nav { display: none; padding: 0.5rem 1rem 1rem; border-bottom: 1px solid var(--hairline); }
-  .docs-nav::before { display: none; }
-  #nav-toggle:checked ~ .docs-layout .docs-nav { display: flex; }
-  .docs-nav a { padding: 0.5rem 0.6rem; }
-  .page { max-width: 100%; padding: 2rem 1rem 3.5rem; }
-  .page h2 { margin-top: 2.8rem; padding-top: 1.4rem; }
-  .app-grid { grid-template-columns: 1fr; }
+	.docs-layout { display: block; padding: 0 var(--gutter); }
+	.sidebar { position: static; max-height: none; overflow: visible; padding: 0; }
+	.nav-burger {
+		display: inline-flex; flex-direction: column; justify-content: center;
+		gap: 5px; width: 22px; height: 40px; cursor: pointer;
+	}
+	.nav-burger::before, .nav-burger::after, .nav-burger span {
+		content: ""; display: block; width: 100%; height: 1.5px; background: var(--ink);
+	}
+	.bar > nav { order: 0; width: auto; margin-left: auto; }
+	.docs-nav { display: none; padding: var(--s-3) 0 var(--s-4); border-bottom: 1px solid var(--rule); }
+	.docs-nav .tech { display: none; }
+	#nav-toggle:checked ~ .docs-layout .docs-nav { display: flex; }
+	.docs-nav a { padding: 10px 0 10px var(--s-3); }
+	.page { max-width: 100%; padding: var(--s-6) 0 var(--s-8); }
+	.page h2 { margin-top: var(--s-7); padding-top: var(--s-5); }
+	.app-grid { grid-template-columns: 1fr; }
 }

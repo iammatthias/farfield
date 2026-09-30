@@ -84,7 +84,7 @@ func run(host, port string) error {
 			ReadKey:      store.Env("CONTENT_READ_KEY", ""),
 			CookieSecure: store.Env("COOKIE_SECURE", "false") == "true",
 		},
-		rd: &web.Renderer{Templates: tmpl, AssetVer: theme.Version,
+		rd: &web.Renderer{Templates: tmpl, AssetVer: theme.Version, Funcs: tmplFuncs,
 			App: "content", Mark: "co",
 			Nav: []web.NavItem{
 				{Label: "Dashboard", URL: "/"},
@@ -192,8 +192,6 @@ func (s *Server) routes() http.Handler {
 	// Editor embedding — session-gated proxy so service keys stay server-side.
 	// The list reads (blob gallery, series picker) proxy the now-token-gated
 	// sibling APIs so the editor page never needs a read token.
-	mux.HandleFunc("POST /preview", s.auth.RequireSession(s.handlePreview))
-	mux.HandleFunc("POST /editdoc", s.auth.RequireSession(s.handleEditdoc))
 	// Assist proposes tags and an excerpt for the open draft. Session-gated
 	// like the rest of the editor: it spends model credit, so it is a thing
 	// the author does, not a thing the API offers.

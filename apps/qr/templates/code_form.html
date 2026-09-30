@@ -53,19 +53,20 @@
     </div>
 
     {{if not .IsNew}}
+      <div class="section-head"><h2>Preview</h2></div>
       <section class="qr-panel">
         <figure>
           {{qrFor .Code}}
-          <figcaption>Preview · {{.Code.Mode}} mode · EC {{.Code.EC}}</figcaption>
+          <figcaption class="tech">Preview · {{.Code.Mode}} mode · EC {{.Code.EC}}</figcaption>
         </figure>
         <div class="qr-meta">
           <dl>
-            <dt>id</dt><dd>{{.Code.ID}}</dd>
-            <dt>cid</dt><dd>{{.Code.CID}}</dd>
-            <dt>created</dt><dd>{{.Code.CreatedAt}}</dd>
-            <dt>updated</dt><dd>{{.Code.UpdatedAt}}</dd>
+            <dt class="tech">id</dt><dd class="mono">{{.Code.ID}}</dd>
+            <dt class="tech">cid</dt><dd class="mono">{{.Code.CID}}</dd>
+            <dt class="tech">created</dt><dd class="mono">{{.Code.CreatedAt}}</dd>
+            <dt class="tech">updated</dt><dd class="mono">{{.Code.UpdatedAt}}</dd>
           </dl>
-          <p class="label" style="margin-top:1rem">Endpoints</p>
+          <p class="label">Endpoints</p>
           <div class="endpoints">
             <div>SVG · <code>{{.PublicURL}}/qr/{{.Code.ID}}.svg</code></div>
             {{if eq (printf "%s" .Code.Mode) "proxy"}}
@@ -74,7 +75,7 @@
             <div>JSON · <code>{{.PublicURL}}/api/codes/{{.Code.ID}}</code></div>
           </div>
           {{if not (and .Code.Public .Enabled)}}
-            <p class="hint" style="margin-top:0.85rem;opacity:0.8">Currently private or disabled — these endpoints return 404 to the public. Flip both <em>Public</em> and <em>Enabled</em> on to make them resolve.</p>
+            <p class="hint">Currently private or disabled — these endpoints return 404 to the public. Flip both <em>Public</em> and <em>Enabled</em> on to make them resolve.</p>
           {{end}}
         </div>
       </section>

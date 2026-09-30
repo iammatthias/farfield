@@ -2,32 +2,33 @@
 
 {{define "head"}}
   <style>
-    /* wordle — one secret word a day; tile states in the instrument language:
-       correct = solid ink fill, present = wash + inner rule, absent = ghost */
+    /* wordle — one secret word a day. Tile states read by shape and fill,
+       never by hue alone: correct = solid ink, present = wash + inner ring,
+       absent = a faint letter in a faint frame. */
     .wordle-wrap { max-width: 24rem; }
-    .wordle-grid { display: grid; gap: 0.4rem; }
-    .wordle-row { display: grid; grid-template-columns: repeat(5, 1fr); gap: 0.4rem; }
+    .wordle-grid { display: grid; gap: 6px; }
+    .wordle-row { display: grid; grid-template-columns: repeat(5, 1fr); gap: 6px; }
     .wordle-wrap .tile {
       aspect-ratio: 1; min-width: 0;
       display: flex; align-items: center; justify-content: center;
-      border: 1px solid var(--hairline); border-radius: 4px;
+      border: 1px solid var(--rule-strong); border-radius: var(--r-s);
       font: 500 clamp(1.1rem, 7vw, 1.5rem) var(--font-mono);
       text-transform: uppercase;
     }
     .tile.pending { border-color: var(--ink); }
-    .tile.s-g { background: var(--ink); color: var(--surface); border-color: var(--ink); }
+    .tile.s-g { background: var(--ink); color: var(--paper); border-color: var(--ink); }
     .tile.s-y {
       background: var(--wash); border-color: var(--ink);
       outline: 1px solid var(--ink); outline-offset: -4px;
     }
-    .tile.s-a { opacity: 0.3; }
+    .tile.s-a { color: var(--ink-3); border-color: var(--rule); }
 
     .wordle-legend {
-      display: flex; flex-wrap: wrap; gap: 0.5rem 1.25rem;
-      list-style: none; padding: 0.6rem 0 0; margin: 0;
-      font-size: 0.72rem; font-weight: 500; opacity: 0.8;
+      display: flex; flex-wrap: wrap; gap: var(--s-2) var(--s-5);
+      list-style: none; padding: var(--s-3) 0 0; margin: 0;
+      font-size: 0.8rem; color: var(--ink-2);
     }
-    .wordle-legend li { display: flex; align-items: center; gap: 0.45rem; }
+    .wordle-legend li { display: flex; align-items: center; gap: var(--s-2); }
     .wordle-legend .tile {
       width: 1.3rem; height: 1.3rem; aspect-ratio: auto; flex: none;
       font-size: 0.7rem;
@@ -35,36 +36,19 @@
     .wordle-legend .tile.s-y { outline-offset: -3px; }
 
     .wordle-controls {
-      display: flex; flex-wrap: wrap; gap: 0.6rem 1rem; align-items: center;
-      margin-top: 1rem;
+      display: flex; flex-wrap: wrap; gap: var(--s-2) var(--s-4); align-items: center;
+      margin-top: var(--s-4);
     }
-    .wordle-status { font-size: 0.8rem; font-weight: 500; opacity: 0.7; min-height: 1rem; }
-    .wordle-status.alert { color: var(--accent); opacity: 1; }
-    .wordle-hard {
-      display: flex; align-items: center; gap: 0.4rem;
-      font-size: 0.8rem; font-weight: 500;
-    }
-    .wordle-hard input { width: auto; }
-    .wordle-hint { margin-top: 0.6rem; }
+    .wordle-hard { min-height: 40px; font-size: 0.9rem; cursor: pointer; }
+    .wordle-hint { margin-top: var(--s-2); }
 
     /* visually hidden input — keeps mobile keyboards available without a
        visible text field; physical keyboards go through document keydown */
     .vh-input {
-      position: absolute; width: 1px; height: 1px;
+      position: absolute; width: 1px; height: 1px; min-height: 0;
       margin: -1px; padding: 0; border: 0;
       overflow: hidden; clip-path: inset(50%); white-space: nowrap;
     }
-
-    .wordle-meta { margin-top: 1.5rem; border-top: 1px solid var(--hairline); }
-    .wordle-meta > div {
-      display: flex; gap: 1rem; padding: 0.45rem 0;
-      border-bottom: 1px solid var(--hairline);
-    }
-    .wordle-meta dt {
-      flex: 0 0 6.5rem; font-size: 0.75rem; font-weight: 500;
-      line-height: 1.7; opacity: 0.55;
-    }
-    .wordle-meta dd { margin: 0; font-family: var(--font-mono); font-size: 0.8rem; overflow-wrap: anywhere; }
   </style>
   <script src="/static/wordle.js?v={{.JSVer}}" defer></script>
 {{end}}
@@ -73,7 +57,7 @@
   {{template "masthead" .}}
 
   <div class="label source-eyebrow">
-    <span>WORDLE · ONE WORD PER DAY · {{len .Rows}} GUESSES</span>
+    <span>Wordle · one word per day · <span class="num">{{len .Rows}}</span> guesses</span>
     <nav class="actions"><a href="{{.JSONURL}}">JSON</a></nav>
   </div>
 
@@ -96,27 +80,21 @@
     </ul>
 
     <div class="wordle-controls">
-      <label class="wordle-hard" for="wordle-hardmode">
+      <label class="check wordle-hard" for="wordle-hardmode">
         <input type="checkbox" id="wordle-hardmode">
         hard mode
       </label>
-      <span class="wordle-status" id="wordle-status"></span>
+      <span class="game-status" id="wordle-status" role="status"></span>
     </div>
     <p class="hint wordle-hint">Type a five-letter word, Enter submits.</p>
   </section>
 
-  <dl class="wordle-meta">
+  <dl class="meta-list">
     <div><dt>Date</dt><dd>{{.Date}}</dd></div>
     <div><dt>CID</dt><dd>{{.CID}}</dd></div>
   </dl>
 
-  <nav class="stepper">
-    {{if .PrevURL}}<a href="{{.PrevURL}}">← Previous</a>
-    {{else}}<span class="muted">← Previous</span>{{end}}
-    <span class="muted">{{.Date}}</span>
-    {{if .NextURL}}<a href="{{.NextURL}}">Next →</a>
-    {{else}}<span class="muted">Next →</span>{{end}}
-  </nav>
+  {{template "stepper" .}}
 
   <footer class="cal-foot">
     <span>farfield · daily · wordle</span>

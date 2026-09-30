@@ -1,6 +1,6 @@
 {{/* blobs: the shared layout supplies the shell and masthead, and the theme
-    supplies .thumb, .swatch, .pager, and the .modal shell. Only the pieces
-    shaped like this app's media table live here. */}}
+    supplies .thumb, .swatch, .pager, tables and the .modal shell. Only the
+    pieces shaped like this app's media table and viewer live here. */}}
 
 {{define "styles"}}
   <style>
@@ -8,20 +8,19 @@
     .container { max-width: 86rem; }
 
     table.blobs td, table.blobs th { white-space: nowrap; }
-    table.blobs td.shrink { width: 1%; }
     a.row { text-decoration: none; }
     a.row:hover { color: var(--accent); }
 
     /* hygiene report — reference lists inside table cells */
-    details.reflist summary { cursor: pointer; opacity: 0.72; }
-    details.reflist[open] summary, details.reflist summary:hover { opacity: 1; }
+    details.reflist summary { cursor: pointer; color: var(--ink-2); }
+    details.reflist[open] summary, details.reflist summary:hover { color: var(--ink); }
     .reflist ul, ul.reflist {
       list-style: none; padding: 0; margin: 0;
-      display: grid; gap: 0.35rem;
+      display: grid; gap: var(--s-1);
     }
-    details.reflist ul { margin-top: 0.5rem; }
+    details.reflist ul { margin-top: var(--s-2); }
 
-    /* the media viewer's card is two-column here: the plate beside its
+    /* the media viewer is two-column here: the media on a wash beside its
        metadata. The shell (backdrop, close, :target behavior) is shared. */
     .modal .card { display: grid; grid-template-columns: minmax(0, 1fr) 19rem; }
     .modal .card > img, .modal .card > video {
@@ -30,22 +29,23 @@
     }
     .modal .card > .media-well {
       display: flex; align-items: center; justify-content: center;
-      min-height: 14rem; padding: 1.5rem; background: var(--wash);
+      min-height: 14rem; padding: var(--s-5); background: var(--wash);
     }
-    .modal .card > .media-well.glyph { font-size: 2rem; opacity: 0.4; }
+    .modal .card > .media-well.glyph { font-size: 2rem; color: var(--ink-3); }
     .modal .card > .media-well audio { width: 100%; }
-    .modal .detail { padding: 1.25rem 1.4rem; min-width: 0; border-left: 1px solid var(--hairline); }
-    .modal .detail h2 { font-size: 0.9rem; font-weight: 600; margin-bottom: 0.9rem; }
+    .modal .detail { padding: var(--s-5); min-width: 0; }
+    .modal .detail h2 { font-size: 1rem; margin-bottom: var(--s-4); }
     .modal .detail dl {
       display: grid; grid-template-columns: auto minmax(0, 1fr);
-      gap: 0.45rem 1rem; margin-bottom: 1.1rem; font-size: 0.85rem;
+      gap: var(--s-2) var(--s-4); margin-bottom: var(--s-5); font-size: 0.85rem;
     }
-    .modal .detail dt { font-size: 0.75rem; font-weight: 500; opacity: 0.55; line-height: 1.6; }
-    .modal .detail dd { word-break: break-all; }
+    .modal .detail dt { line-height: 1.9; }
+    .modal .detail dd { margin: 0; word-break: break-all; }
+    .modal .detail p { margin-bottom: var(--s-4); font-size: 0.85rem; }
+    .modal .detail form button { margin-left: calc(-1 * 14px); }
     @media (max-width: 46rem) {
       .modal .card { grid-template-columns: 1fr; }
       .modal .card > img, .modal .card > video { max-height: 50vh; }
-      .modal .detail { border-left: 0; border-top: 1px solid var(--hairline); }
     }
   </style>
 {{end}}

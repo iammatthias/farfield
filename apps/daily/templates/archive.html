@@ -3,7 +3,7 @@
   {{template "masthead" .}}
 
   <div class="label source-eyebrow">
-    <span>PHOTO · ARCHIVE · PAGE {{.Page}} / {{.Pages}} · {{.Total}} DAYS</span>
+    <span>Photo archive · page <span class="num">{{.Page}} / {{.Pages}}</span> · <span class="num">{{.Total}}</span> days</span>
     <nav class="actions">
       <a href="/photo">Today</a>
       <a href="{{.JSONURL}}">JSON</a>
@@ -23,20 +23,20 @@
             {{if eq .MediaType "video"}}<span class="media-tag">▶ video</span>{{end}}
           </div>
           <div class="cap">
-            <span class="date">{{.Date}}</span>
+            <span class="mono dim">{{.Date}}</span>
             <span class="ttl">{{.Title}}</span>
           </div>
         </a>
       {{end}}
     </div>
   {{else}}
-    <p class="notice">No entries are cached for this page yet.</p>
+    <div class="empty"><p class="line">No days are cached for this page yet.</p></div>
   {{end}}
 
-  <nav class="pager">
+  <nav class="pager stepper" aria-label="archive pages">
     {{if .PrevURL}}<a href="{{.PrevURL}}">← Newer</a>
     {{else}}<span class="muted">← Newer</span>{{end}}
-    <span class="muted">Page {{.Page}} of {{.Pages}}</span>
+    <span class="muted">Page <span class="num">{{.Page}}</span> of <span class="num">{{.Pages}}</span></span>
     {{if .NextURL}}<a href="{{.NextURL}}">Older →</a>
     {{else}}<span class="muted">Older →</span>{{end}}
   </nav>

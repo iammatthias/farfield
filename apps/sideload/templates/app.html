@@ -3,12 +3,12 @@
   {{template "topbar" .}}
 
   <a class="back" href="/">← all apps</a>
-  <div style="display:flex;flex-wrap:wrap;align-items:baseline;gap:0.5rem 1rem;margin-top:0.5rem">
-    <h1 style="font-size:1.25rem;margin:0">{{if .AppName}}{{.AppName}}{{else}}{{.BundleID}}{{end}}</h1>
-    <span style="margin-left:auto;display:inline-flex;gap:1.1rem">
-      <a class="back" href="/app/{{.BundleID}}/devices">devices{{if gt .Pending 0}} <span style="color:var(--accent)">({{.Pending}} pending)</span>{{end}} →</a>
-      <a class="back" href="/app/{{.BundleID}}/edit">edit page →</a>
-    </span>
+  <div class="page-head">
+    <h1 class="page-title">{{if .AppName}}{{.AppName}}{{else}}{{.BundleID}}{{end}}</h1>
+    <nav class="page-links">
+      <a href="/app/{{.BundleID}}/devices">devices{{if gt .Pending 0}} <span class="pending">({{.Pending}} pending)</span>{{end}} →</a>
+      <a href="/app/{{.BundleID}}/edit">edit page →</a>
+    </nav>
   </div>
   {{with .Meta}}{{with .Tagline}}<p class="tagline">{{.}}</p>{{end}}{{end}}
   <p class="meta">
@@ -30,28 +30,28 @@
   {{end}}
 
   {{with .Meta}}{{with .Description}}
-  <div class="markdown" style="margin:1.2rem 0">{{markdown .}}</div>
+  <div class="prose small spaced">{{markdown .}}</div>
   {{end}}{{end}}
 
-  <section class="versions">
-    <h2 style="font-size:0.95rem">Versions</h2>
+  <section>
+    <div class="section-head"><h2>Versions</h2></div>
     {{range .Builds}}
     <div class="vcard">
       <div class="vhead">
-        <span class="vver">{{.Version}} <span class="muted" style="font-weight:400">({{.BuildNumber}})</span></span>
+        <span class="vver">{{.Version}} <span class="muted">({{.BuildNumber}})</span></span>
         <span class="vmeta">
           <span>{{sizeText .SizeBytes}}</span>
           <span>{{relAge .CreatedAt}}</span>
           {{if .ProfileExpiry}}<span>profile {{.ProfileExpiry}}</span>{{end}}
         </span>
       </div>
-      {{with .Notes}}<div class="markdown changelog">{{markdown .}}</div>{{end}}
+      {{with .Notes}}<div class="prose small changelog">{{markdown .}}</div>{{end}}
       <div class="vactions">
         <a href="/b/{{.ID}}">install →</a>
         <a href="/b/{{.ID}}">changelog</a>
         <form method="post" action="/b/{{.ID}}/delete"
               onsubmit="return confirm('Delete version {{.Version}} ({{.BuildNumber}})?')">
-          <button type="submit">delete</button>
+          <button type="submit" class="danger">delete</button>
         </form>
       </div>
     </div>
@@ -60,7 +60,7 @@
 
   <form method="post" action="/app/{{.BundleID}}/delete"
         onsubmit="return confirm('Delete the entire app and all {{len .Builds}} version(s)? This cannot be undone.')"
-        style="margin-top:1.4rem">
+        class="spaced">
     <button class="danger" type="submit">Delete app ({{len .Builds}} version{{if ne (len .Builds) 1}}s{{end}})</button>
   </form>
 {{end}}

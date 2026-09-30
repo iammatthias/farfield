@@ -3,56 +3,49 @@
 
 {{define "styles"}}
   <style>
-    .container { max-width: 46rem; }
-    /* The composer page carries the document-first edit layout, which needs
-       the theme's full-width canvas — the 46rem cap suits only the stream. */
-    .container:has(.edit-layout) { max-width: 72rem; }
+    /* The stream reads at a narrow measure; the composer's .doc-page
+       constrains itself, so the post form keeps the normal container. */
+    .container:not(:has(.doc-page)) { max-width: calc(44rem + 2 * var(--gutter)); }
 
-    /* feed — a ruled stream of dated notes */
-    .post { padding: 1.4rem 0; border-bottom: 1px solid var(--hairline); }
-    .post:last-child { border-bottom: 0; }
+    /* feed — dated notes separated by horizons, not boxes */
+    .post { padding: var(--s-5) 0; border-bottom: 1px solid var(--rule); }
+    .post:last-of-type { border-bottom: 0; }
     .post-meta {
-      display: flex; gap: 0.85rem; flex-wrap: wrap; align-items: baseline;
-      margin-bottom: 0.5rem;
-      font-family: var(--font-mono); font-size: 0.75rem;
+      display: flex; gap: var(--s-1) var(--s-4); flex-wrap: wrap; align-items: baseline;
+      margin-bottom: var(--s-2);
     }
-    .post-meta .when { opacity: 0.55; }
-    .post-meta .tag { opacity: 0.55; }
-    /* Posts are writing, not chrome — they take the editorial face. */
+    /* Posts are writing, not chrome — they take the document face. */
     .post-body {
-      display: flex; flex-direction: column; gap: 0.6rem;
-      word-break: break-word;
-      font-family: var(--font-serif);
-      font-size: 1.05rem; line-height: 1.6;
+      display: flex; flex-direction: column; gap: var(--s-3);
+      overflow-wrap: anywhere;
+      font: 400 1.1rem/1.6 var(--font-doc);
     }
     /* Markdown blocks: vertical rhythm comes from the flex gap. */
-    .post-body p, .post-body ul, .post-body ol,
-    .post-body blockquote, .post-body pre,
-    .post-body h1, .post-body h2, .post-body h3, .post-body h4 { margin: 0; }
+    .post-body > * { margin: 0; }
     .post-body ul, .post-body ol { padding-left: 1.3rem; }
     .post-body blockquote {
-      border-left: 2px solid var(--hairline);
-      padding-left: 0.8rem; opacity: 0.8;
+      border-left: 2px solid var(--rule-strong);
+      padding-left: var(--s-4); color: var(--ink-2); font-style: italic;
     }
-    .post-body code { font-family: var(--font-mono); font-size: 0.85em; background: var(--wash); padding: 0.1em 0.3em; }
-    .post-body pre { background: var(--wash); padding: 0.6rem 0.8rem; overflow-x: auto; }
-    .post-body pre code { background: transparent; padding: 0; }
-    .post-body h1, .post-body h2, .post-body h3, .post-body h4 { font-size: 1rem; }
-    .blob-media.inline { display: inline-block; vertical-align: middle; max-width: 100%; }
-    .blob-media.standalone { display: block; max-width: 100%; }
-    .blob-media { border-radius: var(--r-s); }
+    .post-body h1, .post-body h2, .post-body h3, .post-body h4 { font-size: 1.1rem; font-weight: 500; }
+    .post-body img, .post-body video { border-radius: var(--r-s); }
     .post-body audio.blob-media.inline, .post-body video.blob-media.inline { width: min(100%, 32rem); }
     .blob-file { word-break: break-all; }
     .post-actions {
-      display: flex; gap: 1.25rem; margin-top: 0.8rem;
-      font-family: var(--font-mono); font-size: 0.78rem;
+      display: flex; gap: var(--s-5); align-items: baseline; margin-top: var(--s-3);
+      font-size: 0.85rem;
     }
+    .post-actions a { color: var(--ink-2); }
+    .post-actions a:hover { color: var(--accent); }
     .post-actions form { display: inline; }
-    .post-actions button {
-      border: 0; background: transparent; padding: 0;
-      color: var(--accent); text-decoration: underline;
-      text-underline-offset: 0.2em; font: inherit;
+    .post-actions button.danger {
+      min-height: 0; padding: 0; background: transparent;
+      font: inherit; text-decoration: underline; text-underline-offset: 0.2em;
+      text-decoration-color: var(--rule-strong);
     }
-    .post-actions button:hover { background: transparent; text-decoration-thickness: 2px; }
+    .post-actions button.danger:hover { background: transparent; text-decoration-color: currentColor; }
+    @media (pointer: coarse) {
+      .post-actions a, .post-actions button.danger { display: inline-flex; align-items: center; min-height: 40px; }
+    }
   </style>
 {{end}}

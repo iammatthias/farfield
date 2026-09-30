@@ -1,18 +1,34 @@
-/* farfield editor — the host element. The editor draws everything itself;
-   this only sizes the surface and hides the input sink. */
+/* farfield editor — the host element and its chrome.
+ *
+ * The editor draws the document itself; this sizes the surface, hides the
+ * input sink, and styles the three bits of page chrome mount.js adds: the
+ * strip, the selection bar and the / menu. There is no box: the page is the
+ * document. Tokens come from lib/theme/ui.css, with fallbacks so the editor
+ * still reads on a page that has not moved to it.
+ */
 .ff-editor {
 	position: relative;
 	height: min(78vh, 60rem);
 	min-height: 18rem;
 	overflow: hidden;
-	background: var(--surface, #f3e5d1);
-	border: 1px solid var(--hairline, rgba(14, 34, 45, 0.16));
-	border-radius: var(--r-m, 6px);
+	background: var(--paper, var(--surface, #f3e5d1));
 	cursor: text;
 	touch-action: pan-y;
 }
-.ff-editor.focused { border-color: var(--accent-line, rgba(13, 53, 96, 0.32)); }
 .ff-editor canvas { display: block; }
+
+/* page mode: as tall as the text (host.js sets the height), with the canvas
+   a sticky window onto it — so the window scrolls the document */
+.ff-editor.ff-editor-page {
+	height: auto;
+	min-height: 0;
+	overflow: visible;
+}
+.ff-editor-page canvas {
+	position: sticky;
+	top: var(--ff-editor-top, 0px);
+}
+
 /* The sink must be focusable and on-screen for IME and phone keyboards, but
    never seen: transparent, no caret, 16px so iOS does not zoom on focus. */
 .ff-editor-sink {
@@ -35,33 +51,100 @@
 	white-space: pre;
 }
 
-/* ── page glue (mount.js): toolbar and the replaced field ── */
-.ff-editor-wrap { margin: 0 0 0.75rem; }
+.ff-doc { position: relative; }
 .ff-editor-replaced { display: none !important; }
-.ff-editor-bar {
-	display: flex;
-	flex-wrap: wrap;
-	gap: 4px;
-	padding: 0 0 6px;
+
+/* ── the strip: one quiet line of commands, pinned under the top bar ── */
+.ff-strip {
 	position: sticky;
-	top: 0;
-	z-index: 2;
-	background: var(--surface, #f3e5d1);
+	top: var(--ff-strip-top, 0px);
+	z-index: 5;
+	display: flex;
+	align-items: center;
+	gap: 2px;
+	min-height: 40px;
+	margin: 0 -8px;
+	padding: 0 2px;
+	margin-bottom: var(--s-4, 16px);
+	overflow-x: auto;
+	scrollbar-width: none;
+	/* the horizon between the chrome and the document, drawn across the
+	   text column only (the strip overhangs it by 8px each side) */
+	background:
+		linear-gradient(var(--rule, rgba(14, 34, 45, 0.12)), var(--rule, rgba(14, 34, 45, 0.12))) 8px 100% / calc(100% - 16px) 1px no-repeat,
+		var(--paper, #f3e5d1);
 }
-.ff-editor-bar button {
-	font: 12px var(--font-mono, ui-monospace, monospace);
-	color: var(--ink, #0e222d);
-	background: transparent;
-	border: 1px solid var(--hairline, rgba(14, 34, 45, 0.16));
+.ff-strip::-webkit-scrollbar { display: none; }
+.ff-strip button, .ff-float button {
+	flex: none;
+	min-width: 30px;
+	height: 30px;
+	padding: 0 7px;
+	border: 0;
 	border-radius: var(--r-s, 3px);
-	padding: 4px 8px;
-	min-height: 30px;
+	background: none;
+	color: var(--ink-2, #4c5456);
+	font: 500 12.5px/1 var(--font-ui, ui-sans-serif, system-ui, sans-serif);
+	cursor: pointer;
+	transition: background 120ms, color 120ms;
+}
+.ff-strip button:hover { color: var(--ink, #0e222d); background: var(--wash, rgba(14, 34, 45, 0.04)); }
+.ff-strip .b, .ff-float .b { font-weight: 700; }
+.ff-strip .i, .ff-float .i { font-style: italic; font-family: var(--font-doc, Georgia, serif); font-size: 15px; }
+.ff-strip .s, .ff-float .s { text-decoration: line-through; }
+.ff-strip .sep, .ff-float .sep {
+	flex: none;
+	width: 1px;
+	height: 14px;
+	margin: 0 6px;
+	background: var(--rule, rgba(14, 34, 45, 0.12));
+}
+.ff-strip .hint {
+	margin-left: auto;
+	padding: 0 8px;
+	flex: none;
+	font: 400 12px var(--font-ui, ui-sans-serif, system-ui, sans-serif);
+	color: var(--ink-3, #6f7a7e);
+}
+@media (pointer: coarse) {
+	.ff-strip button { height: 40px; min-width: 40px; }
+	.ff-strip .hint { display: none; }
+}
+
+/* ── floating: the selection bar and the / menu ── */
+.ff-float, .ff-slash {
+	position: absolute;
+	z-index: 6;
+	background: var(--float, #f7ecdd);
+	border-radius: var(--r-m, 6px);
+	box-shadow: var(--shadow, 0 1px 2px rgba(14, 34, 45, 0.08), 0 10px 30px rgba(14, 34, 45, 0.14));
+}
+.ff-float { display: flex; align-items: center; padding: 3px; }
+.ff-float button { color: var(--ink, #0e222d); }
+.ff-float button:hover { background: var(--wash, rgba(14, 34, 45, 0.05)); }
+.ff-slash {
+	display: grid;
+	width: 240px;
+	max-height: 320px;
+	overflow-y: auto;
+	padding: 5px;
+}
+.ff-slash button {
+	display: flex;
+	justify-content: space-between;
+	align-items: baseline;
+	gap: 16px;
+	padding: 7px 10px;
+	border: 0;
+	border-radius: var(--r-s, 3px);
+	background: none;
+	color: var(--ink, #0e222d);
+	font: 400 14px var(--font-ui, ui-sans-serif, system-ui, sans-serif);
+	text-align: left;
 	cursor: pointer;
 }
-.ff-editor-bar button:hover { border-color: var(--accent-line, rgba(13, 53, 96, 0.32)); }
-.ff-editor-bar button[data-cmd="bold"] { font-weight: 700; }
-.ff-editor-bar button[data-cmd="italic"] { font-style: italic; }
-.ff-editor-bar button[data-cmd="strike"] { text-decoration: line-through; }
-.ff-editor-bar .sep { width: 1px; background: var(--hairline, rgba(14, 34, 45, 0.16)); margin: 2px 4px; }
-.ff-editor-plain { height: min(60vh, 40rem); }
-.save-note.bad { color: var(--alarm, #b3271e); }
+.ff-slash button[aria-selected="true"] { background: var(--wash, rgba(14, 34, 45, 0.05)); }
+.ff-slash .hint { font: 400 12px var(--font-mono, ui-monospace, monospace); color: var(--ink-3, #6f7a7e); }
+.ff-float[hidden], .ff-slash[hidden] { display: none; }
+
+.save-note.bad { color: var(--bad, #a62a20); }

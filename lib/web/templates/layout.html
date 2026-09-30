@@ -21,8 +21,8 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>{{block "title" .}}farfield · {{.App}}{{end}}</title>
-  <meta name="theme-color" content="#f7f3e8" media="(prefers-color-scheme: light)">
-  <meta name="theme-color" content="#101833" media="(prefers-color-scheme: dark)">
+  <meta name="theme-color" content="#f3e5d1" media="(prefers-color-scheme: light)">
+  <meta name="theme-color" content="#0e222d" media="(prefers-color-scheme: dark)">
   {{.Favicon}}
   {{/* Social and search metadata. Everything here is opt-in: an app supplies
        Renderer.Description (and PublicURL for a public one) and its links
@@ -62,7 +62,7 @@
      for every app that has a session, so no app spells it out. */}}
 {{define "topbar"}}
 <header class="bar">
-  <h1><a href="/">farfield · {{.App}}</a></h1>
+  <a class="mark" href="/">farfield <span class="app">{{.App}}</span></a>
   {{if .Nav}}
   <nav>
     {{range .Nav}}<a href="{{.URL}}"{{if .Class}} class="{{.Class}}"{{end}}>{{.Label}}</a>{{end}}

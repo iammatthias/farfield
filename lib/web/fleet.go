@@ -35,13 +35,19 @@ var (
 )
 
 // FleetBase returns the browser-facing base URL for a fleet app — the
-// production subdomain, or the canonical localhost port under
-// FARFIELD_FLEET=local.
+// production subdomain, or the canonical local port under
+// FARFIELD_FLEET=local. FARFIELD_FLEET_HOST names the host those ports are
+// reached on (default 127.0.0.1) — a tailnet name when a local fleet is
+// previewed from another device.
 func FleetBase(name string) string {
 	if os.Getenv("FARFIELD_FLEET") == "local" {
+		host := os.Getenv("FARFIELD_FLEET_HOST")
+		if host == "" {
+			host = "127.0.0.1"
+		}
 		for _, a := range fleetApps {
 			if a.Name == name {
-				return "http://127.0.0.1:" + a.Port
+				return "http://" + host + ":" + a.Port
 			}
 		}
 	}

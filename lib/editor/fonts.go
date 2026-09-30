@@ -12,8 +12,9 @@ import (
 //go:embed fonts/*.ttf fonts/*.txt
 var fontFS embed.FS
 
-// FontSlots lists the files for font slots 0–5, in the order the editor
-// expects them: serif regular, bold, italic, bold italic, mono, mono bold.
+// FontSlots lists the files for font slots 0–6, in the order the editor
+// expects them: serif regular, semibold, italic, semibold italic, mono, mono
+// semibold, serif medium (H2 headings).
 var FontSlots = []string{
 	"Newsreader16pt-Regular.ttf",
 	"Newsreader16pt-SemiBold.ttf",
@@ -21,6 +22,7 @@ var FontSlots = []string{
 	"Newsreader16pt-SemiBoldItalic.ttf",
 	"IBMPlexMono-Regular.ttf",
 	"IBMPlexMono-SemiBold.ttf",
+	"Newsreader16pt-Medium.ttf",
 }
 
 // Font returns one embedded font file by name.

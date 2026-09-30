@@ -4,7 +4,7 @@
 
   <div class="section-head">
     <h2>Entries{{if .Filter}} · {{.Filter}}{{end}}</h2>
-    <span><a class="muted" href="/entries/trash">Trash</a> · <a href="/entries/new">New entry</a></span>
+    <span class="cluster"><a class="muted" href="/entries/trash">Trash</a><a href="/entries/new">New entry</a></span>
   </div>
 
   <div class="search-row">
@@ -24,7 +24,7 @@
   {{if .Entries}}
     {{template "entry_table" .}}
   {{else}}
-    <p class="muted">No entries{{if .Filter}} in this collection{{end}}.</p>
+    <div class="empty"><p class="line">No entries{{if .Filter}} in this collection{{end}}.</p></div>
   {{end}}
 
   <script type="module" src="/static/search.js"></script>

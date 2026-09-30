@@ -3,8 +3,8 @@
   {{template "topbar" .}}
 
   {{if .Rows}}
-    <div class="table-wrap">
-      <table class="telemetry">
+    <div class="table-wrap stack-wrap">
+      <table class="telemetry stack">
         <thead>
           <tr>
             <th>Target</th>
@@ -19,32 +19,32 @@
         <tbody>
           {{range .Rows}}
             <tr>
-              <td>
+              <td data-label="Target">
                 <a href="/targets/{{.ID}}/edit">{{.Name}}</a>
                 {{if not .Enabled}} <span class="badge draft">Paused</span>{{end}}
               </td>
-              <td>
+              <td data-label="State">
                 {{if .Last}}
                   {{if .Last.OK}}
-                    <span class="updown up">Up</span>
+                    <span class="status live">Up</span>
                   {{else}}
-                    <span class="updown down">Down</span>
+                    <span class="status bad">Down</span>
                   {{end}}
                   <span class="mono muted">{{if .Last.StatusCode}}{{.Last.StatusCode}}{{end}} {{.Last.LatencyMS}}ms</span>
                 {{else}}
                   <span class="muted">no checks yet</span>
                 {{end}}
               </td>
-              <td>{{.Sparkline}}</td>
-              <td class="num">{{.Up24}}</td>
-              <td class="num">{{.Up7}}</td>
-              <td class="num">{{.Up30}}</td>
-              <td>
+              <td data-label="Latency">{{.Sparkline}}</td>
+              <td data-label="24h" class="num">{{.Up24}}</td>
+              <td data-label="7d" class="num">{{.Up7}}</td>
+              <td data-label="30d" class="num">{{.Up30}}</td>
+              <td data-label="Incident">
                 {{if .Incident}}
-                  <span class="badge live">Open</span>
+                  <span class="badge bad">Open</span>
                   <span class="err-text">{{.Incident.LastErr}}</span>
                 {{else}}
-                  <span class="muted">—</span>
+                  <span class="dim">—</span>
                 {{end}}
               </td>
             </tr>
@@ -53,7 +53,10 @@
       </table>
     </div>
   {{else}}
-    <p class="muted">No targets yet. <a href="/targets/new">Add one.</a></p>
+    <div class="empty">
+      <p class="line">No targets yet.</p>
+      <p class="muted"><a href="/targets/new">Add one</a> and pulse starts probing it.</p>
+    </div>
   {{end}}
 
   <section>
@@ -61,8 +64,8 @@
       <h2>Recent incidents</h2>
     </div>
     {{if .Incidents}}
-      <div class="table-wrap">
-        <table class="telemetry">
+      <div class="table-wrap stack-wrap">
+        <table class="telemetry stack">
           <thead>
             <tr>
               <th>Target</th>
@@ -74,10 +77,10 @@
           <tbody>
             {{range .Incidents}}
               <tr>
-                <td>{{.TargetName}}</td>
-                <td class="mono">{{.OpenedAt}}</td>
-                <td class="mono">{{if .ClosedAt}}{{.ClosedAt}}{{else}}<span class="badge live">Open</span>{{end}}</td>
-                <td class="err-text">{{.LastErr}}</td>
+                <td data-label="Target">{{.TargetName}}</td>
+                <td data-label="Opened" class="mono">{{.OpenedAt}}</td>
+                <td data-label="Closed" class="mono">{{if .ClosedAt}}{{.ClosedAt}}{{else}}<span class="badge bad">Open</span>{{end}}</td>
+                <td data-label="Last error" class="err-text">{{.LastErr}}</td>
               </tr>
             {{end}}
           </tbody>

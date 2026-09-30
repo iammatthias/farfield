@@ -3,7 +3,7 @@
   <header id="grid" class="bar">
     <h1><a href="/">farfield · blobs</a></h1>
     <nav>
-      <span class="muted">{{.Total}} blob{{if ne .Total 1}}s{{end}}</span>
+      <span class="tech">{{.Total}} blob{{if ne .Total 1}}s{{end}}</span>
       <a href="/upload">Upload</a>
       <a href="/hygiene">Hygiene</a>
       <a href="/logout">Log out</a>
@@ -12,8 +12,8 @@
   </header>
 
   {{if .Blobs}}
-    <div class="table-wrap">
-      <table class="blobs">
+    <div class="table-wrap stack-wrap">
+      <table class="blobs stack">
         <thead>
           <tr>
             <th></th><th>CID</th><th>Type</th><th>Dimensions</th>
@@ -23,7 +23,7 @@
         <tbody>
           {{range .Blobs}}
             <tr>
-              <td class="shrink">
+              <td class="shrink" data-label="">
                 <a class="row" href="#m-{{.CID}}">
                   {{$kind := mediaKind .Mime}}
                   {{if eq $kind "image"}}
@@ -38,17 +38,17 @@
                   {{end}}
                 </a>
               </td>
-              <td><a class="row mono" href="#m-{{.CID}}">{{slice .CID 0 24}}…</a></td>
-              <td>{{.Mime}}</td>
-              <td>{{if .Width}}{{.Width}} × {{.Height}}{{else}}—{{end}}</td>
-              <td>{{humanSize .Size}}</td>
-              <td>
+              <td data-label="CID"><a class="row mono" href="#m-{{.CID}}">{{slice .CID 0 24}}…</a></td>
+              <td data-label="Type">{{.Mime}}</td>
+              <td data-label="Dimensions">{{if .Width}}{{.Width}} × {{.Height}}{{else}}—{{end}}</td>
+              <td data-label="Size" class="mono">{{humanSize .Size}}</td>
+              <td data-label="Color" class="mono">
                 {{if .DominantColor}}
                   <span class="swatch" style="background:{{.DominantColor}}"></span>
                   {{.DominantColor}}
                 {{else}}—{{end}}
               </td>
-              <td>{{shortDate .CreatedAt}}</td>
+              <td data-label="Added" class="mono">{{shortDate .CreatedAt}}</td>
             </tr>
           {{end}}
         </tbody>
@@ -76,18 +76,18 @@
           <div class="detail">
             <h2>{{.Mime}}</h2>
             <dl>
-              <dt>CID</dt><dd class="mono">{{.CID}}</dd>
-              <dt>Size</dt><dd>{{humanSize .Size}} ({{.Size}} bytes)</dd>
-              <dt>Dimensions</dt><dd>{{if .Width}}{{.Width}} × {{.Height}}{{else}}—{{end}}</dd>
-              <dt>Color</dt>
+              <dt class="tech">CID</dt><dd class="mono">{{.CID}}</dd>
+              <dt class="tech">Size</dt><dd>{{humanSize .Size}} ({{.Size}} bytes)</dd>
+              <dt class="tech">Dimensions</dt><dd>{{if .Width}}{{.Width}} × {{.Height}}{{else}}—{{end}}</dd>
+              <dt class="tech">Color</dt>
               <dd>
                 {{if .DominantColor}}
                   <span class="swatch" style="background:{{.DominantColor}}"></span>
                   {{.DominantColor}}
                 {{else}}—{{end}}
               </dd>
-              <dt>Blurhash</dt><dd class="mono">{{if .Blurhash}}{{.Blurhash}}{{else}}—{{end}}</dd>
-              <dt>Added</dt><dd>{{.CreatedAt}}</dd>
+              <dt class="tech">Blurhash</dt><dd class="mono">{{if .Blurhash}}{{.Blurhash}}{{else}}—{{end}}</dd>
+              <dt class="tech">Added</dt><dd class="mono">{{.CreatedAt}}</dd>
             </dl>
             <p>
               <a href="/blobs/{{.CID}}" target="_blank" rel="noopener">Raw bytes ↗</a>
@@ -95,13 +95,16 @@
             </p>
             <form method="post" action="/blobs/{{.CID}}/delete"
                   onsubmit="return confirm('Delete this blob? It is removed from the store.')">
-              <button type="submit">Delete blob</button>
+              <button type="submit" class="danger">Delete blob</button>
             </form>
           </div>
         </div>
       </div>
     {{end}}
   {{else}}
-    <p class="muted">No blobs in the store. <a href="/upload">Upload one.</a></p>
+    <div class="empty">
+      <p class="line">Nothing in the store yet.</p>
+      <p class="muted"><a href="/upload">Upload a blob.</a></p>
+    </div>
   {{end}}
 {{end}}

@@ -5,8 +5,8 @@
     {{range .Posts}}
       <article class="post">
         <div class="post-meta">
-          <span class="when">{{slice .CreatedAt 0 10}}</span>
-          {{range .Tags}}<span class="tag">#{{.}}</span>{{end}}
+          <span class="tech">{{slice .CreatedAt 0 10}}</span>
+          {{if .Tags}}<span class="tags">{{range .Tags}}<span>{{.}}</span>{{end}}</span>{{end}}
         </div>
         <div class="post-body">{{.BodyHTML}}</div>
         <div class="post-actions">
@@ -19,9 +19,12 @@
       </article>
     {{end}}
     {{if .Older}}
-      <p class="muted"><a href="/?before={{.Older}}">Older posts →</a></p>
+      <nav class="pager"><span></span><a href="/?before={{.Older}}">Older posts →</a></nav>
     {{end}}
   {{else}}
-    <p class="muted">No posts yet. <a href="/new">Write one.</a></p>
+    <div class="empty">
+      <p class="line">Nothing posted yet.</p>
+      <p class="muted"><a href="/new">Write the first note.</a></p>
+    </div>
   {{end}}
 {{end}}

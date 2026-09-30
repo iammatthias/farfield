@@ -3,9 +3,9 @@
   {{template "topbar" .}}
 
   <a class="back" href="/app/{{.Build.BundleID}}">← {{if .Build.AppName}}{{.Build.AppName}}{{else}}{{.Build.BundleID}}{{end}}</a>
-  <h1 style="font-size:1.25rem;margin-top:0.5rem">
+  <h1 class="page-title">
     {{if .Build.AppName}}{{.Build.AppName}}{{else}}{{.Build.BundleID}}{{end}}
-    <span class="muted" style="font-weight:400">{{.Build.Version}} ({{.Build.BuildNumber}})</span>
+    <span class="muted">{{.Build.Version}} ({{.Build.BuildNumber}})</span>
   </h1>
   <p class="meta">
     <span class="cid">{{.Build.BundleID}}</span>
@@ -14,25 +14,23 @@
     {{if .Build.Team}}<span>{{.Build.Team}}</span>{{end}}
     {{if .Build.GitCommit}}<span>commit {{.Build.GitCommit}}</span>{{end}}
   </p>
-  {{with .Build.Notes}}<p class="muted" style="margin-top:0.3rem">{{.}}</p>{{end}}
+  {{with .Build.Notes}}<p class="muted spaced">{{.}}</p>{{end}}
 
   {{with .Expiry}}{{if .Known}}
     {{if .Expired}}
-      <p class="banner danger">Provisioning profile expired {{.Date}} — iOS will refuse this build. Re-sign and re-upload.</p>
+      <p class="notice bad">Provisioning profile expired {{.Date}} — iOS will refuse this build. Re-sign and re-upload.</p>
     {{else if .Warn}}
-      <p class="banner warn">Provisioning profile expires in {{.Days}} day{{if ne .Days 1}}s{{end}} ({{.Date}}). Re-sign before it lapses.</p>
+      <p class="notice warn">Provisioning profile expires in {{.Days}} day{{if ne .Days 1}}s{{end}} ({{.Date}}). Re-sign before it lapses.</p>
     {{else}}
-      <p class="banner ok">Profile valid until {{.Date}} — {{.Days}} days left.</p>
+      <p class="notice good">Profile valid until {{.Date}} — {{.Days}} days left.</p>
     {{end}}
   {{end}}{{end}}
 
   <section class="install">
     <div class="lede">
-      <a class="install-btn" href="{{.InstallURL}}">Install on this iPhone</a>
-      <p class="meta" style="margin-top:0.9rem">
-        <span>Open this page in Safari on a registered iPhone and tap install.</span>
-      </p>
-      <p class="muted" style="font-size:0.8rem;margin-top:0.4rem">
+      <a class="btn primary install-btn" href="{{.InstallURL}}">Install on this iPhone</a>
+      <p class="hint">
+        Open this page in Safari on a registered iPhone and tap install.
         {{if gt .Build.DeviceCount 0}}{{.Build.DeviceCount}} device{{if ne .Build.DeviceCount 1}}s{{end}} enrolled in this profile.{{end}}
         Only devices whose UDID is in the profile can install.
       </p>
@@ -45,13 +43,13 @@
     {{end}}
   </section>
 
-  <section class="panel">
-    <h2>Share off-tailnet</h2>
-    <p class="muted" style="font-size:0.82rem;margin:0 0 0.8rem">
+  <section>
+    <div class="section-head"><h2>Share off-tailnet</h2></div>
+    <p class="hint">
       Mint a public, single-use install link for one registered device. It
       self-revokes after one install and expires on its own.
     </p>
-    <form class="inline-form" method="post" action="/b/{{.Build.ID}}/share">
+    <form class="form-row" method="post" action="/b/{{.Build.ID}}/share">
       <div class="field">
         <label for="ttl">Expires</label>
         <select id="ttl" name="ttl">
@@ -68,7 +66,7 @@
           <option value="unlimited">unlimited</option>
         </select>
       </div>
-      <div class="field" style="flex:1 1 12rem">
+      <div class="field" style="flex:2 1 12rem">
         <label for="label">Label (optional)</label>
         <input type="text" id="label" name="label" placeholder="for Sam's iPhone">
       </div>
@@ -76,23 +74,21 @@
     </form>
   </section>
 
-  <section class="panel">
-    <h2>Changelog — what's new in this version</h2>
-    <p class="muted" style="font-size:0.82rem;margin:0 0 0.8rem">
-      Shown on the app page under this version. Markdown supported.
-    </p>
+  <section>
+    <div class="section-head"><h2>Changelog — what's new in this version</h2></div>
+    <p class="hint">Shown on the app page under this version. Markdown supported.</p>
     <form method="post" action="/b/{{.Build.ID}}/notes">
       <div class="field">
         <textarea name="notes" rows="5"
                   placeholder="- Fixed the crash on launch&#10;- New settings screen">{{.Build.Notes}}</textarea>
       </div>
-      <div class="actions"><button type="submit">Save changelog</button></div>
+      <div class="actions"><button type="submit" class="quiet">Save changelog</button></div>
     </form>
   </section>
 
   <form method="post" action="/b/{{.Build.ID}}/delete"
         onsubmit="return confirm('Delete this build and its .ipa?')"
-        style="margin-top:1.4rem">
+        class="spaced">
     <button class="danger" type="submit">Delete build</button>
   </form>
 {{end}}

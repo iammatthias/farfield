@@ -3,8 +3,9 @@
 
 {{define "styles"}}
   <style>
-    /* trash rows carry two actions — keep them on one line */
-    .trash-actions { display: flex; gap: 0.6rem; align-items: center; }
+    /* fleet search: the source app, a fixed-width readout at the row's head */
+    .fleet-hit-kind { flex: none; width: 5.5rem; }
+    @media (max-width: 40rem) { .fleet-hit-kind { width: 4.5rem; } }
   </style>
 {{end}}
 
@@ -19,12 +20,12 @@
       {{range .Entries}}
         <tr data-slug="{{.Slug}}">
           <td data-label="Title"><a href="/entries/{{.Slug}}/edit">{{.Title}}</a></td>
-          <td data-label="Collection">{{.Collection}}</td>
+          <td data-label="Collection" class="muted">{{.Collection}}</td>
           <td data-label="Status">{{if .Published}}<span class="badge live">published</span>
               {{else}}<span class="badge draft">draft</span>{{end}}</td>
           <td data-label="Created" class="nowrap muted">{{slice .CreatedAt 0 10}}</td>
           <td data-label="Updated" class="nowrap muted">{{slice .UpdatedAt 0 10}}</td>
-          <td data-label="" class="nowrap">
+          <td data-label="" class="actions">
             <form method="post" action="/entries/{{.Slug}}/delete"
                   onsubmit="return confirm('Move this entry to the trash?')">
               <button class="danger" type="submit">Delete</button>
@@ -36,4 +37,3 @@
   </table>
 </div>
 {{end}}
-

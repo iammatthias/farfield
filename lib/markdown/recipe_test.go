@@ -42,19 +42,6 @@ func TestRenderRecipeBlock(t *testing.T) {
 	}
 }
 
-func TestRecipeBlockSurvivesTheDocumentEditor(t *testing.T) {
-	// The editor round-trips a recipe block as editable source; rendering it
-	// there would make it uneditable and a save would destroy it.
-	var r Renderer
-	html := string(r.RenderEditable(context.Background(), recipeBody))
-	if !strings.Contains(html, `data-lang="recipe"`) {
-		t.Errorf("recipe block should stay a code block in the editor:\n%s", html)
-	}
-	if !strings.Contains(html, "ingredients:") {
-		t.Error("recipe source should be editable verbatim")
-	}
-}
-
 func TestOtherFencedBlocksAreUntouched(t *testing.T) {
 	var r Renderer
 	body := "```yaml\nyield: not a recipe\n```\n"

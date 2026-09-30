@@ -123,9 +123,9 @@ func (rd *Renderer) mark() string {
 // only the glyph differing.
 func (rd *Renderer) favicon() template.HTML {
 	svg := `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">` +
-		`<rect width="64" height="64" rx="8" fill="#17265c"/>` +
+		`<rect width="64" height="64" rx="12" fill="#0e222d"/>` +
 		`<text x="32" y="42" font-family="ui-monospace,Menlo,monospace" font-size="26" ` +
-		`font-weight="600" text-anchor="middle" fill="#f7f3e8">` +
+		`font-weight="500" text-anchor="middle" fill="#f3e5d1">` +
 		template.HTMLEscapeString(rd.mark()) + `</text></svg>`
 	// PathEscape leaves the quotes and angle brackets a data: URI needs
 	// readable, and escapes the spaces and '#' that would break the attribute.

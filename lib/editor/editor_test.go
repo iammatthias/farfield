@@ -70,7 +70,7 @@ func newEd(t testing.TB) *ed {
 	m := newModule(t)
 	e := &ed{t: t, m: m}
 	callT(t, m, "init")
-	for slot, ttf := range [][]byte{goregular.TTF, gobold.TTF, goitalic.TTF, gobolditalic.TTF, gomono.TTF, gomonobold.TTF} {
+	for slot, ttf := range [][]byte{goregular.TTF, gobold.TTF, goitalic.TTF, gobolditalic.TTF, gomono.TTF, gomonobold.TTF, goregular.TTF} {
 		loadFont(t, m, uint32(slot), ttf)
 	}
 	if callT(t, m, "resize", 900, 700, 200) == 0 {
@@ -490,5 +490,81 @@ func TestInlineCodeTint(t *testing.T) {
 	c, _ := panel.Read(0x110, 3) // palette slot 4: the code panel
 	if !has(img, [3]byte{c[0], c[1], c[2]}) {
 		t.Error("no code tint drawn")
+	}
+}
+
+func TestSelRectAndCaretLine(t *testing.T) {
+	e := newEd(t)
+	e.setText("first line\n/he")
+	e.sel(len(e.text()), len(e.text()))
+	n := uint32(e.call("caret_line"))
+	b, _ := e.m.Memory().Read(uint32(e.call("io_ptr")), n)
+	if string(b) != "/he" || e.call("line_start") != 11 {
+		t.Errorf("caret_line = %q start %d", b, e.call("line_start"))
+	}
+	e.sel(0, 5)
+	r := uint32(e.call("sel_rect"))
+	mem := e.m.Memory()
+	x0, _ := mem.ReadUint32Le(r)
+	y0, _ := mem.ReadUint32Le(r + 4)
+	x1, _ := mem.ReadUint32Le(r + 8)
+	y1, _ := mem.ReadUint32Le(r + 12)
+	if !(x1 > x0 && y1 > y0) {
+		t.Errorf("sel_rect = %d,%d → %d,%d", x0, y0, x1, y1)
+	}
+}
+
+// Page mode lays out and renders at any size — including the 1×1 surface a
+// hidden page hands it — without hanging.
+func TestPageModeSizes(t *testing.T) {
+	e := newEd(t)
+	e.call("set_page", 1)
+	for _, wh := range [][2]uint64{{1, 1}, {2, 240}, {1520, 1200}, {1, 1}, {760, 900}} {
+		e.call("resize", wh[0], wh[1], 200)
+		e.setText(PreviewSample)
+		e.call("render")
+		h := e.call("doc_height")
+		e.call("set_scroll", h)
+		e.call("render")
+	}
+}
+
+// The browser's order: mounted while hidden (1 px wide), text set, then
+// shown at full width.
+func TestPageModeShownAfterHidden(t *testing.T) {
+	e := newEd(t)
+	e.call("set_page", 1)
+	e.call("resize", 1, 240, 200)
+	e.setText(PreviewSample)
+	e.call("render")
+	e.call("doc_height")
+	e.call("resize", 1520, 1673, 200)
+	e.call("doc_height")
+	e.call("set_scroll", 0)
+	e.call("tick", 100)
+	e.call("render")
+	e.call("caret_rect")
+	e.call("sel_rect")
+	e.call("caret_line")
+}
+
+// The coverage curve keeps the ends fixed, never decreases, and lifts the
+// mid-tones that make antialiased text read thin.
+func TestGammaCurve(t *testing.T) {
+	e := newEd(t)
+	lut, ok := e.m.Memory().Read(0x300, 256)
+	if !ok {
+		t.Fatal("read curve")
+	}
+	if lut[0] != 0 || lut[255] != 255 {
+		t.Fatalf("ends = %d, %d; want 0, 255", lut[0], lut[255])
+	}
+	for i := 1; i < 256; i++ {
+		if lut[i] < lut[i-1] {
+			t.Fatalf("curve falls at %d: %d < %d", i, lut[i], lut[i-1])
+		}
+	}
+	if lut[128] < 150 {
+		t.Errorf("mid coverage %d not lifted", lut[128])
 	}
 }

@@ -12,18 +12,18 @@
   </p>
 
   {{if .Series}}
-    <div class="table-wrap">
-      <table class="rows">
+    <div class="table-wrap stack-wrap">
+      <table class="rows stack">
         <thead>
           <tr><th>Slug</th><th>Title</th><th class="nowrap">Updated</th><th></th></tr>
         </thead>
         <tbody>
           {{range .Series}}
             <tr>
-              <td><a href="/series/{{.Slug}}/edit"><code>{{.Slug}}</code></a></td>
-              <td>{{if .Title}}{{.Title}}{{else}}<span class="muted">—</span>{{end}}</td>
-              <td class="nowrap muted">{{slice .UpdatedAt 0 10}}</td>
-              <td class="nowrap">
+              <td data-label="Slug"><a href="/series/{{.Slug}}/edit"><code>{{.Slug}}</code></a></td>
+              <td data-label="Title">{{if .Title}}{{.Title}}{{else}}<span class="muted">—</span>{{end}}</td>
+              <td data-label="Updated" class="nowrap muted">{{slice .UpdatedAt 0 10}}</td>
+              <td data-label="" class="actions">
                 <form method="post" action="/series/{{.Slug}}/delete"
                       onsubmit="return confirm('Delete this series?')">
                   <button class="danger" type="submit">Delete</button>
@@ -35,6 +35,6 @@
       </table>
     </div>
   {{else}}
-    <p class="muted">No series yet.</p>
+    <div class="empty"><p class="line">No series yet.</p></div>
   {{end}}
 {{end}}

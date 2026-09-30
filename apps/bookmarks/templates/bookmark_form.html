@@ -31,21 +31,20 @@
     </div>
     <div class="field check">
       <input type="checkbox" id="public" name="public"{{if .Bookmark.Public}} checked{{end}}>
-      <label for="public" style="font:inherit;text-transform:none;letter-spacing:normal;opacity:1;margin:0">Public — include in the public JSON API</label>
+      <label for="public">Public — include in the public JSON API</label>
     </div>
 
     {{if not .IsNew}}
-      <hr>
-      <p class="label">Fetched metadata</p>
-      <dl class="summary" style="display:grid;grid-template-columns:auto 1fr;gap:0.3rem 0.9rem;font-family:var(--font-mono);font-size:0.78rem;opacity:0.7">
-        <dt>og:title</dt><dd>{{if .Bookmark.OGTitle}}{{.Bookmark.OGTitle}}{{else}}—{{end}}</dd>
-        <dt>og:description</dt><dd>{{if .Bookmark.OGDescription}}{{.Bookmark.OGDescription}}{{else}}—{{end}}</dd>
-        <dt>og:image</dt><dd>{{if .Bookmark.OGImage}}{{.Bookmark.OGImage}}{{else}}—{{end}}</dd>
-        <dt>og:site_name</dt><dd>{{if .Bookmark.OGSiteName}}{{.Bookmark.OGSiteName}}{{else}}—{{end}}</dd>
-        <dt>og:type</dt><dd>{{if .Bookmark.OGType}}{{.Bookmark.OGType}}{{else}}—{{end}}</dd>
-        <dt>author</dt><dd>{{if .Bookmark.MetaAuthor}}{{.Bookmark.MetaAuthor}}{{else}}—{{end}}</dd>
-        <dt>favicon</dt><dd>{{if .Bookmark.Favicon}}{{.Bookmark.Favicon}}{{else}}—{{end}}</dd>
-        <dt>cid</dt><dd>{{.Bookmark.CID}}</dd>
+      <div class="section-head"><h2>Fetched metadata</h2></div>
+      <dl class="fetched">
+        <dt class="tech">og:title</dt><dd>{{if .Bookmark.OGTitle}}{{.Bookmark.OGTitle}}{{else}}—{{end}}</dd>
+        <dt class="tech">og:description</dt><dd>{{if .Bookmark.OGDescription}}{{.Bookmark.OGDescription}}{{else}}—{{end}}</dd>
+        <dt class="tech">og:image</dt><dd>{{if .Bookmark.OGImage}}{{.Bookmark.OGImage}}{{else}}—{{end}}</dd>
+        <dt class="tech">og:site_name</dt><dd>{{if .Bookmark.OGSiteName}}{{.Bookmark.OGSiteName}}{{else}}—{{end}}</dd>
+        <dt class="tech">og:type</dt><dd>{{if .Bookmark.OGType}}{{.Bookmark.OGType}}{{else}}—{{end}}</dd>
+        <dt class="tech">author</dt><dd>{{if .Bookmark.MetaAuthor}}{{.Bookmark.MetaAuthor}}{{else}}—{{end}}</dd>
+        <dt class="tech">favicon</dt><dd>{{if .Bookmark.Favicon}}{{.Bookmark.Favicon}}{{else}}—{{end}}</dd>
+        <dt class="tech">cid</dt><dd class="mono">{{.Bookmark.CID}}</dd>
       </dl>
     {{end}}
 
