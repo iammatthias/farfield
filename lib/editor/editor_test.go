@@ -627,3 +627,113 @@ func TestImageLineDrawsPixels(t *testing.T) {
 		t.Fatalf("text changed: %q", e.text())
 	}
 }
+
+// Two images with emphasis around them both draw: styling a later line must
+// not overwrite an earlier image's placement (they once shared memory).
+func TestImagesSurviveEmphasis(t *testing.T) {
+	e := newEd(t)
+	e.setText("*one* **two**\n![](blob://a)\n_three_ and **four**\n![](blob://b)\n*five*")
+	put := func(url string, r, g, b byte) {
+		const w, h = 30, 12
+		ptr := uint32(e.call("image_alloc", w*h*4))
+		px := make([]byte, w*h*4)
+		for i := 0; i < len(px); i += 4 {
+			px[i], px[i+1], px[i+2], px[i+3] = r, g, b, 255
+		}
+		e.m.Memory().Write(ptr, px)
+		e.m.Memory().Write(uint32(e.call("io_ptr")), []byte(url))
+		e.call("image_put", uint64(len(url)), w, h, uint64(ptr))
+	}
+	put("blob://a", 250, 10, 10)
+	put("blob://b", 10, 250, 10)
+	e.call("render")
+	img := e.frame()
+	has := func(r, g, b uint8) bool {
+		bd := img.Bounds()
+		for y := bd.Min.Y; y < bd.Max.Y; y++ {
+			for x := bd.Min.X; x < bd.Max.X; x++ {
+				c := img.RGBAAt(x, y)
+				if c.R == r && c.G == g && c.B == b {
+					return true
+				}
+			}
+		}
+		return false
+	}
+	if !has(250, 10, 10) || !has(10, 250, 10) {
+		t.Fatalf("both images should draw (a=%v b=%v)", has(250, 10, 10), has(10, 250, 10))
+	}
+}
+
+// Raw HTML / JSX lines are markup: every byte is code-styled and dimmed, and
+// no inline Markdown runs inside them.
+func TestHTMLLinesAreMarkup(t *testing.T) {
+	e := newEd(t)
+	src := "<div style=\"display:flex\">\n\t<StripeButton id=\"x_y_z\" />\n</div>\n*prose*"
+	e.setText(src)
+	e.call("render")
+	styles, _ := e.m.Memory().Read(0x00DD0000, uint32(len(src)))
+	for i := 0; i < strings.Index(src, "\n*prose*"); i++ {
+		if src[i] == '\n' || src[i] == '\t' {
+			continue
+		}
+		if styles[i]&4 == 0 || styles[i]&16 == 0 {
+			t.Fatalf("byte %d %q of an HTML line has style %#x, want code|mark", i, src[i], styles[i])
+		}
+		if styles[i]&2 != 0 {
+			t.Fatalf("emphasis ran inside HTML at byte %d", i)
+		}
+	}
+	p := strings.Index(src, "prose")
+	if styles[p]&2 == 0 {
+		t.Fatalf("the prose line after the HTML should still be italic")
+	}
+}
+
+// A backslash escape dims the backslash and keeps the next character literal:
+// it neither starts emphasis nor looks like syntax itself.
+func TestBackslashEscapes(t *testing.T) {
+	e := newEd(t)
+	src := `a \_not italic\_ and \[not a link\](x) *yes*`
+	e.setText(src)
+	e.call("render")
+	styles, _ := e.m.Memory().Read(0x00DD0000, uint32(len(src)))
+	bs := strings.Index(src, `\_`)
+	if styles[bs]&16 == 0 {
+		t.Fatalf("the backslash should be dimmed syntax")
+	}
+	if styles[bs+1]&16 != 0 {
+		t.Fatalf("the escaped character should read as plain text")
+	}
+	n := strings.Index(src, "not italic")
+	if styles[n]&2 != 0 {
+		t.Fatalf("escaped underscores must not start emphasis")
+	}
+	l := strings.Index(src, "not a link")
+	if styles[l]&8 != 0 {
+		t.Fatalf("an escaped bracket must not start a link")
+	}
+	y := strings.Index(src, "yes")
+	if styles[y]&2 == 0 {
+		t.Fatalf("real emphasis after the escapes should still work")
+	}
+}
+
+// A caret blink repaints one line's strip, not the whole surface.
+func TestBlinkRepaintsOnlyTheCaretLine(t *testing.T) {
+	e := newEd(t)
+	e.setText("one\ntwo\nthree\nfour\nfive")
+	e.call("tick", 0)
+	e.call("render")
+	if e.call("dirty_h") != 700 {
+		t.Fatalf("a full render should mark the whole surface dirty, got %d", e.call("dirty_h"))
+	}
+	e.call("tick", 5000) // long after the last edit: somewhere in the blink cycle
+	e.call("tick", 5700)
+	if e.call("render") == 0 {
+		t.Fatal("a blink should repaint something")
+	}
+	if h := e.call("dirty_h"); h == 0 || h >= 700 {
+		t.Fatalf("blink dirtied %d rows; want one line's strip", h)
+	}
+}

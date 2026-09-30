@@ -17,16 +17,26 @@
 }
 .ff-editor canvas { display: block; }
 
-/* page mode: as tall as the text (host.js sets the height), with the canvas
-   a sticky window onto it — so the window scrolls the document */
+/* page mode: the host is as tall as the text (host.js sets the height) and
+   the canvas is a tile inside it, about two screens tall, moved by host.js
+   when the view nears its edge — so the page scrolls natively */
 .ff-editor.ff-editor-page {
 	height: auto;
 	min-height: 0;
 	overflow: visible;
 }
 .ff-editor-page canvas {
-	position: sticky;
-	top: var(--ff-editor-top, 0px);
+	position: absolute;
+	left: 0;
+	top: 0;
+}
+/* touch: the editor places the caret and selects words itself; the page's
+   own long-press callout and text selection would fight it */
+.ff-editor canvas {
+	-webkit-touch-callout: none;
+	-webkit-user-select: none;
+	user-select: none;
+	-webkit-tap-highlight-color: transparent;
 }
 
 /* The sink must be focusable and on-screen for IME and phone keyboards, but

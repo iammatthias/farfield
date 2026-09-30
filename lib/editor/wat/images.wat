@@ -19,7 +19,7 @@
 (module
   (global $IMGTAB i32 (i32.const 0x1000))  ;; STATIC: 64 records × 32 bytes
   (global $IMG_MAX i32 (i32.const 64))
-  (global $PLACE i32 (i32.const 0x2000))   ;; STATIC: 128 placements × 20 bytes
+  (global $PLACE i32 (i32.const 0x8000))   ;; STATIC: 128 placements × 20 bytes
   (global $PLACE_MAX i32 (i32.const 128))
   (global $IMG_HEAP i32 (i32.const 0x05BD0000)) ;; FB + 64 MiB
   (global $img_n (mut i32) (i32.const 0))

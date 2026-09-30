@@ -41,7 +41,12 @@
   (global $TEXT_CAP i32 (i32.const 0x00400000))
   (global $FB     i32 (i32.const 0x01BD0000))
 
-  ;; STATIC sub-regions
+  ;; STATIC sub-regions — every fixed address below 64 KiB, in one place so a
+  ;; new one cannot land on an old one:
+  ;;   0x0100 PALETTE      0x0200 CARET_OUT (+16 sel_rect)   0x0300 GAMMA
+  ;;   0x0400 FONTREC (8 × 64)   0x1000 IMGTAB (64 × 32, images.wat)
+  ;;   0x2000 OPENERS (64 × 12, markdown.wat)   0x3000 PLACEHOLDER (1 KiB)
+  ;;   0x4000 SCRATCH (edit.wat)   0x8000 PLACE (128 × 20, images.wat)
   (global $PALETTE i32 (i32.const 0x0100)) ;; 16 colours × u32 (RGBA bytes)
   (global $CARET_OUT i32 (i32.const 0x0200)) ;; x, y, w, h (device px) for the host
   (global $GAMMA i32 (i32.const 0x0300))    ;; 256-byte glyph coverage curve

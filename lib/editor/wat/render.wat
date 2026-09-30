@@ -11,6 +11,14 @@
 (module
   (global $scroll (mut i32) (i32.const 0)) ;; document y at the top of the surface
   (global $dirty (mut i32) (i32.const 1))
+  ;; $blink: only the caret changed; render redraws its line alone. The rows
+  ;; render last touched are dirty_y..dirty_y+dirty_h, so a host re-uploads
+  ;; just those instead of the whole framebuffer on every blink.
+  (global $blink (mut i32) (i32.const 0))
+  (global $dirty_y (mut i32) (i32.const 0))
+  (global $dirty_h (mut i32) (i32.const 0))
+  (func (export "dirty_y") (result i32) (global.get $dirty_y))
+  (func (export "dirty_h") (result i32) (global.get $dirty_h))
 
   (func $color (param $i i32) (result i32)
     (i32.load (i32.add (global.get $PALETTE) (i32.shl (local.get $i) (i32.const 2)))))
@@ -223,7 +231,7 @@
         ;; inline code gets a tint (code blocks are tinted whole)
         (if (i32.and (i32.ne (i32.and (local.get $st) (global.get $S_CODE)) (i32.const 0))
                      (i32.and (i32.and (i32.ne (local.get $kind) (global.get $K_CODE)) (i32.ne (local.get $kind) (global.get $K_FENCE)))
-                              (i32.ne (local.get $kind) (global.get $K_PLAIN))))
+                              (i32.and (i32.ne (local.get $kind) (global.get $K_PLAIN)) (i32.ne (local.get $kind) (global.get $K_HTML)))))
           (then (call $fill (local.get $xi) (i32.add (local.get $y) (i32.div_s (local.get $h) (i32.const 8)))
             (local.get $aw) (i32.sub (local.get $h) (i32.div_s (local.get $h) (i32.const 4))) (call $color (i32.const 4)))))
         (local.set $x (f32.add (local.get $x) (local.get $a)))
@@ -270,8 +278,13 @@
     (local $th i32) (local $ty i32) (local $p i32) (local $x f32) (local $cp i32) (local $g i32)
     (if (i32.or (i32.eqz (global.get $W)) (i32.eqz (global.get $H))) (then (return (i32.const 0))))
     (call $layout)
+    (if (i32.and (i32.eqz (global.get $dirty)) (global.get $blink))
+      (then (global.set $blink (i32.const 0)) (return (call $render_caret_line))))
     (if (i32.eqz (global.get $dirty)) (then (return (i32.const 0))))
     (global.set $dirty (i32.const 0))
+    (global.set $blink (i32.const 0))
+    (global.set $dirty_y (i32.const 0))
+    (global.set $dirty_h (global.get $H))
     (call $fill (i32.const 0) (i32.const 0) (global.get $W) (global.get $H) (call $color (i32.const 0)))
     (if (i32.eqz (global.get $nlines)) (then (return (i32.const 1))))
     ;; visible lines only
@@ -320,6 +333,25 @@
           (call $max (i32.const 1) (i32.sub (global.get $doc_h) (global.get $H)))))
         (call $fill (i32.sub (global.get $W) (call $dp (i32.const 6))) (local.get $ty)
           (call $dp (i32.const 3)) (local.get $th) (call $color (i32.const 8)))))
+    (i32.const 1))
+
+  ;; $render_caret_line repaints only the caret's visual line — background,
+  ;; text, selection, caret — for a blink. Returns 1 when it drew anything.
+  (func $render_caret_line (result i32) (local $cl i32) (local $r i32) (local $y i32) (local $h i32)
+    (if (i32.eqz (global.get $nlines)) (then (return (i32.const 0))))
+    (local.set $cl (call $line_of (global.get $sel_h)))
+    (local.set $r (call $rec (local.get $cl)))
+    (local.set $y (i32.sub (i32.load offset=8 (local.get $r)) (global.get $scroll)))
+    (local.set $h (i32.load offset=12 (local.get $r)))
+    (if (i32.or (i32.ge_s (local.get $y) (global.get $H)) (i32.le_s (i32.add (local.get $y) (local.get $h)) (i32.const 0)))
+      (then (return (i32.const 0))))
+    (call $fill (i32.const 0) (local.get $y) (global.get $W) (local.get $h) (call $color (i32.const 0)))
+    (call $draw_line (local.get $cl))
+    (if (i32.and (global.get $focused) (global.get $caret_on))
+      (then (call $fill (call $x_of (global.get $sel_h)) (local.get $y)
+        (call $max (call $dp (i32.const 2)) (i32.const 1)) (local.get $h) (call $color (i32.const 6)))))
+    (global.set $dirty_y (call $max (local.get $y) (i32.const 0)))
+    (global.set $dirty_h (i32.sub (call $min (i32.add (local.get $y) (local.get $h)) (global.get $H)) (global.get $dirty_y)))
     (i32.const 1))
 
   (func (export "fb_ptr") (result i32) (global.get $FB))

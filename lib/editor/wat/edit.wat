@@ -933,7 +933,7 @@
     ;; stay solid for a moment after any edit or move
     (if (i32.lt_u (i32.sub (local.get $ms) (global.get $last_edit_ms)) (i32.const 600)) (then (local.set $on (i32.const 1))))
     (if (i32.ne (local.get $on) (global.get $caret_on))
-      (then (global.set $caret_on (local.get $on)) (global.set $dirty (i32.const 1)))))
+      (then (global.set $caret_on (local.get $on)) (global.set $blink (i32.const 1)))))
 
   ;; sel_rect writes the selection's bounds in surface pixels to STATIC+0x210:
   ;; x of its start, top of its first line, x of its end, bottom of its last

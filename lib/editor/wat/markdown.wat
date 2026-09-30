@@ -23,6 +23,7 @@
   (global $K_RULE  i32 (i32.const 7))
   (global $K_BLANK i32 (i32.const 8))
   (global $K_PLAIN i32 (i32.const 9)) ;; plain-text mode: mono, no Markdown
+  (global $K_HTML  i32 (i32.const 10)) ;; raw HTML or a JSX component: markup, not prose
 
   ;; $plain switches Markdown off: every line is plain monospaced text. For
   ;; pastes and code, where # and * are content, not syntax.
@@ -98,6 +99,22 @@
             (return (global.get $K_FENCE))))))
     (if (global.get $in_fence) (then (return (global.get $K_CODE))))
     (if (i32.ge_s (local.get $p) (local.get $e)) (then (return (global.get $K_BLANK))))
+    ;; raw HTML / JSX: a line opening with <tag, </tag or <! (tabs allowed
+    ;; before it) is markup the site renders — shown as source, not as prose
+    (local.set $q (local.get $p))
+    (block $tabs (loop $t
+      (br_if $tabs (i32.ge_s (local.get $q) (local.get $e)))
+      (br_if $tabs (i32.ne (call $byte (local.get $q)) (i32.const 9)))
+      (local.set $q (i32.add (local.get $q) (i32.const 1)))
+      (br $t)))
+    (if (i32.and (i32.lt_s (i32.add (local.get $q) (i32.const 1)) (local.get $e))
+                 (i32.eq (call $byte (local.get $q)) (i32.const 0x3C)))
+      (then
+        (local.set $n (i32.or (call $byte (i32.add (local.get $q) (i32.const 1))) (i32.const 0x20)))
+        (if (i32.or (i32.and (i32.ge_u (local.get $n) (i32.const 0x61)) (i32.le_u (local.get $n) (i32.const 0x7A)))
+                    (i32.or (i32.eq (call $byte (i32.add (local.get $q) (i32.const 1))) (i32.const 0x2F))
+                            (i32.eq (call $byte (i32.add (local.get $q) (i32.const 1))) (i32.const 0x21))))
+          (then (global.set $prefix_len (i32.const 0)) (return (global.get $K_HTML))))))
     ;; ATX heading: 1–6 '#' then a space (or end of line)
     (if (i32.eq (local.get $c) (i32.const 0x23))
       (then
@@ -176,6 +193,8 @@
       (then (call $style_set (local.get $s) (local.get $e) (global.get $S_CODE)) (return)))
     (if (i32.eq (local.get $kind) (global.get $K_RULE))
       (then (call $style_set (local.get $s) (local.get $e) (global.get $S_MARK)) (return)))
+    (if (i32.eq (local.get $kind) (global.get $K_HTML))
+      (then (call $style_set (local.get $s) (local.get $e) (i32.or (global.get $S_CODE) (global.get $S_MARK))) (return)))
     (if (i32.eq (local.get $kind) (global.get $K_HEAD))
       (then
         (call $style_set (local.get $s) (local.get $ps) (global.get $S_MARK))
@@ -198,9 +217,54 @@
 
   (func $inline (param $s i32) (param $e i32)
     (call $code_spans (local.get $s) (local.get $e))
+    (call $escapes (local.get $s) (local.get $e))
     (call $links (local.get $s) (local.get $e))
     (call $autolinks (local.get $s) (local.get $e))
-    (call $emphasis (local.get $s) (local.get $e)))
+    (call $emphasis (local.get $s) (local.get $e))
+    (call $unescape (local.get $s) (local.get $e)))
+
+  ;; $is_punct: ASCII punctuation, the characters a backslash can escape.
+  (func $is_punct (param $c i32) (result i32)
+    (i32.or (i32.or
+      (i32.and (i32.ge_u (local.get $c) (i32.const 0x21)) (i32.le_u (local.get $c) (i32.const 0x2F)))
+      (i32.and (i32.ge_u (local.get $c) (i32.const 0x3A)) (i32.le_u (local.get $c) (i32.const 0x40))))
+      (i32.or
+      (i32.and (i32.ge_u (local.get $c) (i32.const 0x5B)) (i32.le_u (local.get $c) (i32.const 0x60)))
+      (i32.and (i32.ge_u (local.get $c) (i32.const 0x7B)) (i32.le_u (local.get $c) (i32.const 0x7E))))))
+
+  ;; \x — a backslash escape. The backslash is syntax (dimmed); the character
+  ;; after it is literal, so it is claimed as markup for the passes that
+  ;; follow and handed back to plain text by $unescape at the end.
+  (func $escapes (param $s i32) (param $e i32) (local $p i32)
+    (local.set $p (local.get $s))
+    (block $done
+      (loop $scan
+        (br_if $done (i32.ge_s (i32.add (local.get $p) (i32.const 1)) (local.get $e)))
+        (if (i32.and (i32.eq (call $byte (local.get $p)) (i32.const 0x5C))
+              (i32.and (i32.eqz (i32.and (call $style_of (local.get $p)) (global.get $S_CODE)))
+                       (call $is_punct (call $byte (i32.add (local.get $p) (i32.const 1))))))
+          (then
+            (call $style_set (local.get $p) (i32.add (local.get $p) (i32.const 2)) (global.get $S_MARK))
+            (local.set $p (i32.add (local.get $p) (i32.const 2)))
+            (br $scan)))
+        (local.set $p (i32.add (local.get $p) (i32.const 1)))
+        (br $scan))))
+
+  (func $unescape (param $s i32) (param $e i32) (local $p i32) (local $a i32)
+    (local.set $p (local.get $s))
+    (block $done
+      (loop $scan
+        (br_if $done (i32.ge_s (i32.add (local.get $p) (i32.const 1)) (local.get $e)))
+        (if (i32.and (i32.eq (call $byte (local.get $p)) (i32.const 0x5C))
+              (i32.and (i32.eqz (i32.and (call $style_of (local.get $p)) (global.get $S_CODE)))
+                       (call $is_punct (call $byte (i32.add (local.get $p) (i32.const 1))))))
+          (then
+            (local.set $a (i32.add (i32.add (global.get $STYLE) (local.get $p)) (i32.const 1)))
+            (i32.store8 (local.get $a) (i32.and (i32.load8_u (local.get $a)) (i32.xor (global.get $S_MARK) (i32.const -1))))
+            (local.set $p (i32.add (local.get $p) (i32.const 2)))
+            (br $scan)))
+        (local.set $p (i32.add (local.get $p) (i32.const 1)))
+        (br $scan))))
 
   ;; `code` — a run of n backticks closed by the next run of exactly n.
   (func $code_spans (param $s i32) (param $e i32) (local $p i32) (local $n i32) (local $q i32) (local $m i32)
@@ -241,7 +305,7 @@
       (loop $scan
         (br_if $done (i32.ge_s (local.get $p) (local.get $e)))
         (if (i32.or (i32.ne (call $byte (local.get $p)) (i32.const 0x5B))
-                    (i32.and (call $style_of (local.get $p)) (global.get $S_CODE)))
+                    (i32.and (call $style_of (local.get $p)) (i32.or (global.get $S_CODE) (global.get $S_MARK))))
           (then (local.set $p (i32.add (local.get $p) (i32.const 1))) (br $scan)))
         (local.set $img (i32.and (i32.gt_s (local.get $p) (local.get $s))
           (i32.eq (call $byte (i32.sub (local.get $p) (i32.const 1))) (i32.const 0x21))))
