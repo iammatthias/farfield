@@ -39,7 +39,14 @@ var (
 // FARFIELD_FLEET=local. FARFIELD_FLEET_HOST names the host those ports are
 // reached on (default 127.0.0.1) — a tailnet name when a local fleet is
 // previewed from another device.
+//
+// FARFIELD_URL_<NAME> (FARFIELD_URL_BACKUP) overrides one app's base: backup
+// is tailnet-only in production, reached at its tailscale serve address, and
+// that address is the deployment's to know, not the repo's.
 func FleetBase(name string) string {
+	if u := os.Getenv("FARFIELD_URL_" + strings.ToUpper(name)); u != "" {
+		return strings.TrimRight(u, "/")
+	}
 	if os.Getenv("FARFIELD_FLEET") == "local" {
 		host := os.Getenv("FARFIELD_FLEET_HOST")
 		if host == "" {

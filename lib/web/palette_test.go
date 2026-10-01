@@ -183,3 +183,21 @@ func TestCORSLeavesThePaletteAlone(t *testing.T) {
 		t.Fatal("preflight without credentials")
 	}
 }
+
+func TestFleetBaseOverride(t *testing.T) {
+	t.Setenv("FARFIELD_FLEET", "")
+	t.Setenv("FARFIELD_URL_BACKUP", "https://box.example.ts.net:8791/")
+	if got := FleetBase("backup"); got != "https://box.example.ts.net:8791" {
+		t.Fatalf("FleetBase(backup) = %q", got)
+	}
+	if got := FleetBase("feed"); got != "https://feed.farfield.systems" {
+		t.Fatalf("FleetBase(feed) = %q — the override leaked", got)
+	}
+	found := false
+	for _, f := range paletteFleet() {
+		found = found || (f["name"] == "backup" && f["url"] == "https://box.example.ts.net:8791")
+	}
+	if !found {
+		t.Fatal("backup with a tailnet URL is missing from the menu's fleet")
+	}
+}

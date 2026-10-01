@@ -47,11 +47,12 @@ func fleetHost() string {
 
 // paletteFleet is every app the menu reaches: the masthead's fleet plus apex
 // (the site root, not a subdomain) and switchboard. backup is tailnet-only in
-// production, where a browser on the public fleet cannot reach it.
+// production: listed only when FARFIELD_URL_BACKUP names its tailnet address,
+// which a device on the tailnet reaches and any other fails quietly.
 func paletteFleet() []map[string]string {
 	out := []map[string]string{}
 	for _, a := range fleetApps {
-		if a.Name == "backup" && !local() {
+		if a.Name == "backup" && !local() && os.Getenv("FARFIELD_URL_BACKUP") == "" {
 			continue
 		}
 		out = append(out, map[string]string{"name": a.Name, "url": FleetBase(a.Name)})

@@ -79,6 +79,7 @@ services:
       - PASSWORD=${PASSWORD:?set PASSWORD in .env — refusing to start with a default}
       - SESSION_SECRET=${SESSION_SECRET:-}
       - SESSION_COOKIE_DOMAIN=${SESSION_COOKIE_DOMAIN:-}
+      - FARFIELD_URL_BACKUP=${FARFIELD_URL_BACKUP:-}
       - BLOBS_API_KEY=${BLOBS_API_KEY:-}
       - BLOBS_READ_KEY=${BLOBS_READ_KEY:-}
       - CONTENT_URL=http://content:8787
@@ -125,6 +126,7 @@ services:
       - PASSWORD=${PASSWORD:?set PASSWORD in .env — refusing to start with a default}
       - SESSION_SECRET=${SESSION_SECRET:-}
       - SESSION_COOKIE_DOMAIN=${SESSION_COOKIE_DOMAIN:-}
+      - FARFIELD_URL_BACKUP=${FARFIELD_URL_BACKUP:-}
       - LIBRARY_API_KEY=${LIBRARY_API_KEY:-}
       - LIBRARY_UPLOAD_KEY=${LIBRARY_UPLOAD_KEY:-}
       - LIBRARY_MAX_UPLOAD=${LIBRARY_MAX_UPLOAD:-}
@@ -162,6 +164,7 @@ services:
       - PASSWORD=${PASSWORD:?set PASSWORD in .env — refusing to start with a default}
       - SESSION_SECRET=${SESSION_SECRET:-}
       - SESSION_COOKIE_DOMAIN=${SESSION_COOKIE_DOMAIN:-}
+      - FARFIELD_URL_BACKUP=${FARFIELD_URL_BACKUP:-}
       - CONTENT_API_KEY=${CONTENT_API_KEY:-}
       - CONTENT_READ_KEY=${CONTENT_READ_KEY:-}
       # Cloudflare deploy hook for the website's static build. A bearer secret —
@@ -201,6 +204,7 @@ services:
       - PASSWORD=${PASSWORD:?set PASSWORD in .env — refusing to start with a default}
       - SESSION_SECRET=${SESSION_SECRET:-}
       - SESSION_COOKIE_DOMAIN=${SESSION_COOKIE_DOMAIN:-}
+      - FARFIELD_URL_BACKUP=${FARFIELD_URL_BACKUP:-}
       - FEED_API_KEY=${FEED_API_KEY:-}
       - FEED_READ_KEY=${FEED_READ_KEY:-}
       - KEYS_DB_PATH=/data/keys.sqlite
@@ -261,6 +265,7 @@ services:
       - PASSWORD=${PASSWORD:?set PASSWORD in .env — refusing to start with a default}
       - SESSION_SECRET=${SESSION_SECRET:-}
       - SESSION_COOKIE_DOMAIN=${SESSION_COOKIE_DOMAIN:-}
+      - FARFIELD_URL_BACKUP=${FARFIELD_URL_BACKUP:-}
       - COOKIE_SECURE=true
     volumes:
       - ./data:/data
@@ -300,6 +305,7 @@ services:
       - PASSWORD=${PASSWORD:?set PASSWORD in .env — refusing to start with a default}
       - SESSION_SECRET=${SESSION_SECRET:-}
       - SESSION_COOKIE_DOMAIN=${SESSION_COOKIE_DOMAIN:-}
+      - FARFIELD_URL_BACKUP=${FARFIELD_URL_BACKUP:-}
       - BOOKMARKS_API_KEY=${BOOKMARKS_API_KEY:-}
       - BOOKMARKS_READ_KEY=${BOOKMARKS_READ_KEY:-}
       - KEYS_DB_PATH=/data/keys.sqlite
@@ -328,6 +334,7 @@ services:
       - PASSWORD=${PASSWORD:?set PASSWORD in .env — refusing to start with a default}
       - SESSION_SECRET=${SESSION_SECRET:-}
       - SESSION_COOKIE_DOMAIN=${SESSION_COOKIE_DOMAIN:-}
+      - FARFIELD_URL_BACKUP=${FARFIELD_URL_BACKUP:-}
       - COOKIE_SECURE=true
     volumes:
       - ./data:/data
@@ -352,6 +359,7 @@ services:
       - PASSWORD=${PASSWORD:?set PASSWORD in .env — refusing to start with a default}
       - SESSION_SECRET=${SESSION_SECRET:-}
       - SESSION_COOKIE_DOMAIN=${SESSION_COOKIE_DOMAIN:-}
+      - FARFIELD_URL_BACKUP=${FARFIELD_URL_BACKUP:-}
       - COOKIE_SECURE=true
     volumes:
       - ./data:/data
@@ -383,6 +391,7 @@ services:
       - PASSWORD=${PASSWORD:?set PASSWORD in .env — refusing to start with a default}
       - SESSION_SECRET=${SESSION_SECRET:-}
       - SESSION_COOKIE_DOMAIN=${SESSION_COOKIE_DOMAIN:-}
+      - FARFIELD_URL_BACKUP=${FARFIELD_URL_BACKUP:-}
       - COOKIE_SECURE=true
     volumes:
       - ./data:/data
@@ -404,6 +413,7 @@ services:
       - PASSWORD=${PASSWORD:?set PASSWORD in .env — refusing to start with a default}
       - SESSION_SECRET=${SESSION_SECRET:-}
       - SESSION_COOKIE_DOMAIN=${SESSION_COOKIE_DOMAIN:-}
+      - FARFIELD_URL_BACKUP=${FARFIELD_URL_BACKUP:-}
       - COOKIE_SECURE=true
     volumes:
       - ./data:/data
@@ -438,6 +448,7 @@ services:
       # restore or delete every database in the fleet: a session minted here
       # does not travel, and a session from elsewhere does not open it.
       - SESSION_COOKIE_DOMAIN=
+      - FARFIELD_URL_BACKUP=${FARFIELD_URL_BACKUP:-}
       - BLOBS_URL=http://blobs:8789
       - BLOBS_API_KEY=${BLOBS_API_KEY:-}
       - COOKIE_SECURE=true
