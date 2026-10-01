@@ -19,6 +19,7 @@ import (
 	"io"
 	"log/slog"
 	"net/http"
+	"net/url"
 	"regexp"
 	"sort"
 	"strings"
@@ -157,6 +158,10 @@ func (p *profileServer) build(ctx context.Context) profileDoc {
 // blobEmbedRe matches feed's image embeds: ![alt](blob://<cid>).
 var blobEmbedRe = regexp.MustCompile(`!\[[^\]]*\]\(blob://([a-z0-9]+)\)`)
 
+// blankRunRe collapses the blank lines stripped embeds leave behind, so the
+// quote doesn't trail empty "> " lines.
+var blankRunRe = regexp.MustCompile(`\n[ \t]*(\n[ \t]*)+`)
+
 func (p *profileServer) renderFeed(ctx context.Context) (string, error) {
 	raw, err := p.get(ctx, p.feedURL+"/api/posts?limit=1", p.feedKey)
 	if err != nil {
@@ -177,29 +182,41 @@ func (p *profileServer) renderFeed(ctx context.Context) (string, error) {
 	}
 	post := out.Posts[0]
 
-	// The first embedded image rides along; the embed syntax itself comes out
-	// of the quoted text, because a README renders blob:// as a broken link.
-	firstCID := ""
-	if m := blobEmbedRe.FindStringSubmatch(post.Body); m != nil {
-		firstCID = m[1]
+	// Every embedded image rides along; the embed syntax itself comes out of
+	// the quoted text, because a README renders blob:// as a broken link.
+	var cids []string
+	for _, m := range blobEmbedRe.FindAllStringSubmatch(post.Body, -1) {
+		cids = append(cids, m[1])
 	}
-	text := strings.TrimSpace(blobEmbedRe.ReplaceAllString(post.Body, ""))
+	text := strings.TrimSpace(blankRunRe.ReplaceAllString(blobEmbedRe.ReplaceAllString(post.Body, ""), "\n\n"))
 
-	// An image-only post renders as just the image. A blockquote is a claim
+	// An image-only post renders as just the image(s). A blockquote is a claim
 	// that these were the post's own words, so nothing is ever invented to
 	// fill one — an earlier draft put a placeholder there, and it read as if
 	// he had written it.
 	var b strings.Builder
 	if text != "" {
 		for _, line := range strings.Split(text, "\n") {
-			b.WriteString("> " + line + "\n")
+			b.WriteString(strings.TrimRight("> "+line, " ") + "\n")
 		}
 	}
-	if firstCID != "" {
+	if len(cids) > 0 {
 		if b.Len() > 0 {
 			b.WriteString("\n")
 		}
-		fmt.Fprintf(&b, "<img src=\"https://blobs.farfield.systems/blobs/%s\" width=\"480\" alt=\"\">\n", firstCID)
+		// One image gets the full column; several tile on one line, which
+		// GitHub wraps into a grid instead of a tall stack.
+		width := 480
+		if len(cids) > 1 {
+			width = 236
+		}
+		for i, c := range cids {
+			if i > 0 {
+				b.WriteString(" ")
+			}
+			fmt.Fprintf(&b, "<img src=\"%s\" width=\"%d\" alt=\"\">", profileImageURL(c, width), width)
+		}
+		b.WriteString("\n")
 	}
 	if b.Len() == 0 {
 		// No words and no image either — nothing worth splicing.
@@ -208,6 +225,16 @@ func (p *profileServer) renderFeed(ctx context.Context) (string, error) {
 	fmt.Fprintf(&b, "\n*%s · [permalink](https://iammatthias.com/feed/%s)*",
 		shortDate(post.CreatedAt), post.Slug)
 	return b.String(), nil
+}
+
+// profileImageURL points at a display-sized copy of a blob rather than the
+// original. GitHub proxies README images through camo, which refuses anything
+// over 5 MB ("Content length exceeded") — a phone photo straight off blobs is
+// routinely bigger, and the README showed nothing. wsrv.nl is the resizer the
+// website already uses; 2× the display width keeps it sharp on retina.
+func profileImageURL(cid string, width int) string {
+	src := "https://blobs.farfield.systems/blobs/" + cid
+	return fmt.Sprintf("https://wsrv.nl/?url=%s&amp;w=%d&amp;q=80", url.QueryEscape(src), width*2)
 }
 
 // ── writing ────────────────────────────────────────────────────────────────
@@ -279,18 +306,24 @@ func (p *profileServer) renderDaily(ctx context.Context) (string, error) {
 	if art.Date == "" {
 		return "", fmt.Errorf("daily returned no art")
 	}
+	// The art is the picture; the row under it points at everything else the
+	// day has. Dated links, so a README synced this morning still lands on
+	// this morning's puzzles tonight.
+	const daily = "https://daily.farfield.systems"
 	var b strings.Builder
-	fmt.Fprintf(&b, "<a href=\"https://daily.farfield.systems/art/%s\"><img src=\"https://daily.farfield.systems/art/%s.svg\" width=\"480\" alt=\"daily art for %s\"></a>\n",
-		art.Date, art.Date, art.Date)
-	fmt.Fprintf(&b, "\n*%s · %s · %s*", art.Biome, art.Zone.Name, art.Date)
+	fmt.Fprintf(&b, "<a href=\"%s/%s\"><img src=\"%s/art/%s.svg\" width=\"480\" alt=\"daily art for %s\"></a>\n",
+		daily, art.Date, daily, art.Date, art.Date)
+	fmt.Fprintf(&b, "\n*%s · %s · %s*\n", art.Biome, art.Zone.Name, art.Date)
+	fmt.Fprintf(&b, "\n[hub](%[1]s/%[2]s) · [photo](%[1]s/photo/%[2]s) · [art](%[1]s/art/%[2]s) · [sudoku](%[1]s/sudoku/%[2]s) · [wordle](%[1]s/wordle/%[2]s)",
+		daily, art.Date)
 	return b.String(), nil
 }
 
 // ── plumbing ───────────────────────────────────────────────────────────────
 
 // get fetches one sibling URL, attaching the read key when there is one.
-func (p *profileServer) get(ctx context.Context, url, key string) ([]byte, error) {
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
+func (p *profileServer) get(ctx context.Context, addr, key string) ([]byte, error) {
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, addr, nil)
 	if err != nil {
 		return nil, err
 	}

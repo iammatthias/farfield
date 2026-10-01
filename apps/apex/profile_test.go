@@ -82,8 +82,11 @@ func TestProfileRendersAllSections(t *testing.T) {
 	if strings.Contains(feed, "blob://") {
 		t.Errorf("feed leaked embed syntax: %q", feed)
 	}
-	if !strings.Contains(feed, "https://blobs.farfield.systems/blobs/bafyimg1") {
-		t.Errorf("feed = %q, want the image resolved to a public URL", feed)
+	if !strings.Contains(feed, `src="`+profileImageURL("bafyimg1", 480)+`"`) {
+		t.Errorf("feed = %q, want the image resolved to a resized public URL", feed)
+	}
+	if strings.Contains(feed, `src="https://blobs.farfield.systems`) {
+		t.Errorf("feed = %q — originals can exceed camo's 5 MB cap; serve a resized copy", feed)
 	}
 	if !strings.Contains(feed, "https://iammatthias.com/feed/a-walk") {
 		t.Errorf("feed = %q, want the permalink", feed)
@@ -202,5 +205,50 @@ func TestProfileCacheStampsETag(t *testing.T) {
 	p.handle(w2, r)
 	if w2.Code != http.StatusNotModified {
 		t.Errorf("status = %d, want 304", w2.Code)
+	}
+}
+
+// TestProfileEveryImage: a post with several images carries all of them, tiled,
+// and the stripped embeds leave no empty quote lines behind.
+func TestProfileEveryImage(t *testing.T) {
+	feed := `{"posts":[{"slug":"set","body":"three frames\n\n![](blob://bafyone)\n\n![](blob://bafytwo)\n\n![](blob://bafythree)","createdAt":"2026-08-24T00:00:00Z"}]}`
+	p, _ := newProfileTestServer(t, feed, stubContent, stubDaily, 200)
+	doc, _ := fetchProfile(t, p)
+	got := doc.Sections["feed"]
+	for _, c := range []string{"bafyone", "bafytwo", "bafythree"} {
+		if !strings.Contains(got, profileImageURL(c, 236)) {
+			t.Errorf("feed = %q, want %s", got, c)
+		}
+	}
+	if strings.Contains(got, "blob://") {
+		t.Errorf("feed leaked embed syntax: %q", got)
+	}
+	if strings.Count(got, `width="236"`) != 3 {
+		t.Errorf("feed = %q, want the images tiled", got)
+	}
+	if !strings.HasPrefix(got, "> three frames\n\n<img") {
+		t.Errorf("feed = %q, want the quote then the images, no trailing quote lines", got)
+	}
+}
+
+// TestProfileDailyLinks: the daily section points at each of the day's pages.
+func TestProfileDailyLinks(t *testing.T) {
+	p, _ := newProfileTestServer(t, stubFeed, stubContent, stubDaily, 200)
+	doc, _ := fetchProfile(t, p)
+	got := doc.Sections["daily"]
+	for _, path := range []string{"/2026-08-25", "/photo/2026-08-25", "/art/2026-08-25", "/sudoku/2026-08-25", "/wordle/2026-08-25"} {
+		if !strings.Contains(got, "(https://daily.farfield.systems"+path+")") {
+			t.Errorf("daily = %q, want a link to %s", got, path)
+		}
+	}
+}
+
+// TestProfileImageURL: the resized copy wraps the public blob URL and asks for
+// 2x the display width, HTML-escaped for the src attribute.
+func TestProfileImageURL(t *testing.T) {
+	got := profileImageURL("bafyx", 480)
+	want := "https://wsrv.nl/?url=https%3A%2F%2Fblobs.farfield.systems%2Fblobs%2Fbafyx&amp;w=960&amp;q=80"
+	if got != want {
+		t.Errorf("profileImageURL = %q, want %q", got, want)
 	}
 }
