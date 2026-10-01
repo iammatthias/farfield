@@ -15,3 +15,9 @@ var CSS string
 //
 //go:embed band.js
 var BandJS string
+
+// PaletteJS is the fleet-wide ⌘K menu. lib/web serves it on every app that
+// mounts /palette.
+//
+//go:embed palette.js
+var PaletteJS string

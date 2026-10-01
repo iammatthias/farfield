@@ -646,6 +646,66 @@ dl.kv dd { margin: 0; overflow-wrap: anywhere; }
 }
 .menu a:hover, .menu button:hover, .menu [aria-selected="true"] { background: var(--wash); }
 .menu hr { margin: 6px 4px; }
+
+/* the ⌘K menu (palette.js): one floating panel over the page, the fleet's
+   actions, pages and records in one list */
+.bar > .ff-palette-open {
+	min-height: 0; padding: 18px 0 16px; margin-left: var(--s-5);
+	border: 0; background: none; color: var(--ink-2);
+	font: 400 13px var(--font-mono); cursor: pointer;
+}
+.bar > .ff-palette-open:hover { color: var(--ink); background: none; }
+.bar > .ff-palette-open + .fleet { margin-left: var(--s-4); }
+.bar > .mark + .ff-palette-open { margin-left: auto; }
+.ff-palette {
+	position: fixed; inset: 0; z-index: 60;
+	display: flex; justify-content: center; align-items: flex-start;
+	padding: 12vh var(--s-4) var(--s-4);
+	background: color-mix(in srgb, var(--paper) 40%, transparent);
+}
+.ff-palette-panel {
+	width: 100%; max-width: 40rem; max-height: min(34rem, 76vh);
+	display: flex; flex-direction: column;
+	background: var(--float); border-radius: var(--r-m); box-shadow: var(--shadow);
+	overflow: hidden;
+}
+.ff-palette-input {
+	flex: none; width: 100%; min-height: 0;
+	padding: 16px 18px; border: 0; border-bottom: 1px solid var(--rule); border-radius: 0;
+	background: none; color: var(--ink);
+	font: 400 17px var(--font-ui); outline: none; box-shadow: none;
+}
+.ff-palette-input:focus { box-shadow: none; outline: none; border-color: var(--rule); }
+.ff-palette-list { flex: 1 1 auto; overflow-y: auto; padding: 6px; overscroll-behavior: contain; }
+.ff-palette-row {
+	display: flex; align-items: baseline; gap: var(--s-4);
+	padding: 8px 12px; border-radius: var(--r-s); cursor: pointer;
+}
+.ff-palette-row[aria-selected="true"] { background: var(--wash); }
+.ff-palette-row.picked .ff-palette-title::before { content: "→ "; color: var(--signal); }
+.ff-palette-row.ask .ff-palette-title { color: var(--accent); }
+.ff-palette-main { flex: 1 1 auto; min-width: 0; display: flex; align-items: baseline; gap: var(--s-3); }
+.ff-palette-title { flex: none; max-width: 70%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--ink); font-size: 0.95rem; }
+.ff-palette-sub { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--ink-3); font-size: 0.85rem; }
+.ff-palette-app { flex: none; color: var(--ink-3); font: 400 12px var(--font-mono); }
+.ff-palette-answer { padding: 10px 12px 12px; color: var(--ink-2); font-size: 0.95rem; line-height: 1.5; }
+.ff-palette-empty { padding: 14px 12px; color: var(--ink-3); font-size: 0.9rem; }
+.ff-palette-foot {
+	flex: none; padding: 8px 14px; border-top: 1px solid var(--rule);
+	color: var(--ink-3); font: 400 12px var(--font-mono);
+}
+@media (max-width: 40rem) {
+	/* anchored to the top, not a bottom sheet: iOS keeps fixed-bottom
+	   elements under the keyboard */
+	.ff-palette { padding: var(--s-2) var(--s-2) 0; }
+	.ff-palette-panel { max-height: 58vh; }
+	.ff-palette-row { flex-direction: column; gap: 2px; padding: 10px 12px; }
+	.ff-palette-main { flex-direction: column; gap: 2px; width: 100%; }
+	.ff-palette-title { max-width: 100%; }
+	.ff-palette-foot { display: none; }
+	.bar > .ff-palette-open { padding: 10px 0; margin-left: auto; }
+	.bar > .ff-palette-open + .fleet { margin-left: var(--s-4); }
+}
 .toast {
 	position: fixed; left: 50%; transform: translateX(-50%);
 	bottom: calc(var(--s-5) + env(safe-area-inset-bottom, 0px));

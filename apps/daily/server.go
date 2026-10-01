@@ -119,6 +119,7 @@ func run(host, port string) error {
 
 func (s *Server) routes() http.Handler {
 	mux := http.NewServeMux()
+	s.rd.MountPalette(mux, nil, s.paletteItems) // daily has no sign-in
 
 	// HTML pages — public, no auth: the photo artifact is a read-only viewer.
 	mux.HandleFunc("GET /photo", s.handleIndex)

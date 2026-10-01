@@ -267,6 +267,7 @@ func parseTargets(raw string) []capability.Target {
 
 func (s *Server) routes() http.Handler {
 	mux := http.NewServeMux()
+	s.rd.MountPalette(mux, s.auth, s.paletteItems)
 
 	// The console — session-gated. It shows what arrived and what was done
 	// with it, which is the only view into a service whose real UI is Messages.

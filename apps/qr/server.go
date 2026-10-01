@@ -105,6 +105,7 @@ func (s *Server) routes() http.Handler {
 		s.rl = web.NewRateLimiter(publicScanPerMin, time.Minute)
 	}
 	mux := http.NewServeMux()
+	s.rd.MountPalette(mux, s.auth, s.paletteItems)
 
 	// HTML admin UI — session-gated.
 	mux.HandleFunc("GET /{$}", s.auth.RequireSession(s.handleIndex))

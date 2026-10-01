@@ -135,6 +135,7 @@ func (s *Server) routes() http.Handler {
 		s.rl = web.NewRateLimiter(publicReadPerMin, time.Minute)
 	}
 	mux := http.NewServeMux()
+	s.rd.MountPalette(mux, s.auth, s.paletteItems)
 
 	// Author UI — session-gated. Compose lives at /; manage is the table.
 	mux.HandleFunc("GET /{$}", s.auth.RequireSession(s.handleCompose))

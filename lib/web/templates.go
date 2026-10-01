@@ -105,6 +105,9 @@ type Renderer struct {
 	// needed so dev-mode live reloads (FARFIELD_DEV_TEMPLATES) can re-parse
 	// with the same functions. Apps with a nil FuncMap can ignore it.
 	Funcs template.FuncMap
+
+	// palette is set by MountPalette: the masthead loads the ⌘K menu.
+	palette bool
 }
 
 // mark returns the two-letter glyph for this app.
@@ -162,6 +165,7 @@ func (rd *Renderer) Render(w http.ResponseWriter, page string, data map[string]a
 	// and change almost never, so they must not ride the stylesheet's URL.
 	data["FontsVer"] = theme.FontsVersion
 	data["FleetNav"] = fleetNav()
+	data["Palette"] = rd.palette
 	data["App"] = rd.App
 	data["Mark"] = rd.mark()
 	data["Favicon"] = rd.favicon()

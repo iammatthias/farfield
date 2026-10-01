@@ -132,6 +132,7 @@ func (s *Server) routes() http.Handler {
 		s.rl = web.NewRateLimiter(publicReadPerMin, time.Minute)
 	}
 	mux := http.NewServeMux()
+	s.rd.MountPalette(mux, s.auth, s.paletteItems)
 
 	// HTML admin UI — session-gated.
 	mux.HandleFunc("GET /{$}", s.auth.RequireSession(s.handleDashboard))
@@ -196,6 +197,9 @@ func (s *Server) routes() http.Handler {
 	// like the rest of the editor: it spends model credit, so it is a thing
 	// the author does, not a thing the API offers.
 	mux.HandleFunc("POST /assist", s.auth.RequireSession(s.handleAssist))
+	// the ⌘K menu's Ask row, called from any fleet app
+	mux.HandleFunc("POST /palette/ask", s.auth.RequireFleetSession(s.handlePaletteAsk))
+	mux.HandleFunc("OPTIONS /palette/ask", s.auth.RequireFleetSession(s.handlePaletteAsk))
 	mux.HandleFunc("POST /embed/blob", s.auth.RequireSession(s.handleEmbedBlob))
 	mux.HandleFunc("POST /embed/series", s.auth.RequireSession(s.handleEmbedSeries))
 	mux.HandleFunc("GET /embed/blobs", s.auth.RequireSession(s.handleEmbedBlobsList))

@@ -67,6 +67,13 @@ func CORS(next http.Handler, methods ...string) http.Handler {
 		allow = strings.Join(methods, ", ")
 	}
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		// the ⌘K menu's endpoints answer their own CORS — fleet origins only,
+		// with credentials, which a "*" here (and a preflight answered here)
+		// would make the browser refuse
+		if r.URL.Path == "/palette" || strings.HasPrefix(r.URL.Path, "/palette/") {
+			next.ServeHTTP(w, r)
+			return
+		}
 		h := w.Header()
 		h.Set("Access-Control-Allow-Origin", "*")
 		h.Set("Access-Control-Allow-Methods", allow)

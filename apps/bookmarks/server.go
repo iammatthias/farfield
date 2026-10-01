@@ -76,6 +76,7 @@ func run(host, port string) error {
 
 func (s *Server) routes() http.Handler {
 	mux := http.NewServeMux()
+	s.rd.MountPalette(mux, s.auth, s.paletteItems)
 
 	// HTML admin UI — session-gated.
 	mux.HandleFunc("GET /{$}", s.auth.RequireSession(s.handleIndex))

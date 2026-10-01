@@ -85,6 +85,7 @@ func run(host, port string) error {
 
 func (s *Server) routes() http.Handler {
 	mux := http.NewServeMux()
+	s.rd.MountPalette(mux, s.auth, s.paletteItems)
 
 	// Console — session-gated. There is no public monitoring dashboard;
 	// per-target data never leaves the session.

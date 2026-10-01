@@ -121,7 +121,7 @@ func (s *Server) handleAssist(w http.ResponseWriter, r *http.Request) {
 	defer cancel()
 	msgs := []chatMessage{{"user", fmt.Sprintf("Existing tags on the site: %s\n\nTitle: %s\n\n%s",
 		strings.Join(siteTags(s.db, 80), ", "), strings.TrimSpace(in.Title), body)}}
-	raw, err := openrouterChat(ctx, key, assistModel(), msgs)
+	raw, err := openrouterChat(ctx, key, assistModel(), assistPrompt, msgs)
 	if err != nil {
 		web.WriteError(w, http.StatusBadGateway, err.Error())
 		return
@@ -138,7 +138,7 @@ func (s *Server) handleAssist(w http.ResponseWriter, r *http.Request) {
 		msgs = append(msgs, chatMessage{"assistant", raw}, chatMessage{"user", fmt.Sprintf(
 			"That excerpt describes the piece from outside: %q. Rewrite it as the author's own line — "+
 				"ideally a sentence from the piece, trimmed. Same JSON shape.", out.Excerpt)})
-		if raw2, err := openrouterChat(ctx, key, assistModel(), msgs); err == nil {
+		if raw2, err := openrouterChat(ctx, key, assistModel(), assistPrompt, msgs); err == nil {
 			if again, err := parseAssist(raw2); err == nil && again.Excerpt != "" && !outsideVoice(again.Excerpt) {
 				out.Excerpt = again.Excerpt
 			}
@@ -156,8 +156,8 @@ var assistClient = &http.Client{Timeout: assistTimeout}
 // chatMessage is one turn of the conversation after the system prompt.
 type chatMessage struct{ Role, Content string }
 
-func openrouterChat(ctx context.Context, key, model string, turns []chatMessage) (string, error) {
-	messages := []map[string]string{{"role": "system", "content": assistPrompt}}
+func openrouterChat(ctx context.Context, key, model, system string, turns []chatMessage) (string, error) {
+	messages := []map[string]string{{"role": "system", "content": system}}
 	for _, t := range turns {
 		messages = append(messages, map[string]string{"role": t.Role, "content": t.Content})
 	}

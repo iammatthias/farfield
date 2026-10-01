@@ -225,6 +225,10 @@ func routes() (http.Handler, error) {
 	files := cacheStatic(http.FileServerFS(site))
 	mux := http.NewServeMux()
 
+	// The ⌘K menu: apex renders nothing through lib/web, so the Renderer
+	// exists only to carry the app name; no Auth, every page is public.
+	(&web.Renderer{App: "apex"}).MountPalette(mux, nil, paletteItems)
+
 	// Shared farfield theme at the canonical path; docs layer style.css over it.
 	mux.Handle("GET /static/styles.css", theme.CSSHandler())
 	// The landing and status pages are hand-styled from the brand guide, so

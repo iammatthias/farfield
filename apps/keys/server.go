@@ -103,6 +103,7 @@ func run(host, port string) error {
 
 func (s *Server) routes() http.Handler {
 	mux := http.NewServeMux()
+	s.rd.MountPalette(mux, s.auth, s.paletteItems)
 
 	// HTML admin UI — session-gated. There is deliberately no JSON write API:
 	// a credential minter should not itself be drivable by a credential.

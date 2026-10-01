@@ -154,6 +154,9 @@ func (s *Server) routes() http.Handler {
 		s.rl = web.NewRateLimiter(publicBytesPerMin, time.Minute)
 	}
 	mux := http.NewServeMux()
+	if s.rd != nil { // API-only tests build a Server with no renderer
+		s.rd.MountPalette(mux, s.auth, s.paletteItems)
+	}
 
 	// HTML admin UI — session-gated.
 	mux.HandleFunc("GET /{$}", s.auth.RequireSession(s.handleIndex))

@@ -8,6 +8,9 @@ const status = document.getElementById("fleet-status");
 const out = document.getElementById("fleet-results");
 
 if (input && out) {
+  // the ⌘K menu hands a query over as ?q=
+  const handed = new URLSearchParams(location.search).get("q");
+  if (handed) input.value = handed;
   let tern = null;
   let docs = [];
   let vecs = [];
