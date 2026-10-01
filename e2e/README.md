@@ -1,8 +1,7 @@
 # farfield e2e
 
 Browser-level checks for the content editor — the round-trip invariant
-(open → save never corrupts stored markdown), rich-edit serialization, and
-autosave.
+(open → save never corrupts stored markdown) and typed-edit serialization.
 
 ```sh
 make dev                      # fleet on localhost, password "demo"

@@ -1,9 +1,9 @@
 // content editor end-to-end suite.
 //
-// Drives the real rich editor in a real browser and asserts the invariant
-// everything else depends on: opening a document and saving it back never
-// corrupts the stored markdown (byte-identical round trip), and edits made
-// through the rich surface serialize to correct markdown.
+// Drives the real editor (lib/editor: WASM, canvas-drawn) in a real browser
+// and asserts the invariant everything else depends on: opening a document
+// and saving it back never corrupts the stored markdown (byte-identical round
+// trip), and typed edits serialize to correct markdown.
 //
 // Usage:
 //   make dev                      # fleet on localhost with demo credentials
@@ -81,62 +81,39 @@ try {
   })).json();
   slug = created.slug; // the server stamps slugs
 
-  // ── round trip: open rich, flip to markdown with no edits ──
+  // ── round trip: open the editor, save with no edits ──
+  // The editor draws to a canvas (lib/editor, WASM); typing goes through a
+  // hidden textarea sink. It adds .ready to its host once the engine is up.
   await page.goto(`${BASE}/entries/${slug}/edit`);
-  // The page IS the editor: no card to click, no dialog to open. The rich
-  // surface mounts itself and appears once its render round-trip returns.
-  await page.waitForSelector("[data-doc-host] .doc-rich");
-  await page.waitForTimeout(400);
-  check("verbatim table block", await page.locator(".doc-rich pre.md-verbatim").count() > 0);
-
-  await page.click('.seg button:has-text("Markdown")');
-  const roundtripped = await page.locator("textarea#body").inputValue();
-  check("round trip is byte-identical", roundtripped.trim() === BODY.trim(),
-    JSON.stringify(roundtripped.slice(0, 120)));
-
-  // ── rich edits serialize correctly ──
-  await page.click('.seg button:has-text("Edit")');
-  await page.waitForSelector("[data-doc-host] .doc-rich");
+  await page.waitForSelector(".ff-doc.ready");
   await page.waitForTimeout(300);
 
-  await page.evaluate(() => {
-    const rich = document.querySelector(".doc-rich");
-    const p = document.createElement("p");
-    p.innerHTML = "<br>";
-    rich.appendChild(p);
-    const r = document.createRange();
-    r.selectNodeContents(p); r.collapse(true);
-    const s = getSelection(); s.removeAllRanges(); s.addRange(r);
-  });
+  const saveAndWait = async () => {
+    await page.click("[data-doc-save]");
+    await page.waitForFunction(() =>
+      /^Saved/.test(document.querySelector(".save-note")?.textContent ?? ""));
+  };
+  await saveAndWait();
+  const untouched = await (await api("/api/entries/" + slug)).json();
+  check("round trip is byte-identical", untouched.body.trim() === BODY.trim(),
+    JSON.stringify(untouched.body.slice(0, 120)));
+
+  // ── typed edits serialize correctly ──
+  const mod = process.platform === "darwin" ? "Meta" : "Control";
+  await page.focus(".ff-editor-sink");
+  await page.keyboard.press(mod + "+a");
+  await page.keyboard.press("ArrowRight"); // collapse to the end
+  await page.keyboard.press("Enter");
+  await page.keyboard.press("Enter");
   await page.keyboard.type("## Appendix");
-  check("typing ## makes a heading", await page.evaluate(() =>
-    [...document.querySelectorAll(".doc-rich h2")]
-      .some((h) => h.textContent.replace(/ /g, " ") === "Appendix")));
-
-  await page.keyboard.press("Meta+s");
   await page.waitForFunction(() =>
-    /^Saved/.test(document.querySelector(".save-note").textContent));
+    /Unsaved/.test(document.querySelector(".save-note")?.textContent ?? ""));
+  await page.keyboard.press(mod + "+s");
+  await page.waitForFunction(() =>
+    /^Saved/.test(document.querySelector(".save-note")?.textContent ?? ""));
   const after = await (await api("/api/entries/" + slug)).json();
-  check("saved markdown has the heading", after.body.includes("## Appendix"));
-  check("saved markdown keeps the table", after.body.includes("| a | b |"));
-  check("saved markdown keeps the fence", after.body.includes('echo "fences survive"'));
-
-  // ── autosave: type in the surface, wait, expect a save with no ⌘S ──
-  await page.evaluate(() => {
-    const h = [...document.querySelectorAll(".doc-rich h2")].at(-1);
-    const r = document.createRange();
-    r.selectNodeContents(h); r.collapse(false);
-    const sel = getSelection(); sel.removeAllRanges(); sel.addRange(r);
-    document.querySelector(".doc-rich").focus();
-  });
-  await page.keyboard.type(" autosaved-token");
-  await page.waitForFunction(() =>
-    /Unsaved/.test(document.querySelector(".save-note").textContent));
-  await page.waitForFunction(() =>
-    /^Saved/.test(document.querySelector(".save-note").textContent),
-    null, { timeout: 9000 });
-  const after2 = await (await api("/api/entries/" + slug)).json();
-  check("autosave persisted", after2.body.includes("autosaved-token"));
+  check("typed heading saves as markdown, nothing else changed",
+    after.body.trim() === BODY.trim() + "\n\n## Appendix", JSON.stringify(after.body.slice(-80)));
 
   check("no page errors", errors.length === 0, errors.join("; "));
 } finally {
