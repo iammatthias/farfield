@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"path/filepath"
 	"strings"
 	"testing"
 )
@@ -149,5 +150,92 @@ func TestHandleAssistEmptyBody(t *testing.T) {
 	s.handleAssist(w, httptest.NewRequest("POST", "/assist", strings.NewReader(`{"title":"x","body":"  "}`)))
 	if w.Code != http.StatusBadRequest {
 		t.Errorf("status = %d, want 400", w.Code)
+	}
+}
+
+// An excerpt is the author's own line, not a reviewer's synopsis of it.
+func TestOutsideVoice(t *testing.T) {
+	outside := []string{
+		"Frames LLMs as an enclosure movement: the open-web commons was ingested, weights locked, and cognition rented back.",
+		"An overview of three Obsidian plugins the author built.",
+		"Explores how diffusion models work.",
+		"In this post I look at diffusion.",
+	}
+	for _, e := range outside {
+		if !outsideVoice(e) {
+			t.Errorf("should read as a synopsis: %q", e)
+		}
+	}
+	own := []string{
+		"Cold war style number stations for good little bots built on Ethereum",
+		"Putting my Apple Music \"Now Playing\" on display with a Raspberry Pi and a 64x64 LED matrix.",
+		"LLMs look like an enclosure movement, taking what's held in the commons and renting it back.",
+		"Frameworks come and go; the web stays.", // "Frame" as a word, not a verb about the piece
+	}
+	for _, e := range own {
+		if outsideVoice(e) {
+			t.Errorf("should read as the author's own line: %q", e)
+		}
+	}
+}
+
+// A synopsis gets one rewrite, with the reason, and the rewrite wins.
+func TestHandleAssistRewritesASynopsis(t *testing.T) {
+	calls := 0
+	var firstUser, lastUser string
+	stub := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		calls++
+		var req struct {
+			Messages []struct{ Role, Content string } `json:"messages"`
+		}
+		_ = json.NewDecoder(r.Body).Decode(&req)
+		for _, m := range req.Messages {
+			if m.Role == "user" {
+				if firstUser == "" {
+					firstUser = m.Content
+				}
+				lastUser = m.Content
+			}
+		}
+		excerpt := "Frames LLMs as an enclosure movement."
+		if calls > 1 {
+			excerpt = "LLMs look like an enclosure movement, a fence line around cognition."
+		}
+		reply, _ := json.Marshal(map[string]any{"tags": []string{"llms", "enclosure"}, "excerpt": excerpt})
+		out, _ := json.Marshal(map[string]any{"choices": []any{map[string]any{"message": map[string]string{"content": string(reply)}}}})
+		w.Write(out)
+	}))
+	defer stub.Close()
+	prev := openrouterURL
+	openrouterURL = stub.URL
+	defer func() { openrouterURL = prev }()
+	t.Setenv("OPENROUTER_API_KEY", "sk-test")
+
+	db, err := openDB(filepath.Join(t.TempDir(), "content.sqlite"))
+	if err != nil {
+		t.Fatalf("openDB: %v", err)
+	}
+	defer db.Close()
+	s := &Server{db: db}
+	w := httptest.NewRecorder()
+	r := httptest.NewRequest("POST", "/assist",
+		strings.NewReader(`{"title":"Own The Means of Cognition","body":"LLMs look like an enclosure movement."}`))
+	s.handleAssist(w, r)
+
+	var out assistResult
+	if err := json.Unmarshal(w.Body.Bytes(), &out); err != nil {
+		t.Fatalf("response %d: %s", w.Code, w.Body.String())
+	}
+	if calls != 2 {
+		t.Fatalf("model called %d times; a synopsis should get exactly one rewrite", calls)
+	}
+	if out.Excerpt != "LLMs look like an enclosure movement, a fence line around cognition." {
+		t.Errorf("excerpt = %q, want the rewrite", out.Excerpt)
+	}
+	if !strings.Contains(lastUser, "from outside") {
+		t.Errorf("the rewrite request should say why: %q", lastUser)
+	}
+	if !strings.Contains(firstUser, "Existing tags on the site:") {
+		t.Errorf("the request should carry the site's tag vocabulary: %q", firstUser)
 	}
 }

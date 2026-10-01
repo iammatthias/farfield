@@ -13,11 +13,13 @@ package main
 import (
 	"bytes"
 	"context"
+	"database/sql"
 	"encoding/json"
 	"fmt"
 	"io"
 	"net/http"
 	"regexp"
+	"sort"
 	"strings"
 	"time"
 
@@ -25,33 +27,64 @@ import (
 	"github.com/iammatthias/farfield/lib/web"
 )
 
-// assistModel is the OpenRouter model id. Flash-class on purpose: this is a
-// summarising errand, not an essay, and it runs while somebody waits with a
-// form open.
+// assistModel is the OpenRouter model id. It must be on the workspace's
+// guardrail allowlist — the flash model this used to name was not, and every
+// request came back "Model blocked by guardrail". This is the model the
+// switchboard agent already runs on; CONTENT_ASSIST_MODEL overrides it.
 func assistModel() string {
-	return store.Env("CONTENT_ASSIST_MODEL", "z-ai/glm-5.3-flash")
+	return store.Env("CONTENT_ASSIST_MODEL", "openai/gpt-6-luna-pro")
 }
 
-// assistTimeout bounds the upstream call. The author is watching a button.
-const assistTimeout = 25 * time.Second
+// assistTimeout bounds the upstream call. The author is watching a button,
+// and a rewrite of a synopsis is a second call inside the same budget.
+const assistTimeout = 45 * time.Second
 
 // assistMaxBody caps how much of the piece is sent. Enough that the model has
 // actually read it; bounded so a book-length draft is not a book-length bill.
 const assistMaxBody = 24_000
 
 // assistPrompt is the entire instruction. JSON out, and the constraints that
-// make the output match the site: lowercase kebab tags like the ones already
-// in use, and an excerpt in the register of a description rather than a pitch.
+// make the output match the site: tags drawn from the vocabulary already in
+// use, and an excerpt in the author's own voice.
+//
+// The excerpt instruction is the delicate one. "Describe what the piece is"
+// produced a reviewer's synopsis — "Frames LLMs as an enclosure movement…",
+// "An overview of three plugins the author built" — when an excerpt is the
+// author's line: the dek under a title, ideally lifted from the piece itself.
+// The examples are excerpts the author wrote by hand.
 const assistPrompt = `You write metadata for one article on a personal site.
 Reply with ONLY a JSON object, no prose, no code fences:
 {"tags": ["..."], "excerpt": "..."}
 
-tags: 3 to 6, each 1-3 words, lowercase, hyphenated (kebab-case), concrete
-topics found in the piece. No hashtags, no invented themes.
+tags: 3 to 5, lowercase kebab-case, each 1-3 words. Lead with the piece's own
+specific subjects — the named technologies, ideas and projects it is about —
+then at most two broader ones. When a tag in the site's existing vocabulary
+(listed with the article) names the same thing, use that spelling ("llms", not
+"llm"); never swap a specific subject for a generic one. No hashtags.
 
-excerpt: one or two plain sentences, at most 220 characters, describing what
-the piece is — factual and specific, in the piece's own register. Not a teaser,
-no "in this post", no exclamation marks, no markdown.`
+excerpt: the line a reader sees under the title — written in the author's own
+voice, as if the author wrote it. The best excerpt is a sentence lifted from the
+piece that states its central idea and stands alone out of context — not a
+transition ("Along the way…"), an aside, or a list item. Trim it if needed.
+One sentence, at most 160 characters, plain text, no markdown, no exclamation
+marks.
+Never describe the piece from outside. Do not start with a verb about the piece
+("Frames", "Explores", "Argues", "Examines", "Describes", "Covers") and never
+write "this piece", "this post", "the article", "the author", "an overview of".
+Write as the author: "I", "we", or a plain statement of the idea itself.
+
+Excerpts the author wrote, for voice:
+- Cold war style number stations for good little bots built on Ethereum
+- Putting my Apple Music "Now Playing" on display with a Raspberry Pi and a 64x64 LED matrix.
+- Wiring a Farfield homelab up to iMessage with Photon and OpenPoke, so slash commands reach personal apps and talking to your agent feels like texting a friend.`
+
+// synopsisRe catches an excerpt written from outside the piece — the failure
+// the prompt warns against, checked because models drift back to it.
+var synopsisRe = regexp.MustCompile(`(?i)^(frames|explores|examines|argues|describes|covers|discusses|outlines|reflects|presents|details|introduces|traces|considers|offers)\b|\b(this (piece|post|article|essay|entry)|the author|an overview of|in this (piece|post|article|essay))\b`)
+
+// outsideVoice reports whether an excerpt reads as a synopsis of the piece
+// rather than the author's own line.
+func outsideVoice(excerpt string) bool { return synopsisRe.MatchString(strings.TrimSpace(excerpt)) }
 
 type assistResult struct {
 	Tags    []string `json:"tags"`
@@ -86,8 +119,9 @@ func (s *Server) handleAssist(w http.ResponseWriter, r *http.Request) {
 
 	ctx, cancel := context.WithTimeout(r.Context(), assistTimeout)
 	defer cancel()
-	raw, err := openrouterChat(ctx, key, assistModel(),
-		fmt.Sprintf("Title: %s\n\n%s", strings.TrimSpace(in.Title), body))
+	msgs := []chatMessage{{"user", fmt.Sprintf("Existing tags on the site: %s\n\nTitle: %s\n\n%s",
+		strings.Join(siteTags(s.db, 80), ", "), strings.TrimSpace(in.Title), body)}}
+	raw, err := openrouterChat(ctx, key, assistModel(), msgs)
 	if err != nil {
 		web.WriteError(w, http.StatusBadGateway, err.Error())
 		return
@@ -98,6 +132,18 @@ func (s *Server) handleAssist(w http.ResponseWriter, r *http.Request) {
 		web.WriteError(w, http.StatusBadGateway, "model answered unusably: "+err.Error())
 		return
 	}
+	// A synopsis is the failure the prompt warns against; models drift back
+	// to it. Say so, once, and keep the better answer.
+	if outsideVoice(out.Excerpt) {
+		msgs = append(msgs, chatMessage{"assistant", raw}, chatMessage{"user", fmt.Sprintf(
+			"That excerpt describes the piece from outside: %q. Rewrite it as the author's own line — "+
+				"ideally a sentence from the piece, trimmed. Same JSON shape.", out.Excerpt)})
+		if raw2, err := openrouterChat(ctx, key, assistModel(), msgs); err == nil {
+			if again, err := parseAssist(raw2); err == nil && again.Excerpt != "" && !outsideVoice(again.Excerpt) {
+				out.Excerpt = again.Excerpt
+			}
+		}
+	}
 	web.WriteJSON(w, http.StatusOK, out)
 }
 
@@ -107,14 +153,15 @@ var openrouterURL = "https://openrouter.ai/api/v1/chat/completions"
 var assistClient = &http.Client{Timeout: assistTimeout}
 
 // openrouterChat runs one chat completion and returns the assistant text.
-func openrouterChat(ctx context.Context, key, model, user string) (string, error) {
-	payload, err := json.Marshal(map[string]any{
-		"model": model,
-		"messages": []map[string]string{
-			{"role": "system", "content": assistPrompt},
-			{"role": "user", "content": user},
-		},
-	})
+// chatMessage is one turn of the conversation after the system prompt.
+type chatMessage struct{ Role, Content string }
+
+func openrouterChat(ctx context.Context, key, model string, turns []chatMessage) (string, error) {
+	messages := []map[string]string{{"role": "system", "content": assistPrompt}}
+	for _, t := range turns {
+		messages = append(messages, map[string]string{"role": t.Role, "content": t.Content})
+	}
+	payload, err := json.Marshal(map[string]any{"model": model, "messages": messages})
 	if err != nil {
 		return "", err
 	}
@@ -228,4 +275,42 @@ func parseAssist(reply string) (assistResult, error) {
 		return assistResult{}, fmt.Errorf("nothing usable in the reply")
 	}
 	return out, nil
+}
+
+// siteTags is the tag vocabulary already in use on live entries, most used
+// first, so the model reuses the site's own words instead of coining near
+// duplicates ("llm" beside "llms" beside "large-language-models").
+func siteTags(db *sql.DB, limit int) []string {
+	if db == nil {
+		return nil
+	}
+	rows, err := db.Query(`SELECT tags FROM entries WHERE deleted_at IS NULL OR deleted_at = ''`)
+	if err != nil {
+		return nil
+	}
+	defer rows.Close()
+	count := map[string]int{}
+	for rows.Next() {
+		var s string
+		if rows.Scan(&s) != nil {
+			continue
+		}
+		for _, t := range decodeTags(s) {
+			count[t]++
+		}
+	}
+	tags := make([]string, 0, len(count))
+	for t := range count {
+		tags = append(tags, t)
+	}
+	sort.Slice(tags, func(i, j int) bool {
+		if count[tags[i]] != count[tags[j]] {
+			return count[tags[i]] > count[tags[j]]
+		}
+		return tags[i] < tags[j]
+	})
+	if len(tags) > limit {
+		tags = tags[:limit]
+	}
+	return tags
 }
