@@ -39,6 +39,7 @@ func Wasm() ([]byte, error) {
 		h.Write([]byte(HostJS))
 		h.Write([]byte(HostCSS))
 		h.Write([]byte(MountJS))
+		h.Write(Dictionary)
 		for _, name := range FontSlots {
 			b, _ := Font(name)
 			h.Write(b)
@@ -66,7 +67,8 @@ func FontURLs(prefix string) []string {
 }
 
 // Handler serves the editor's assets under prefix (e.g. "/static/editor/"):
-// editor.wasm, host.js, host.css and fonts/*.ttf. A request carrying the
+// editor.wasm, host.js, host.css, mount.js, fonts/*.ttf and the spelling
+// dictionary (dict/en_US.txt). A request carrying the
 // current ?v= is cached for a year; anything else for five minutes.
 func Handler(prefix string) http.Handler {
 	prefix = strings.TrimRight(prefix, "/") + "/"
@@ -88,6 +90,8 @@ func Handler(prefix string) http.Handler {
 			body, ctype = []byte(HostCSS), "text/css; charset=utf-8"
 		case name == "mount.js":
 			body, ctype = []byte(MountJS), "text/javascript; charset=utf-8"
+		case name == "dict/en_US.txt":
+			body, ctype = Dictionary, "text/plain; charset=utf-8"
 		case strings.HasPrefix(name, "fonts/") && strings.HasSuffix(name, ".ttf"):
 			b, err := Font(strings.TrimPrefix(name, "fonts/"))
 			if err != nil {

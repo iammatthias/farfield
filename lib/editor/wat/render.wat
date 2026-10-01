@@ -51,7 +51,8 @@
     (i32.store offset=0x118 (i32.const 0) (i32.const 0xFF60350D)) ;; caret
     (i32.store offset=0x11C (i32.const 0) (i32.const 0xFF939BA0)) ;; rules and quote bars
     (i32.store offset=0x120 (i32.const 0) (i32.const 0xFFA9B4BD)) ;; scrollbar
-    (i32.store offset=0x124 (i32.const 0) (i32.const 0xFFA3AAAB))) ;; placeholder
+    (i32.store offset=0x124 (i32.const 0) (i32.const 0xFFA3AAAB)) ;; placeholder
+    (i32.store offset=0x128 (i32.const 0) (i32.const 0xFF202AA6))) ;; spelling, #a62a20
 
   ;; $fill paints a rectangle in surface coordinates, clipped to the surface.
   (func $fill (param $x i32) (param $y i32) (param $w i32) (param $h i32) (param $c i32)
@@ -275,7 +276,9 @@
             (call $text_color (local.get $st)))))
         (local.set $x (f32.add (local.get $x) (local.get $a)))
         (local.set $p (i32.add (local.get $p) (local.get $cl)))
-        (br $text))))
+        (br $text)))
+    ;; misspelled words get a wavy underline
+    (call $draw_spelling (local.get $l) (i32.load (local.get $r)) (local.get $e) (local.get $base) (local.get $kind)))
 
   ;; render draws the frame if anything changed. Returns 1 when it drew.
   (func $render (export "render") (result i32)

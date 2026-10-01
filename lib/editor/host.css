@@ -100,6 +100,8 @@
 }
 .ff-strip button:hover { color: var(--ink, #0e222d); background: var(--wash, rgba(14, 34, 45, 0.04)); }
 .ff-strip .b, .ff-float .b { font-weight: 700; }
+/* undo and redo are glyphs; the mono face carries the arrows */
+.ff-strip .glyph { font: 400 16px/1 var(--font-mono, ui-monospace, monospace); }
 .ff-strip .i, .ff-float .i { font-style: italic; font-family: var(--font-doc, Georgia, serif); font-size: 15px; }
 .ff-strip .s, .ff-float .s { text-decoration: line-through; }
 .ff-strip .sep, .ff-float .sep {
@@ -162,3 +164,13 @@
 .ff-float[hidden], .ff-slash[hidden] { display: none; }
 
 .save-note.bad { color: var(--bad, #a62a20); }
+
+/* on a misspelled word, the selection bar offers to learn it */
+.ff-float .learn {
+	margin-left: 4px;
+	padding: 0 10px;
+	color: var(--accent, #0d3560);
+	box-shadow: inset 1px 0 0 var(--rule, rgba(14, 34, 45, 0.12));
+	border-radius: 0 var(--r-s, 3px) var(--r-s, 3px) 0;
+}
+.ff-float .learn[hidden] { display: none; }

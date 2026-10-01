@@ -806,3 +806,56 @@ func TestRenderBandMatchesFullRender(t *testing.T) {
 		}
 	}
 }
+
+// Spelling: misspellings get a red wave; names, code, links, URLs, HTML and
+// identifiers never do, and the personal dictionary clears a word.
+func TestSpellingUnderlines(t *testing.T) {
+	e := newEd(t)
+	words := "the\ncat\nsat\non\nmat\nwith\nand\na\nlink\nsome\ncode\nhere\n"
+	e.m.Memory().Write(uint32(e.call("io_ptr")), []byte(words))
+	if n := e.call("dict_load", uint64(len(words))); n == 0 {
+		t.Fatal("dict_load loaded nothing")
+	}
+	reds := func() int {
+		img := e.frame()
+		n := 0
+		b := img.Bounds()
+		for y := b.Min.Y; y < b.Max.Y; y++ {
+			for x := b.Min.X; x < b.Max.X; x++ {
+				c := img.RGBAAt(x, y)
+				if c.R == 0xA6 && c.G == 0x2A && c.B == 0x20 {
+					n++
+				}
+			}
+		}
+		return n
+	}
+	// nothing here is a misspelling, by the rules
+	clean := "the cat sat on the mat with Ethereum and GPT\n" +
+		"some `cdoe` here and a [lnik](https://exmaple.com/pth)\n" +
+		"<div clss=\"wrapr\">\n" +
+		"the snake_cse and foo.bar and v2beta\n"
+	e.setText(clean)
+	e.sel(len(clean), len(clean))
+	e.call("render")
+	if n := reds(); n != 0 {
+		t.Fatalf("nothing should be flagged, but %d red pixels were drawn", n)
+	}
+	// one real typo
+	src := clean + "the cat sat on teh mat\nend"
+	e.setText(src)
+	e.sel(len(src), len(src))
+	e.call("render")
+	if reds() == 0 {
+		t.Fatal("teh should be underlined")
+	}
+	e.m.Memory().Write(uint32(e.call("io_ptr")), []byte("teh"))
+	if e.call("dict_has", 3) != 0 {
+		t.Fatal("dict_has should not know teh yet")
+	}
+	e.call("dict_add", 3)
+	e.call("render")
+	if n := reds(); n != 0 {
+		t.Fatalf("after adding teh, %d red pixels remain", n)
+	}
+}

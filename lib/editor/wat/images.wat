@@ -21,10 +21,10 @@
   (global $IMG_MAX i32 (i32.const 64))
   (global $PLACE i32 (i32.const 0x8000))   ;; STATIC: 128 placements × 20 bytes
   (global $PLACE_MAX i32 (i32.const 128))
-  (global $IMG_HEAP i32 (i32.const 0x05BD0000)) ;; FB + 64 MiB
+  (global $IMG_HEAP i32 (i32.const 0x05CD0000)) ;; FB + 64 MiB
   (global $img_n (mut i32) (i32.const 0))
   (global $place_n (mut i32) (i32.const 0))
-  (global $heap_top (mut i32) (i32.const 0x05BD0000))
+  (global $heap_top (mut i32) (i32.const 0x05CD0000))
 
   ;; FNV-1a over n bytes at p — images are looked up by the URL's text.
   (func $hash (param $p i32) (param $n i32) (result i32) (local $h i32) (local $e i32)

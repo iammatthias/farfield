@@ -16,9 +16,11 @@
 ;;   LINES   0x011D0000    2 MiB   laid-out visual lines, 32 bytes each
 ;;   UNDO    0x013D0000    4 MiB   edit log for undo / redo
 ;;   TEXT    0x017D0000    4 MiB   the document, UTF-8, contiguous
-;;   FB      0x01BD0000    …       RGBA framebuffer, grown on resize
+;;   DICT    0x01BD0000    1 MiB   spelling: 262144 word hashes, open addressing
+;;   FB      0x01CD0000    …       RGBA framebuffer, grown on resize (≤ 64 MiB)
+;;   IMGHEAP 0x05CD0000    …       decoded images (images.wat), grown as loaded
 (module
-  (memory (export "memory") 446)
+  (memory (export "memory") 462) ;; through FB's first page
 
   (global $STATIC i32 (i32.const 0x00000000))
   (global $IO     i32 (i32.const 0x00010000))
@@ -39,7 +41,9 @@
   (global $UNDO_CAP i32 (i32.const 0x00400000))
   (global $TEXT   i32 (i32.const 0x017D0000))
   (global $TEXT_CAP i32 (i32.const 0x00400000))
-  (global $FB     i32 (i32.const 0x01BD0000))
+  (global $DICT   i32 (i32.const 0x01BD0000))
+  (global $DICT_SLOTS i32 (i32.const 262144)) ;; × 4 bytes = 1 MiB
+  (global $FB     i32 (i32.const 0x01CD0000))
 
   ;; STATIC sub-regions — every fixed address below 64 KiB, in one place so a
   ;; new one cannot land on an old one:
