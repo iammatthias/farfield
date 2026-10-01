@@ -174,3 +174,11 @@
 	border-radius: 0 var(--r-s, 3px) var(--r-s, 3px) 0;
 }
 .ff-float .learn[hidden] { display: none; }
+
+/* spelling: the bar holds corrections in place of the formatting */
+.ff-float.spelling > button[data-cmd], .ff-float.spelling > .sep { display: none; }
+.ff-float .fixes { display: flex; align-items: center; }
+.ff-float .fixes:empty { display: none; }
+.ff-float .fix { font-weight: 500; }
+.ff-float .fixes .none { padding: 0 10px; color: var(--ink-3, #6f7a7e); font-size: 13px; }
+.ff-float.spelling .learn { margin-left: 0; }
