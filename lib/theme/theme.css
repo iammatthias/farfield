@@ -663,6 +663,7 @@ dl.kv dd { margin: 0; overflow-wrap: anywhere; }
 	padding: 12vh var(--s-4) var(--s-4);
 	background: color-mix(in srgb, var(--paper) 40%, transparent);
 }
+.ff-palette[hidden] { display: none; }
 .ff-palette-panel {
 	width: 100%; max-width: 40rem; max-height: min(34rem, 76vh);
 	display: flex; flex-direction: column;
