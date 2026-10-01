@@ -19,6 +19,7 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"log/slog"
 	"strings"
 	"sync"
 	"time"
@@ -53,7 +54,7 @@ CREATE TABLE IF NOT EXISTS api_keys (
 	expires_at   TEXT,
 	revoked_at   TEXT,
 	last_used_at TEXT
-);`
+);` + usageSchema
 
 // Key is one issued key. The token itself is never stored — Hash is its
 // SHA-256 and Hint its first characters, enough to match a key against a
@@ -97,6 +98,15 @@ type Store struct {
 	// last_used_at was last written.
 	stampMu sync.Mutex
 	stamped map[string]time.Time
+
+	// usageMu guards usage, the in-process rollups waiting for the next
+	// flush (see usage.go). stop ends the flusher; closeOnce makes Close
+	// safe to call twice.
+	usageMu   sync.Mutex
+	usage     map[usageKey]*usageAgg
+	stop      chan struct{}
+	flushed   chan struct{}
+	closeOnce sync.Once
 }
 
 // shouldStamp reports whether this key's last_used_at is due for a rewrite,
@@ -133,11 +143,31 @@ func New(db *sql.DB) (*Store, error) {
 	if _, err := db.Exec(schema); err != nil {
 		return nil, err
 	}
-	return &Store{db: db, stamped: make(map[string]time.Time)}, nil
+	s := &Store{
+		db:      db,
+		stamped: make(map[string]time.Time),
+		usage:   make(map[usageKey]*usageAgg),
+		stop:    make(chan struct{}),
+		flushed: make(chan struct{}),
+	}
+	go s.flushLoop()
+	return s, nil
 }
 
-// Close releases the underlying database.
-func (s *Store) Close() error { return s.db.Close() }
+// Close stops the usage flusher, writes the rollups still in memory, and
+// releases the underlying database. It is safe to call more than once.
+func (s *Store) Close() error {
+	var err error
+	s.closeOnce.Do(func() {
+		close(s.stop)
+		<-s.flushed
+		if ferr := s.Flush(); ferr != nil {
+			slog.Warn("keys: final usage flush failed", "err", ferr)
+		}
+		err = s.db.Close()
+	})
+	return err
+}
 
 // ValidScope reports whether scope is one of the known scopes.
 func ValidScope(scope string) bool {
@@ -148,6 +178,16 @@ func ValidScope(scope string) bool {
 // shown exactly once — and the stored record. A zero expires means the key
 // never expires.
 func (s *Store) Mint(name, app, scope string, expires time.Time) (string, *Key, error) {
+	return mint(s.db, name, app, scope, expires)
+}
+
+// execer is the slice of *sql.DB and *sql.Tx that mint needs, so Rotate can
+// mint inside its transaction.
+type execer interface {
+	Exec(query string, args ...any) (sql.Result, error)
+}
+
+func mint(db execer, name, app, scope string, expires time.Time) (string, *Key, error) {
 	name = strings.TrimSpace(name)
 	app = strings.TrimSpace(app)
 	if name == "" {
@@ -171,7 +211,7 @@ func (s *Store) Mint(name, app, scope string, expires time.Time) (string, *Key, 
 	if !expires.IsZero() {
 		k.ExpiresAt = expires.UTC().Format(time.RFC3339)
 	}
-	_, err := s.db.Exec(`INSERT INTO api_keys
+	_, err := db.Exec(`INSERT INTO api_keys
 		(id, name, app, scope, hash, hint, created_at, expires_at)
 		VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
 		k.ID, k.Name, k.App, k.Scope, hashToken(token), k.Hint,
@@ -186,8 +226,19 @@ func (s *Store) Mint(name, app, scope string, expires time.Time) (string, *Key, 
 // the token names an active key issued for that app (or for every app).
 // Lookup is by SHA-256, so timing reveals nothing about stored tokens. A hit
 // stamps last_used_at best-effort, at most once per stampInterval — an audit
-// hint, never a gate.
+// hint, never a gate. Check counts toward the key's usage with no route; the
+// fleet's gates call CheckRequest instead.
 func (s *Store) Check(token, app string) (string, bool) {
+	return s.CheckRequest(token, app, "", "")
+}
+
+// CheckRequest is Check plus the request's method and route, for the usage
+// rollups: a token that names a key is counted in memory — accepted, or
+// refused because the key is revoked, expired, or issued for another app —
+// and flushed in batches (see usage.go). A token that names no key is not
+// recorded at all. lib/web's gates find this method through an optional
+// interface, so lib/web never imports this package.
+func (s *Store) CheckRequest(token, app, method, path string) (string, bool) {
 	if token == "" || !strings.HasPrefix(token, tokenPrefix) {
 		return "", false
 	}
@@ -200,14 +251,117 @@ func (s *Store) Check(token, app string) (string, bool) {
 		return "", false
 	}
 	k.ExpiresAt, k.RevokedAt = expires.String, revoked.String
-	if !k.Active() || (k.App != AppAny && k.App != app) {
+	now := time.Now()
+	switch {
+	case k.RevokedAt != "":
+		s.record(k.ID, app, method, path, OutcomeRevoked, now)
+		return "", false
+	case !k.Active():
+		s.record(k.ID, app, method, path, OutcomeExpired, now)
+		return "", false
+	case k.App != AppAny && k.App != app:
+		s.record(k.ID, app, method, path, OutcomeWrongApp, now)
 		return "", false
 	}
-	if now := time.Now(); s.shouldStamp(k.ID, now) {
+	s.record(k.ID, app, method, path, OutcomeOK, now)
+	if s.shouldStamp(k.ID, now) {
 		_, _ = s.db.Exec(`UPDATE api_keys SET last_used_at = ? WHERE id = ?`,
 			now.UTC().Format(time.RFC3339), k.ID)
 	}
 	return k.Scope, true
+}
+
+// Get returns one key by id, or nil when there is no such key.
+func (s *Store) Get(id string) (*Key, error) {
+	var k Key
+	var expires, revoked, used sql.NullString
+	err := s.db.QueryRow(`SELECT id, name, app, scope, hint, created_at,
+		expires_at, revoked_at, last_used_at FROM api_keys WHERE id = ?`, id).
+		Scan(&k.ID, &k.Name, &k.App, &k.Scope, &k.Hint,
+			&k.CreatedAt, &expires, &revoked, &used)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	k.ExpiresAt, k.RevokedAt, k.LastUsed = expires.String, revoked.String, used.String
+	return &k, nil
+}
+
+// Rename changes a key's display name; an unknown id reports false.
+func (s *Store) Rename(id, name string) (bool, error) {
+	name = strings.TrimSpace(name)
+	if name == "" {
+		return false, errors.New("key name is required")
+	}
+	res, err := s.db.Exec(`UPDATE api_keys SET name = ? WHERE id = ?`, name, id)
+	if err != nil {
+		return false, err
+	}
+	n, _ := res.RowsAffected()
+	return n > 0, nil
+}
+
+// SetExpiry sets when a key stops working; a zero time clears the expiry so
+// the key never expires. Extending an expired key revives it; a revoked key
+// stays revoked whatever its expiry. An unknown id reports false.
+func (s *Store) SetExpiry(id string, expires time.Time) (bool, error) {
+	var v any
+	if !expires.IsZero() {
+		v = expires.UTC().Format(time.RFC3339)
+	}
+	res, err := s.db.Exec(`UPDATE api_keys SET expires_at = ? WHERE id = ?`, v, id)
+	if err != nil {
+		return false, err
+	}
+	n, _ := res.RowsAffected()
+	return n > 0, nil
+}
+
+// ErrNotActive is returned by Rotate for a key that is revoked or expired —
+// there is nothing live to replace; extend or reissue it instead.
+var ErrNotActive = errors.New("only an active key can be rotated")
+
+// Rotate replaces an active key: in one transaction it mints a new key with
+// the same name, app, scope and expiry, and revokes the old one. It returns
+// the new plaintext token — shown exactly once, as from Mint — and the new
+// record. An unknown id returns a nil key and no error.
+func (s *Store) Rotate(id string) (string, *Key, error) {
+	old, err := s.Get(id)
+	if err != nil || old == nil {
+		return "", nil, err
+	}
+	if !old.Active() {
+		return "", nil, ErrNotActive
+	}
+	var expires time.Time
+	if old.ExpiresAt != "" {
+		if expires, err = time.Parse(time.RFC3339, old.ExpiresAt); err != nil {
+			return "", nil, err
+		}
+	}
+	tx, err := s.db.Begin()
+	if err != nil {
+		return "", nil, err
+	}
+	defer tx.Rollback()
+	token, k, err := mint(tx, old.Name, old.App, old.Scope, expires)
+	if err != nil {
+		return "", nil, err
+	}
+	res, err := tx.Exec(`UPDATE api_keys SET revoked_at = ?
+		WHERE id = ? AND revoked_at IS NULL`, store.NowRFC3339(), id)
+	if err != nil {
+		return "", nil, err
+	}
+	if n, _ := res.RowsAffected(); n == 0 {
+		return "", nil, ErrNotActive // revoked between the read and the write
+	}
+	if err := tx.Commit(); err != nil {
+		return "", nil, err
+	}
+	return token, k, nil
 }
 
 // Revoke deactivates a key immediately. Revoking an already-revoked key is a
@@ -222,11 +376,22 @@ func (s *Store) Revoke(id string) (bool, error) {
 	return n > 0, nil
 }
 
-// Delete removes a key record entirely — for tidying long-revoked keys; use
-// Revoke to deactivate.
+// Delete removes a key record entirely, with its usage rollups — for tidying
+// long-revoked keys; use Revoke to deactivate.
 func (s *Store) Delete(id string) (bool, error) {
-	res, err := s.db.Exec(`DELETE FROM api_keys WHERE id = ?`, id)
+	tx, err := s.db.Begin()
 	if err != nil {
+		return false, err
+	}
+	defer tx.Rollback()
+	res, err := tx.Exec(`DELETE FROM api_keys WHERE id = ?`, id)
+	if err != nil {
+		return false, err
+	}
+	if _, err := tx.Exec(`DELETE FROM key_usage WHERE key_id = ?`, id); err != nil {
+		return false, err
+	}
+	if err := tx.Commit(); err != nil {
 		return false, err
 	}
 	n, _ := res.RowsAffected()

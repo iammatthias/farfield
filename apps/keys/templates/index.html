@@ -24,7 +24,7 @@
         <tbody>
           {{range .Keys}}
             <tr>
-              <td data-label="Name">{{.Name}}</td>
+              <td data-label="Name"><a href="/keys/{{.ID}}">{{.Name}}</a></td>
               <td class="mono" data-label="App">{{.App}}</td>
               <td class="mono" data-label="Scope">{{.Scope}}</td>
               <td class="mono" data-label="Key">{{.Hint}}…</td>

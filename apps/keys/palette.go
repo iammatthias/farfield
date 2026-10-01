@@ -1,7 +1,7 @@
 package main
 
 // keys' part of the ⌘K menu: the key to issue, and the keys there are —
-// by name, app and scope only; a key has no page of its own, so each opens the index.
+// by name, app and scope; each opens its own page.
 
 import (
 	"net/http"
@@ -22,7 +22,7 @@ func (s *Server) paletteItems(r *http.Request) []web.PaletteItem {
 			v := keyView(k)
 			items = append(items, web.PaletteItem{Kind: "record", Title: k.Name,
 				Sub: k.App + " · " + k.Scope + " · " + strings.ToLower(v.Status),
-				URL: "/", Words: k.App + " " + k.Scope})
+				URL: keyURL(k.ID), Words: k.App + " " + k.Scope})
 		}
 	}
 	return items

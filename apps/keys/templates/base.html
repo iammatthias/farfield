@@ -29,5 +29,39 @@
     .token-meta dt { line-height: 1.9; }
     .token-meta dd { margin: 0; }
     .token-use { color: var(--ink-2); }
+
+    /* A key's page: the 30-day strip — one column per day, accepted in
+       ink, refused in the alarm colour stacked on top. No chart library. */
+    .days {
+      display: flex; align-items: flex-end; gap: 2px;
+      height: 4rem; margin: var(--s-5) 0 var(--s-1);
+      border-bottom: 1px solid var(--rule);
+    }
+    .days .day {
+      flex: 1 1 0; min-width: 0; height: 100%;
+      display: flex; flex-direction: column; justify-content: flex-end;
+    }
+    .days i { display: block; }
+    .days i.ok { background: var(--ink-2); }
+    .days i.refused { background: var(--bad); }
+    .days-axis {
+      display: flex; justify-content: space-between;
+      margin: 0 0 var(--s-5); font-size: 0.7rem;
+    }
+    table.usage { margin-bottom: var(--s-5); }
+    td.route { white-space: normal; overflow-wrap: anywhere; }
+    .by-day { margin: 0 0 var(--s-5); }
+    .by-day summary { cursor: pointer; font-size: 0.75rem; margin-bottom: var(--s-3); }
+    h3.sub { font-size: 0.75rem; margin: var(--s-6) 0 var(--s-2); }
+    .fine { font-size: 0.8rem; margin-top: var(--s-4); }
+
+    /* the manage forms: label, field and button on one line that wraps */
+    .row-form {
+      display: flex; flex-wrap: wrap; align-items: center;
+      gap: var(--s-2) var(--s-3); margin: var(--s-4) 0;
+    }
+    .row-form .label { flex: 0 0 4.5rem; }
+    .row-form input { flex: 1 1 12rem; min-width: 0; }
+    .page-head .readout { align-items: baseline; }
   </style>
 {{end}}

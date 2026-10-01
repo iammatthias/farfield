@@ -9,6 +9,7 @@ import (
 	"regexp"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/iammatthias/farfield/lib/keys"
 	"github.com/iammatthias/farfield/lib/store"
@@ -31,6 +32,7 @@ func newTestServer(t *testing.T) *Server {
 	if err != nil {
 		t.Fatalf("keys.New: %v", err)
 	}
+	t.Cleanup(func() { ks.Close() })
 	tmpl, err := web.ParseTemplates(assets, tmplFuncs)
 	if err != nil {
 		t.Fatalf("ParseTemplates: %v", err)
@@ -83,6 +85,10 @@ func postForm(t *testing.T, ts *httptest.Server, cookies []*http.Cookie, path st
 }
 
 var tokenRe = regexp.MustCompile(`ffk_[a-z0-9]+`)
+
+// revealRe finds the one-time token reveal itself — a rotate page also shows
+// the replaced key's hint, which tokenRe alone would match first.
+var revealRe = regexp.MustCompile(`<code class="token">(ffk_[a-z0-9]+)</code>`)
 
 // ── tests ──────────────────────────────────────────────────────────────────
 
@@ -192,5 +198,160 @@ func TestStatus(t *testing.T) {
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
 		t.Errorf("status = %d, want 200", resp.StatusCode)
+	}
+}
+
+func getPage(t *testing.T, ts *httptest.Server, cookies []*http.Cookie, path string) (int, string) {
+	t.Helper()
+	req, _ := http.NewRequest("GET", ts.URL+path, nil)
+	for _, ck := range cookies {
+		req.AddCookie(ck)
+	}
+	resp, err := noRedirectClient().Do(req)
+	if err != nil {
+		t.Fatalf("GET %s: %v", path, err)
+	}
+	defer resp.Body.Close()
+	body, _ := io.ReadAll(resp.Body)
+	return resp.StatusCode, string(body)
+}
+
+func TestKeyPage(t *testing.T) {
+	s := newTestServer(t)
+	ts := httptest.NewServer(s.routes())
+	defer ts.Close()
+	cookies := loginSession(t, ts)
+
+	token, k, err := s.ks.Mint("intern uploads", "library", keys.ScopeUpload, time.Time{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	s.ks.CheckRequest(token, "library", "POST", "/api/books")
+	s.ks.CheckRequest(token, "feed", "GET", "/api/posts")
+	if err := s.ks.Flush(); err != nil {
+		t.Fatal(err)
+	}
+
+	code, body := getPage(t, ts, cookies, "/keys/"+k.ID)
+	if code != http.StatusOK {
+		t.Fatalf("key page = %d: %s", code, body)
+	}
+	for _, want := range []string{"intern uploads", k.Hint + "…", "/api/books", "wrong-app",
+		"/keys/" + k.ID + "/rotate", "/keys/" + k.ID + "/revoke"} {
+		if !strings.Contains(body, want) {
+			t.Errorf("key page lacks %q", want)
+		}
+	}
+	if strings.Contains(body, token) {
+		t.Error("key page reveals the token")
+	}
+
+	if code, _ := getPage(t, ts, cookies, "/keys/nope"); code != http.StatusNotFound {
+		t.Errorf("unknown key page = %d, want 404", code)
+	}
+	if code, _ := getPage(t, ts, nil, "/keys/"+k.ID); code != http.StatusSeeOther {
+		t.Errorf("anonymous key page = %d, want 303 to login", code)
+	}
+
+	// The index links each key to its page.
+	if _, body := getPage(t, ts, cookies, "/"); !strings.Contains(body, `href="/keys/`+k.ID+`"`) {
+		t.Error("index does not link to the key page")
+	}
+	// So does the ⌘K menu.
+	found := false
+	for _, it := range s.paletteItems(httptest.NewRequest("GET", "/", nil)) {
+		if it.URL == "/keys/"+k.ID {
+			found = true
+		}
+	}
+	if !found {
+		t.Error("palette record does not open the key page")
+	}
+}
+
+func TestKeyPageControls(t *testing.T) {
+	s := newTestServer(t)
+	ts := httptest.NewServer(s.routes())
+	defer ts.Close()
+	cookies := loginSession(t, ts)
+	_, k, _ := s.ks.Mint("old name", "feed", keys.ScopeRead, time.Time{})
+
+	resp := postForm(t, ts, cookies, "/keys/"+k.ID+"/rename", url.Values{"name": {"new name"}})
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusSeeOther || resp.Header.Get("Location") != "/keys/"+k.ID {
+		t.Errorf("rename = %d → %q", resp.StatusCode, resp.Header.Get("Location"))
+	}
+	resp = postForm(t, ts, cookies, "/keys/"+k.ID+"/expiry", url.Values{
+		"expires": {time.Now().AddDate(0, 0, 10).Format("2006-01-02")}, "action": {"set"}})
+	resp.Body.Close()
+	got, _ := s.ks.Get(k.ID)
+	if got.Name != "new name" || got.ExpiresAt == "" || !got.Active() {
+		t.Errorf("after rename + expiry: %+v", got)
+	}
+	resp = postForm(t, ts, cookies, "/keys/"+k.ID+"/expiry", url.Values{
+		"expires": {"2001-01-01"}, "action": {"set"}})
+	body, _ := io.ReadAll(resp.Body)
+	resp.Body.Close()
+	if !strings.Contains(string(body), "today or later") {
+		t.Error("a past expiry was not refused")
+	}
+	resp = postForm(t, ts, cookies, "/keys/"+k.ID+"/expiry", url.Values{"action": {"clear"}})
+	resp.Body.Close()
+	if got, _ := s.ks.Get(k.ID); got.ExpiresAt != "" {
+		t.Error("expiry not cleared")
+	}
+
+	// Revoke from the key page lands back on it.
+	resp = postForm(t, ts, cookies, "/keys/"+k.ID+"/revoke", url.Values{"from": {"key"}})
+	resp.Body.Close()
+	if resp.Header.Get("Location") != "/keys/"+k.ID {
+		t.Errorf("revoke from key page → %q", resp.Header.Get("Location"))
+	}
+	resp = postForm(t, ts, cookies, "/keys/"+k.ID+"/delete", nil)
+	resp.Body.Close()
+	if code, _ := getPage(t, ts, cookies, "/keys/"+k.ID); code != http.StatusNotFound {
+		t.Errorf("deleted key page = %d, want 404", code)
+	}
+}
+
+func TestRotateFlow(t *testing.T) {
+	s := newTestServer(t)
+	ts := httptest.NewServer(s.routes())
+	defer ts.Close()
+	cookies := loginSession(t, ts)
+	oldToken, k, _ := s.ks.Mint("ci", "blobs", keys.ScopeWrite, time.Time{})
+
+	resp := postForm(t, ts, cookies, "/keys/"+k.ID+"/rotate", nil)
+	body, _ := io.ReadAll(resp.Body)
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("rotate = %d: %s", resp.StatusCode, body)
+	}
+	var token string
+	if m := revealRe.FindStringSubmatch(string(body)); m != nil {
+		token = m[1]
+	}
+	if token == "" || token == oldToken {
+		t.Fatalf("rotate did not reveal a new token")
+	}
+	if scope, ok := s.ks.Check(token, "blobs"); !ok || scope != keys.ScopeWrite {
+		t.Error("rotated token does not check as blobs/write")
+	}
+	if _, ok := s.ks.Check(oldToken, "blobs"); ok {
+		t.Error("old token still valid after rotate")
+	}
+	if !strings.Contains(string(body), "Key rotated") {
+		t.Error("rotate page does not say it replaced a key")
+	}
+
+	// Rotating the now-revoked key is refused, not a second mint.
+	resp = postForm(t, ts, cookies, "/keys/"+k.ID+"/rotate", nil)
+	body, _ = io.ReadAll(resp.Body)
+	resp.Body.Close()
+	if revealRe.MatchString(string(body)) {
+		t.Error("rotating a revoked key minted a token")
+	}
+	if ks, _ := s.ks.List(); len(ks) != 2 {
+		t.Errorf("keys after rotate = %d, want 2", len(ks))
 	}
 }

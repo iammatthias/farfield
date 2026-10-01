@@ -73,6 +73,10 @@ func run(host, port string) error {
 	if err != nil {
 		return err
 	}
+	// Close stops the store's usage flusher; the keys app checks no tokens
+	// itself, so there is nothing to flush, but the goroutine should not leak.
+	// Closing the shared db twice is harmless.
+	defer ks.Close()
 
 	tmpl, err := web.ParseTemplates(assets, tmplFuncs)
 	if err != nil {
@@ -110,8 +114,12 @@ func (s *Server) routes() http.Handler {
 	mux.HandleFunc("GET /{$}", s.auth.RequireSession(s.handleIndex))
 	mux.HandleFunc("GET /new", s.auth.RequireSession(s.handleNewForm))
 	mux.HandleFunc("POST /keys", s.auth.RequireSession(s.handleCreate))
+	mux.HandleFunc("GET /keys/{id}", s.auth.RequireSession(s.handleKey))
 	mux.HandleFunc("POST /keys/{id}/revoke", s.auth.RequireSession(s.handleRevoke))
 	mux.HandleFunc("POST /keys/{id}/delete", s.auth.RequireSession(s.handleDelete))
+	mux.HandleFunc("POST /keys/{id}/rename", s.auth.RequireSession(s.handleRename))
+	mux.HandleFunc("POST /keys/{id}/expiry", s.auth.RequireSession(s.handleExpiry))
+	mux.HandleFunc("POST /keys/{id}/rotate", s.auth.RequireSession(s.handleRotate))
 
 	// Login — HandleLogin throttles failed attempts itself, in every app.
 	mux.HandleFunc("GET /login", s.handleLoginForm)
@@ -179,6 +187,12 @@ func (s *Server) handleCreate(w http.ResponseWriter, r *http.Request) {
 func (s *Server) handleRevoke(w http.ResponseWriter, r *http.Request) {
 	if _, err := s.ks.Revoke(r.PathValue("id")); err != nil {
 		s.fail(w, "revoke key", err)
+		return
+	}
+	// The key's own page sends from=key to land back on it; the index
+	// stays on the index.
+	if r.FormValue("from") == "key" {
+		http.Redirect(w, r, keyURL(r.PathValue("id")), http.StatusSeeOther)
 		return
 	}
 	http.Redirect(w, r, "/", http.StatusSeeOther)

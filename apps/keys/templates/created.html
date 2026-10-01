@@ -1,7 +1,8 @@
 {{define "title"}}Key issued · farfield keys{{end}}
 {{define "content"}}
   {{template "topbar" .}}
-  <h2 class="page-title">Key issued</h2>
+  <h2 class="page-title">{{if .Replaced}}Key rotated{{else}}Key issued{{end}}</h2>
+  {{with .Replaced}}<p class="notice warn">Replaces <a href="/keys/{{.ID}}">{{.Name}} ({{.Hint}}…)</a>, which is now revoked — update anything that used it.</p>{{end}}
   <p class="notice">Copy it now — only its hash is stored, so this token is shown exactly once.</p>
   <code class="token">{{.Token}}</code>
   <dl class="token-meta">
@@ -12,5 +13,5 @@
   </dl>
   <p class="token-use">Send it as <code>X-API-Key: &lt;token&gt;</code> or
      <code>Authorization: Bearer &lt;token&gt;</code>.</p>
-  <div class="actions"><a href="/">← Back to keys</a></div>
+  <div class="actions"><a href="/keys/{{.Key.ID}}">Key page →</a><a href="/">← Back to keys</a></div>
 {{end}}

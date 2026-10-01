@@ -27,6 +27,9 @@
   </div>
   <p>An optional expiry (in days) auto-retires a key; revocation is immediate either way. Env keys (<code>&lt;APP&gt;_API_KEY</code>, <code>&lt;APP&gt;_READ_KEY</code>) keep working unchanged as the bootstrap / break-glass tier.</p>
 
+  <h2>Each key's page</h2>
+  <p>Every key has a permalink, <code>/keys/{id}</code> (the ⌘K menu opens it): its facts, its usage, and its controls — rename, set or clear the expiry, <strong>rotate</strong> (a new token on the same terms, shown once; the old key is revoked in the same step), revoke, delete. Usage is a daily rollup per app and route: accepted requests and <strong>refused</strong> ones — a revoked, expired or wrong-app key still being presented, which means something out there needs updating. Each app counts in memory and writes its rollups about once a minute, never per request; they are kept 90 days. Only the method and route are recorded — never tokens, addresses, query strings or bodies, and a token that names no key leaves no trace.</p>
+
   <h2>Authentication</h2>
   <p>The admin UI is session-gated behind the shared <code>PASSWORD</code>, with brute-force limiting on the login form. There is deliberately no JSON write API: a credential minter should not itself be drivable by a credential. <code>/status</code> stays public.</p>
 

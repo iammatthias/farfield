@@ -28,3 +28,7 @@ func Attach(a *web.Auth, app string) func() {
 	a.Keys, a.App = s, app
 	return func() { _ = s.Close() }
 }
+
+// Pin the optional interface lib/web looks for: if CheckRequest ever drifts,
+// keyScope would silently fall back to Check and usage would stop recording.
+var _ web.RequestKeyChecker = (*Store)(nil)

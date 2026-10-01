@@ -58,6 +58,14 @@ type KeyChecker interface {
 	Check(token, app string) (scope string, ok bool)
 }
 
+// RequestKeyChecker is the optional richer form of KeyChecker: the same
+// check, told the request's method and route so the store can keep per-key
+// usage rollups. lib/keys implements it; keyScope prefers it when present.
+// Only the method and path are passed — never the query, headers or body.
+type RequestKeyChecker interface {
+	CheckRequest(token, app, method, path string) (scope string, ok bool)
+}
+
 // Auth bundles the credentials and session storage an app's gated routes
 // share. Zero-value fields fail closed: an empty Password rejects every
 // login, an empty APIKey refuses every API write.
@@ -110,7 +118,26 @@ func (a *Auth) keyScope(r *http.Request) (string, bool) {
 	if a.Keys == nil {
 		return "", false
 	}
+	if rc, ok := a.Keys.(RequestKeyChecker); ok {
+		return rc.CheckRequest(APIKeyFrom(r), a.App, r.Method, keyRoute(r))
+	}
 	return a.Keys.Check(APIKeyFrom(r), a.App)
+}
+
+// keyRoute names the request's route for key usage: the ServeMux pattern the
+// request matched (e.g. /blobs/{cid}), which keeps the rollups to one row per
+// route rather than one per blob or slug, else the bare URL path.
+func keyRoute(r *http.Request) string {
+	p := r.Pattern
+	if p == "" {
+		return r.URL.Path
+	}
+	// Patterns read "[METHOD ][HOST]/PATH"; keep the path — the method is
+	// recorded separately.
+	if i := strings.IndexByte(p, '/'); i >= 0 {
+		return p[i:]
+	}
+	return r.URL.Path
 }
 
 // RequireSession guards the HTML admin UI. An invalid or absent session

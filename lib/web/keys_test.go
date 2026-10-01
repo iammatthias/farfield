@@ -97,3 +97,45 @@ func TestRequireAPIKeyWithOnlyKeyStore(t *testing.T) {
 		t.Errorf("unconfigured → %d, want 503", w.Code)
 	}
 }
+
+// requestKeys records what keyScope tells a RequestKeyChecker.
+type requestKeys struct {
+	fakeKeys
+	method, path string
+}
+
+func (f *requestKeys) CheckRequest(token, app, method, path string) (string, bool) {
+	f.method, f.path = method, path
+	return f.Check(token, app)
+}
+
+func TestKeyScopePassesRoute(t *testing.T) {
+	rk := &requestKeys{fakeKeys: fakeKeys{"ffk_r": {"blobs", "read"}}}
+	a := &Auth{App: "blobs", ReadKey: "env-read", Keys: rk}
+	mux := http.NewServeMux()
+	mux.HandleFunc("GET /blobs/{cid}", a.RequireReadKey(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusNoContent)
+	}))
+
+	r := httptest.NewRequest("GET", "/blobs/bafyabc?secret=1", nil)
+	r.Header.Set("X-API-Key", "ffk_r")
+	w := httptest.NewRecorder()
+	mux.ServeHTTP(w, r)
+	if w.Code != http.StatusNoContent {
+		t.Fatalf("read key via RequestKeyChecker → %d, want 204", w.Code)
+	}
+	if rk.method != "GET" || rk.path != "/blobs/{cid}" {
+		t.Errorf("CheckRequest got %q %q; want GET and the route pattern", rk.method, rk.path)
+	}
+
+	// Outside a mux there is no pattern: the bare path, never the query.
+	rk.path = ""
+	a.HasReadKey(func() *http.Request {
+		r := httptest.NewRequest("GET", "/x/y?q=1", nil)
+		r.Header.Set("X-API-Key", "ffk_r")
+		return r
+	}())
+	if rk.path != "/x/y" {
+		t.Errorf("no-pattern path = %q, want /x/y", rk.path)
+	}
+}

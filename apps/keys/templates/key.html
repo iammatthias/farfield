@@ -1,0 +1,151 @@
+{{define "title"}}{{.Key.Name}} · farfield keys{{end}}
+{{define "content"}}
+  {{template "topbar" .}}
+  <a class="back" href="/">← all keys</a>
+  <div class="page-head">
+    <div>
+      <h1 class="page-title">{{.Key.Name}}</h1>
+      <p class="readout tech">
+        {{if eq .Key.Status "Active"}}<span class="badge live">Active</span>
+        {{else}}<span class="badge draft">{{.Key.Status}}</span>{{end}}
+        <span>{{.Key.App}}</span>
+        <span>{{.Key.Scope}}</span>
+      </p>
+    </div>
+  </div>
+
+  {{with .Error}}<p class="error">{{.}}</p>{{end}}
+
+  <dl class="kv">
+    <dt>Key</dt><dd class="mono">{{.Key.Hint}}…</dd>
+    <dt>App</dt><dd class="mono">{{if eq .Key.App "*"}}* — every app{{else}}{{.Key.App}}{{end}}</dd>
+    <dt>Scope</dt><dd class="mono">{{.Key.Scope}}</dd>
+    <dt>Status</dt><dd>{{.Key.Status}}{{with .Key.RevokedAt}} · revoked {{day .}}{{end}}</dd>
+    <dt>Created</dt><dd class="mono">{{day .Key.CreatedAt}}</dd>
+    <dt>Expires</dt><dd class="mono">{{if .Key.ExpiresAt}}{{day .Key.ExpiresAt}}{{else}}never{{end}}</dd>
+    <dt>Last used</dt><dd class="mono">{{if .Key.LastUsed}}{{.Key.LastUsed}}{{else}}never{{end}}</dd>
+    <dt>ID</dt><dd class="mono">{{.Key.ID}}</dd>
+  </dl>
+
+  <section>
+    <div class="section-head">
+      <h2>Usage</h2>
+      <span class="tech">{{.Usage.OK}} accepted · {{.Usage.Refused}} refused</span>
+    </div>
+    {{if gt .Usage.Refused 0}}
+      <p class="notice warn">Refused attempts mean something still presents this key
+        after it was revoked or expired, or on an app it was not issued for.</p>
+    {{end}}
+
+    <div class="days" role="img" aria-label="Requests per day, last 30 days">
+      {{range .Days}}
+        <span class="day" title="{{.Day}} · {{.OK}} accepted{{if .Refused}} · {{.Refused}} refused{{end}}">
+          {{if .RefusedPct}}<i class="refused" style="height: {{.RefusedPct}}%"></i>{{end}}
+          {{if .OKPct}}<i class="ok" style="height: {{.OKPct}}%"></i>{{end}}
+        </span>
+      {{end}}
+    </div>
+    <p class="days-axis tech"><span>30 days ago</span><span>{{.Today}}</span></p>
+
+    {{if .Usage.ByApp}}
+      <div class="table-wrap">
+        <table class="admin usage">
+          <thead><tr><th>App</th><th class="num">Accepted</th><th class="num">Refused</th><th>Last</th></tr></thead>
+          <tbody>
+            {{range .Usage.ByApp}}
+              <tr>
+                <td class="mono">{{.App}}</td>
+                <td class="num">{{.OK}}</td>
+                <td class="num">{{.Refused}}</td>
+                <td class="mono">{{day .LastAt}}</td>
+              </tr>
+            {{end}}
+          </tbody>
+        </table>
+      </div>
+    {{end}}
+
+    {{if .ActiveDays}}
+      <details class="by-day">
+        <summary class="tech">By day</summary>
+        <div class="table-wrap">
+          <table class="admin usage">
+            <thead><tr><th>Day</th><th class="num">Accepted</th><th class="num">Refused</th></tr></thead>
+            <tbody>
+              {{range .ActiveDays}}
+                <tr><td class="mono">{{.Day}}</td><td class="num">{{.OK}}</td><td class="num">{{.Refused}}</td></tr>
+              {{end}}
+            </tbody>
+          </table>
+        </div>
+      </details>
+    {{end}}
+
+    {{if .Usage.Recent}}
+      <h3 class="tech sub">Recent routes</h3>
+      <div class="table-wrap stack-wrap">
+        <table class="admin stack">
+          <thead><tr><th>Route</th><th>App</th><th class="num">Count</th><th>Last</th><th>Outcome</th></tr></thead>
+          <tbody>
+            {{range .Usage.Recent}}
+              <tr>
+                <td class="mono route" data-label="Route">{{with .Method}}{{.}} {{end}}{{if .Path}}{{.Path}}{{else}}—{{end}}</td>
+                <td class="mono" data-label="App">{{.App}}</td>
+                <td class="num" data-label="Count">{{.Count}}</td>
+                <td class="mono" data-label="Last">{{.LastAt}}</td>
+                <td data-label="Outcome">
+                  {{if eq .Outcome "ok"}}<span class="badge live">ok</span>
+                  {{else}}<span class="badge bad">{{.Outcome}}</span>{{end}}
+                </td>
+              </tr>
+            {{end}}
+          </tbody>
+        </table>
+      </div>
+    {{else}}
+      <p class="muted">No recorded use yet.</p>
+    {{end}}
+    <p class="muted fine">Counts are daily rollups, kept 90 days; each app writes its
+      counts about once a minute. Only the method and route are recorded —
+      never tokens, addresses, queries or bodies.</p>
+  </section>
+
+  <section>
+    <div class="section-head"><h2>Manage</h2></div>
+
+    <form class="row-form" method="post" action="/keys/{{.Key.ID}}/rename">
+      <label class="label" for="name">Name</label>
+      <input type="text" id="name" name="name" value="{{.Key.Name}}" required>
+      <button class="quiet" type="submit">Rename</button>
+    </form>
+
+    {{if not .Key.RevokedAt}}
+      <form class="row-form" method="post" action="/keys/{{.Key.ID}}/expiry">
+        <label class="label" for="expires">Expires</label>
+        <input type="date" id="expires" name="expires" min="{{.Today}}"
+               value="{{if .Key.ExpiresAt}}{{day .Key.ExpiresAt}}{{end}}">
+        <button class="quiet" type="submit" name="action" value="set">Set expiry</button>
+        {{if .Key.ExpiresAt}}<button class="quiet" type="submit" name="action" value="clear" formnovalidate>Never expire</button>{{end}}
+      </form>
+    {{end}}
+
+    <div class="actions">
+      {{if eq .Key.Status "Active"}}
+        <form method="post" action="/keys/{{.Key.ID}}/rotate"
+              onsubmit="return confirm('Rotate this key? A new token is issued on the same terms and this one stops working immediately.')">
+          <button type="submit">Rotate</button>
+        </form>
+        <form method="post" action="/keys/{{.Key.ID}}/revoke"
+              onsubmit="return confirm('Revoke this key? Anything using it stops working immediately.')">
+          <input type="hidden" name="from" value="key">
+          <button class="danger" type="submit">Revoke</button>
+        </form>
+      {{else}}
+        <form method="post" action="/keys/{{.Key.ID}}/delete"
+              onsubmit="return confirm('Delete this key record and its usage history?')">
+          <button class="danger" type="submit">Delete</button>
+        </form>
+      {{end}}
+    </div>
+  </section>
+{{end}}
