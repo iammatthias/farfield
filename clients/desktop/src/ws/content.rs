@@ -16,7 +16,9 @@ use farfield_core::api::content::{self, Collection, Entry, Series, Status};
 use farfield_core::store::{Draft, SaveState};
 use farfield_core::sync::{self, ContentEntry, ContentSeries};
 use farfield_core::{Freshness, Latest};
-use gpui::{div, prelude::*, px, uniform_list, AnyElement, App, Context, Entity, SharedString, UniformListScrollHandle, Window};
+use gpui::{
+    div, prelude::*, px, uniform_list, AnyElement, App, Context, Entity, SharedString, UniformListScrollHandle, Window,
+};
 use serde_json::{json, Value};
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -66,7 +68,12 @@ fn entry_specs() -> Vec<FieldSpec> {
         FieldSpec { key: "collection", label: "Collection", placeholder: "collection slug", kind: FieldKind::Mono },
         FieldSpec { key: "slug", label: "Slug", placeholder: "from the title", kind: FieldKind::Mono },
         FieldSpec { key: "tags", label: "Tags", placeholder: "comma, separated", kind: FieldKind::Tags },
-        FieldSpec { key: "excerpt", label: "Excerpt", placeholder: "a line for lists and feeds", kind: FieldKind::Text },
+        FieldSpec {
+            key: "excerpt",
+            label: "Excerpt",
+            placeholder: "a line for lists and feeds",
+            kind: FieldKind::Text,
+        },
     ]
 }
 
@@ -105,7 +112,11 @@ impl ContentWs {
     }
 
     fn draft_area(&self) -> &'static str {
-        if self.mode == Mode::Entries { "content" } else { "content-series" }
+        if self.mode == Mode::Entries {
+            "content"
+        } else {
+            "content-series"
+        }
     }
 
     fn load_drafts(&mut self, cx: &mut Context<Self>) {
@@ -150,9 +161,9 @@ impl ContentWs {
         cx.notify();
         let task = farfield_core::spawn(async move {
             match mode {
-                Mode::Entries => content::entries(&s, col.as_deref(), status, page, PAGE)
-                    .await
-                    .map(|l| (l.value.items.into_iter().map(Row::Entry).collect::<Vec<_>>(), l.value.has_more, l.freshness)),
+                Mode::Entries => content::entries(&s, col.as_deref(), status, page, PAGE).await.map(|l| {
+                    (l.value.items.into_iter().map(Row::Entry).collect::<Vec<_>>(), l.value.has_more, l.freshness)
+                }),
                 Mode::Series => content::series_list(&s)
                     .await
                     .map(|l| (l.value.into_iter().map(Row::Series).collect::<Vec<_>>(), false, l.freshness)),
@@ -214,7 +225,9 @@ impl ContentWs {
 
     fn rows(&self, cx: &App) -> Vec<Row> {
         let q = self.search.read(cx).text().to_lowercase();
-        let hit = |title: &str, slug: &str| q.is_empty() || title.to_lowercase().contains(&q) || slug.to_lowercase().contains(&q);
+        let hit = |title: &str, slug: &str| {
+            q.is_empty() || title.to_lowercase().contains(&q) || slug.to_lowercase().contains(&q)
+        };
         let mut out: Vec<Row> = self
             .drafts
             .iter()
@@ -225,10 +238,18 @@ impl ContentWs {
         let draft_keys: std::collections::HashSet<&str> = self.drafts.iter().map(|d| d.key.as_str()).collect();
         match self.mode {
             Mode::Entries => out.extend(
-                self.entries.iter().filter(|e| !draft_keys.contains(e.slug.as_str()) && hit(&e.title, &e.slug)).cloned().map(Row::Entry),
+                self.entries
+                    .iter()
+                    .filter(|e| !draft_keys.contains(e.slug.as_str()) && hit(&e.title, &e.slug))
+                    .cloned()
+                    .map(Row::Entry),
             ),
             Mode::Series => out.extend(
-                self.series.iter().filter(|s| !draft_keys.contains(s.slug.as_str()) && hit(&s.title, &s.slug)).cloned().map(Row::Series),
+                self.series
+                    .iter()
+                    .filter(|s| !draft_keys.contains(s.slug.as_str()) && hit(&s.title, &s.slug))
+                    .cloned()
+                    .map(Row::Series),
             ),
         }
         out
@@ -274,11 +295,14 @@ impl ContentWs {
     fn open_draft(&mut self, d: Draft, w: &mut Window, cx: &mut Context<Self>) {
         let key = d.key.clone();
         let open = if d.service == "content-series" {
-            let doc = cx.new(|cx| DraftDoc::<ContentSeries>::new(d, Some("title"), vec![], "Images, one per line: ![](blob://…)", w, cx));
+            let doc = cx.new(|cx| {
+                DraftDoc::<ContentSeries>::new(d, Some("title"), vec![], "Images, one per line: ![](blob://…)", w, cx)
+            });
             self.watch(&doc, cx);
             Open::Series(doc)
         } else {
-            let doc = cx.new(|cx| DraftDoc::<ContentEntry>::new(d, Some("title"), entry_specs(), "Write something…", w, cx));
+            let doc =
+                cx.new(|cx| DraftDoc::<ContentEntry>::new(d, Some("title"), entry_specs(), "Write something…", w, cx));
             self.watch(&doc, cx);
             Open::Entry(doc)
         };
@@ -304,7 +328,6 @@ impl ContentWs {
                 this.page = 1;
                 this.load(false, cx);
             }
-            DraftEvent::Closed => {}
             DraftEvent::Touched => {
                 this.load_drafts(cx);
             }
@@ -315,7 +338,11 @@ impl ContentWs {
     fn new_entry(&mut self, w: &mut Window, cx: &mut Context<Self>) {
         let local = match self.mode {
             Mode::Entries => {
-                let col = self.collection.clone().or_else(|| self.collections.first().map(|c| c.slug.clone())).unwrap_or_default();
+                let col = self
+                    .collection
+                    .clone()
+                    .or_else(|| self.collections.first().map(|c| c.slug.clone()))
+                    .unwrap_or_default();
                 if col.is_empty() {
                     toast(cx, "Create a collection in the content console first — there's none to write into.", true);
                     return;
@@ -390,9 +417,19 @@ impl ContentWs {
         let doc = doc.clone();
         let title = doc.update(cx, |d, cx| d.current(cx)["title"].as_str().unwrap_or("").to_string());
         let (head, body, act) = if on {
-            ("Publish this entry?", format!("“{title}” goes live on the site's next rebuild. Its slug, CID and first-published date are kept."), "Publish")
+            (
+                "Publish this entry?",
+                format!(
+                    "“{title}” goes live on the site's next rebuild. Its slug, CID and first-published date are kept."
+                ),
+                "Publish",
+            )
         } else {
-            ("Unpublish this entry?", format!("“{title}” returns to drafts. Its publishedAt is kept for when it returns."), "Unpublish")
+            (
+                "Unpublish this entry?",
+                format!("“{title}” returns to drafts. Its publishedAt is kept for when it returns."),
+                "Unpublish",
+            )
         };
         confirm(cx, head, body, act, !on, move |_, cx| {
             log(if on { "publish" } else { "unpublish" }, &[("title", &title)]);
@@ -406,28 +443,45 @@ impl ContentWs {
         let (is_series, base_etag, has_base, title) = match open {
             Open::Entry(d) => {
                 let d = d.read(cx);
-                (false, d.draft.base_etag.clone(), d.draft.base.is_some(), d.draft.local["title"].as_str().unwrap_or("").to_string())
+                (
+                    false,
+                    d.draft.base_etag.clone(),
+                    d.draft.base.is_some(),
+                    d.draft.local["title"].as_str().unwrap_or("").to_string(),
+                )
             }
             Open::Series(d) => {
                 let d = d.read(cx);
-                (true, d.draft.base_etag.clone(), d.draft.base.is_some(), d.draft.local["title"].as_str().unwrap_or("").to_string())
+                (
+                    true,
+                    d.draft.base_etag.clone(),
+                    d.draft.base.is_some(),
+                    d.draft.local["title"].as_str().unwrap_or("").to_string(),
+                )
             }
         };
         let ent = cx.entity();
         let area = if is_series { "content-series" } else { "content" };
         if !has_base {
-            confirm(cx, "Discard this draft?", "It was never saved to the server; this removes it from this Mac.", "Discard", true, move |_, cx| {
-                let s = app::session(cx);
-                if let Ok(d) = s.drafts(area) {
-                    let _ = d.discard(area, &key);
-                }
-                ent.update(cx, |this, cx| {
-                    this.open.remove(&key);
-                    this.selected = None;
-                    this.load_drafts(cx);
-                    cx.notify();
-                });
-            });
+            confirm(
+                cx,
+                "Discard this draft?",
+                "It was never saved to the server; this removes it from this Mac.",
+                "Discard",
+                true,
+                move |_, cx| {
+                    let s = app::session(cx);
+                    if let Ok(d) = s.drafts(area) {
+                        let _ = d.discard(area, &key);
+                    }
+                    ent.update(cx, |this, cx| {
+                        this.open.remove(&key);
+                        this.selected = None;
+                        this.load_drafts(cx);
+                        cx.notify();
+                    });
+                },
+            );
             return;
         }
         let body = if is_series {
@@ -435,17 +489,23 @@ impl ContentWs {
         } else {
             format!("“{title}” moves to the server's trash (kept 30 days, restorable from the content console).")
         };
-        confirm(cx, if is_series { "Delete this series?" } else { "Delete this entry?" }, body, "Delete", true, move |_, cx| {
-            let s = app::session(cx);
-            let k = key.clone();
-            let task = farfield_core::spawn(async move {
-                if is_series {
-                    content::delete_series(&s, &k, base_etag.as_deref()).await
-                } else {
-                    content::delete(&s, &k, base_etag.as_deref()).await
-                }
-            });
-            ent.update(cx, |_, cx| {
+        confirm(
+            cx,
+            if is_series { "Delete this series?" } else { "Delete this entry?" },
+            body,
+            "Delete",
+            true,
+            move |_, cx| {
+                let s = app::session(cx);
+                let k = key.clone();
+                let task = farfield_core::spawn(async move {
+                    if is_series {
+                        content::delete_series(&s, &k, base_etag.as_deref()).await
+                    } else {
+                        content::delete(&s, &k, base_etag.as_deref()).await
+                    }
+                });
+                ent.update(cx, |_, cx| {
                 cx.spawn(async move |this, cx| {
                     let r = task.await;
                     let _ = this.update(cx, |this, cx| match r {
@@ -470,7 +530,8 @@ impl ContentWs {
                 })
                 .detach();
             });
-        });
+            },
+        );
     }
 
     fn set_mode(&mut self, m: Mode, cx: &mut Context<Self>) {
@@ -499,8 +560,14 @@ impl ContentWs {
             div()
                 .flex()
                 .gap(S2)
-                .child(tab("m-entries", "Entries", self.mode == Mode::Entries).on_click(cx.listener(|this, _, _, cx| this.set_mode(Mode::Entries, cx))))
-                .child(tab("m-series", "Series", self.mode == Mode::Series).on_click(cx.listener(|this, _, _, cx| this.set_mode(Mode::Series, cx))))
+                .child(
+                    tab("m-entries", "Entries", self.mode == Mode::Entries)
+                        .on_click(cx.listener(|this, _, _, cx| this.set_mode(Mode::Entries, cx))),
+                )
+                .child(
+                    tab("m-series", "Series", self.mode == Mode::Series)
+                        .on_click(cx.listener(|this, _, _, cx| this.set_mode(Mode::Series, cx))),
+                )
                 .child(div().flex_1())
                 .child(ui::button("new", "New  ⌘N", BtnKind::Quiet, cx, {
                     let e = cx.entity();
@@ -521,10 +588,12 @@ impl ContentWs {
                         this.status = Status::Drafts;
                         this.reload(cx)
                     })))
-                    .child(tab("s-pub", "Published", st == Status::Published).on_click(cx.listener(|this, _, _, cx| {
-                        this.status = Status::Published;
-                        this.reload(cx)
-                    }))),
+                    .child(tab("s-pub", "Published", st == Status::Published).on_click(cx.listener(
+                        |this, _, _, cx| {
+                            this.status = Status::Published;
+                            this.reload(cx)
+                        },
+                    ))),
             );
             let cols = self.collections.clone();
             let cur = self.collection.clone();
@@ -597,7 +666,11 @@ impl ContentWs {
                             Row::Draft(d) => (
                                 d.key.clone(),
                                 d.local["title"].as_str().filter(|s| !s.is_empty()).unwrap_or("Untitled").to_string(),
-                                if d.base.is_none() { "new · on this Mac".to_string() } else { format!("{} · on this Mac", d.key) },
+                                if d.base.is_none() {
+                                    "new · on this Mac".to_string()
+                                } else {
+                                    format!("{} · on this Mac", d.key)
+                                },
                                 Some((
                                     match d.state {
                                         SaveState::Conflict => "conflict",
@@ -610,7 +683,11 @@ impl ContentWs {
                             Row::Entry(e) => (
                                 e.slug.clone(),
                                 if e.title.is_empty() { "Untitled".into() } else { e.title.clone() },
-                                format!("{} · {}", e.collection, ui::when(if e.published_at.is_empty() { &e.updated_at } else { &e.published_at })),
+                                format!(
+                                    "{} · {}",
+                                    e.collection,
+                                    ui::when(if e.published_at.is_empty() { &e.updated_at } else { &e.published_at })
+                                ),
                                 Some(if e.published { ("published", t.good) } else { ("draft", t.ink_3) }),
                             ),
                             Row::Series(s) => (
@@ -657,7 +734,11 @@ impl ContentWs {
             .child(self.render_filters(cx))
             .when_some(status_line, |d, s| d.child(div().px(S4).py(S2).child(s)))
             .child(if n == 0 && !self.loading && self.error.is_none() {
-                ui::quiet_state(if self.mode == Mode::Entries { "No entries here yet. ⌘N starts one." } else { "No series yet." }, cx).into_any_element()
+                ui::quiet_state(
+                    if self.mode == Mode::Entries { "No entries here yet. ⌘N starts one." } else { "No series yet." },
+                    cx,
+                )
+                .into_any_element()
             } else {
                 list.into_any_element()
             })
@@ -709,11 +790,17 @@ impl Workspace for ContentWs {
                         .flex()
                         .gap(S2)
                         .child(if published {
-                            ui::button("unpublish", "Unpublish…", BtnKind::Quiet, cx, move |_, _, cx| e.update(cx, |this, cx| this.publish(false, cx)))
+                            ui::button("unpublish", "Unpublish…", BtnKind::Quiet, cx, move |_, _, cx| {
+                                e.update(cx, |this, cx| this.publish(false, cx))
+                            })
                         } else {
-                            ui::button("publish", "Publish…", BtnKind::Primary, cx, move |_, _, cx| e.update(cx, |this, cx| this.publish(true, cx)))
+                            ui::button("publish", "Publish…", BtnKind::Primary, cx, move |_, _, cx| {
+                                e.update(cx, |this, cx| this.publish(true, cx))
+                            })
                         })
-                        .child(ui::button("delete", "Delete…", BtnKind::Danger, cx, move |_, _, cx| e2.update(cx, |this, cx| this.delete(cx)))),
+                        .child(ui::button("delete", "Delete…", BtnKind::Danger, cx, move |_, _, cx| {
+                            e2.update(cx, |this, cx| this.delete(cx))
+                        })),
                 );
                 if !cid.is_empty() {
                     col = col.child(ui::field_row("CID", ui::mono(cid, cx), cx));
@@ -731,7 +818,10 @@ impl Workspace for ContentWs {
                 let slug = doc.read(cx).draft.key.clone();
                 col = col.child(ui::field_row("Embed in an entry", ui::mono(format!("![](series://{slug})"), cx), cx));
                 let e = cx.entity();
-                col = col.child(ui::button("delete-series", "Delete series…", BtnKind::Danger, cx, move |_, _, cx| e.update(cx, |this, cx| this.delete(cx))));
+                col =
+                    col.child(ui::button("delete-series", "Delete series…", BtnKind::Danger, cx, move |_, _, cx| {
+                        e.update(cx, |this, cx| this.delete(cx))
+                    }));
             }
         }
         Some(col.into_any_element())
@@ -746,6 +836,70 @@ impl Workspace for ContentWs {
 
     fn focus_search(&mut self, w: &mut Window, cx: &mut Context<Self>) {
         self.search.read(cx).focus(w);
+    }
+    fn commands(&self, cx: &App) -> Vec<(&'static str, String, &'static str)> {
+        let Some(k) = &self.selected else { return vec![] };
+        match self.open.get(k) {
+            Some(Open::Entry(d)) if d.read(cx).draft.state == SaveState::Conflict => vec![
+                ("merge", "Conflict: merge both versions for review".into(), ""),
+                ("keepmine", "Conflict: keep mine (overwrite server)".into(), ""),
+                ("theirs", "Conflict: take the server's version".into(), ""),
+            ],
+            Some(Open::Entry(d)) => {
+                let published = d.read(cx).draft.local["published"].as_bool().unwrap_or(false);
+                vec![
+                    ("save", "Content: save to server".into(), "⌘S"),
+                    if published {
+                        ("unpublish", "Content: unpublish this entry".into(), "")
+                    } else {
+                        ("publish", "Content: publish this entry".into(), "")
+                    },
+                    ("insert", "Content: insert file…".into(), ""),
+                    ("delete", "Content: delete this entry".into(), ""),
+                ]
+            }
+            Some(Open::Series(_)) => {
+                vec![("save", "Series: save to server".into(), "⌘S"), ("delete", "Series: delete".into(), "")]
+            }
+            None => vec![],
+        }
+    }
+    fn run_command(&mut self, id: &str, w: &mut Window, cx: &mut Context<Self>) {
+        match id {
+            "save" => Workspace::save(self, w, cx),
+            "publish" => self.publish(true, cx),
+            "unpublish" => self.publish(false, cx),
+            "delete" => self.delete(cx),
+            "merge" | "keepmine" | "theirs" => {
+                use farfield_core::sync::Resolution;
+                let how = match id {
+                    "merge" => Resolution::Merge,
+                    "keepmine" => Resolution::KeepMine,
+                    _ => Resolution::TakeTheirs,
+                };
+                if let Some(Open::Entry(d)) = self.selected.as_ref().and_then(|k| self.open.get(k)) {
+                    let d = d.clone();
+                    if how == Resolution::KeepMine {
+                        confirm(
+                            cx,
+                            "Overwrite the server's version?",
+                            "The server's changes are replaced by yours.",
+                            "Overwrite",
+                            true,
+                            move |_, cx| d.update(cx, |d, cx| d.resolve(how, cx)),
+                        );
+                    } else {
+                        d.update(cx, |d, cx| d.resolve(how, cx));
+                    }
+                }
+            }
+            "insert" => {
+                if let Some(Open::Entry(d)) = self.selected.as_ref().and_then(|k| self.open.get(k)) {
+                    d.clone().update(cx, |d, cx| d.pick_and_upload(w, cx));
+                }
+            }
+            _ => {}
+        }
     }
     fn new_item(&mut self, w: &mut Window, cx: &mut Context<Self>) {
         self.new_entry(w, cx)

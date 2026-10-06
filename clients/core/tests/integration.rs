@@ -62,7 +62,10 @@ fn auth_and_visibility() {
         let p = content::entries(&reader, None, content::Status::Published, 1, 50).await.unwrap();
         assert!(p.value.items.iter().any(|e| e.slug == public.value.slug));
         assert!(!p.value.items.iter().any(|e| e.slug == draft.value.slug));
-        assert!(matches!(content::entries(&reader, None, content::Status::Drafts, 1, 50).await, Err(ApiError::Forbidden(_))));
+        assert!(matches!(
+            content::entries(&reader, None, content::Status::Drafts, 1, 50).await,
+            Err(ApiError::Forbidden(_))
+        ));
         assert_eq!(content::entry(&reader, &draft.value.slug).await.unwrap_err(), ApiError::NotFound);
 
         // write key sees drafts
@@ -141,7 +144,11 @@ fn outage_serves_stale_and_says_so() {
     f.stop("feed");
     block(async {
         let stale = feed::posts(&s, None, 10).await.unwrap();
-        assert!(matches!(stale.freshness, Freshness::Stale { error: ApiError::Offline(_), .. }), "{:?}", stale.freshness);
+        assert!(
+            matches!(stale.freshness, Freshness::Stale { error: ApiError::Offline(_), .. }),
+            "{:?}",
+            stale.freshness
+        );
         assert_eq!(stale.value.0.len(), 1);
         // a write during the outage fails as offline, never as "saved"
         let e = feed::create(&s, "during", &[]).await.unwrap_err();
@@ -195,7 +202,10 @@ fn blob_upload_progress_cancel_and_media_post() {
         assert!(p.sent() < 24 << 20);
 
         // feed media post through the shared multipart path
-        let post = feed::create_with_media(&s, "a photo", &["pics".into()], &[png.clone()], &Progress::new(0)).await.unwrap();
+        let post =
+            feed::create_with_media(&s, "a photo", &["pics".into()], std::slice::from_ref(&png), &Progress::new(0))
+                .await
+                .unwrap();
         assert!(post.value.body.contains(&format!("blob://{}", m.value.cid)), "{}", post.value.body);
         feed::delete(&s, &post.value.slug, true, None).await.unwrap();
     });
@@ -243,4 +253,147 @@ const PNG_1X1: &[u8] = &[
 #[allow(dead_code)]
 fn unused() {
     let _ = key("x");
+}
+
+#[test]
+fn conditional_writes_conflict_and_resolution() {
+    let f = Fleet::start(&["content"]);
+    make_collection(&f, "notes");
+    let a = f.admin();
+    let b = f.admin(); // a second Mac
+    block(async {
+        let created = content::create(&a, &entry("Shared", "line one\nline two\n", false)).await.unwrap();
+        let slug = created.value.slug.clone();
+
+        // both open the same version
+        let mut da = sync::open::<ContentEntry>(&a, &slug).await.unwrap();
+        let mut db = sync::open::<ContentEntry>(&b, &slug).await.unwrap();
+        assert_eq!(da.base_etag, db.base_etag);
+        assert!(da.base_etag.is_some(), "GET must carry an ETag");
+
+        // B saves first
+        let mut lb = db.local.clone();
+        lb["body"] = json!("line one\nline two\nB's ending\n");
+        sync::edit(&b, &mut db, lb).unwrap();
+        assert_eq!(sync::save::<ContentEntry>(&b, &mut db).await.unwrap(), SaveOutcome::Saved);
+
+        // A's save against the old version is refused, never overwrites
+        let mut la = da.local.clone();
+        la["body"] = json!("A's opening\nline one\nline two\n![](blob://bafkreiuploadedbya)\n");
+        la["title"] = json!("Shared (A)");
+        sync::edit(&a, &mut da, la).unwrap();
+        assert_eq!(sync::save::<ContentEntry>(&a, &mut da).await.unwrap(), SaveOutcome::Conflict);
+        assert_eq!(da.state, SaveState::Conflict);
+        assert!(da.remote.as_ref().unwrap()["body"].as_str().unwrap().contains("B's ending"));
+        // the conflict survives a relaunch
+        let reloaded = a.drafts("content").unwrap().load("content", &slug).unwrap();
+        assert_eq!(reloaded.state, SaveState::Conflict);
+
+        // merge: both edits, the upload kept, title from A
+        assert!(matches!(
+            sync::resolve::<ContentEntry>(&a, &mut da, Resolution::Merge).await.unwrap(),
+            SaveOutcome::NotSaved(_)
+        ));
+        let body = da.local["body"].as_str().unwrap().to_string();
+        assert!(
+            body.contains("A's opening") && body.contains("B's ending") && body.contains("blob://bafkreiuploadedbya"),
+            "{body}"
+        );
+        assert_eq!(da.local["title"], "Shared (A)");
+        assert_eq!(sync::save::<ContentEntry>(&a, &mut da).await.unwrap(), SaveOutcome::Saved);
+
+        let server = content::entry(&a, &slug).await.unwrap().value;
+        assert_eq!(server.body, body);
+        // publishedAt / slug / createdAt preserved through full-replace PUTs
+        assert_eq!(server.slug, slug);
+        assert!(!server.published);
+
+        // delete with a stale version is refused too
+        let stale = db.base_etag.clone();
+        let e = content::delete(&b, &slug, stale.as_deref()).await.unwrap_err();
+        assert!(matches!(e, ApiError::Precondition { .. }), "{e:?}");
+    });
+}
+
+#[test]
+fn publish_preserves_slug_cid_and_published_at() {
+    let f = Fleet::start(&["content"]);
+    make_collection(&f, "notes");
+    let s = f.admin();
+    block(async {
+        let c = content::create(&s, &entry("Pub", "x", false)).await.unwrap();
+        let mut d = sync::open::<ContentEntry>(&s, &c.value.slug).await.unwrap();
+        let mut l = d.local.clone();
+        l["published"] = json!(true);
+        sync::edit(&s, &mut d, l).unwrap();
+        assert_eq!(sync::save::<ContentEntry>(&s, &mut d).await.unwrap(), SaveOutcome::Saved);
+        let first = d.local["publishedAt"].as_str().unwrap().to_string();
+        assert!(!first.is_empty());
+        // unpublish keeps publishedAt; republish keeps the first date
+        for on in [false, true] {
+            let mut l = d.local.clone();
+            l["published"] = json!(on);
+            sync::edit(&s, &mut d, l).unwrap();
+            assert_eq!(sync::save::<ContentEntry>(&s, &mut d).await.unwrap(), SaveOutcome::Saved);
+            assert_eq!(d.local["publishedAt"].as_str().unwrap(), first);
+            assert_eq!(d.local["slug"].as_str().unwrap(), c.value.slug);
+        }
+    });
+}
+
+#[test]
+fn uncertain_save_is_reconciled_not_resent() {
+    let f = Fleet::start(&["content"]);
+    make_collection(&f, "notes");
+    let s = f.admin();
+    block(async {
+        let c = content::create(&s, &entry("Unc", "v1", false)).await.unwrap();
+        let mut d = sync::open::<ContentEntry>(&s, &c.value.slug).await.unwrap();
+        let mut l = d.local.clone();
+        l["body"] = json!("v2");
+        sync::edit(&s, &mut d, l).unwrap();
+        // simulate: the PUT landed but its answer was lost
+        content::update(&s, &c.value.slug, &serde_json::from_value(d.local.clone()).unwrap(), d.base_etag.as_deref())
+            .await
+            .unwrap();
+        d.state = SaveState::Pending;
+        assert_eq!(sync::save::<ContentEntry>(&s, &mut d).await.unwrap(), SaveOutcome::Saved);
+        assert_eq!(d.state, SaveState::Saved);
+
+        // and a pending create whose answer was lost is found, not duplicated
+        let mut n =
+            sync::new_draft("content", serde_json::to_value(entry("Lost reply", "unique body 7f3", false)).unwrap());
+        let created = content::create(&s, &serde_json::from_value(n.local.clone()).unwrap()).await.unwrap();
+        n.state = SaveState::Pending;
+        assert_eq!(sync::save::<ContentEntry>(&s, &mut n).await.unwrap(), SaveOutcome::Saved);
+        assert_eq!(n.key, created.value.slug);
+        let all = content::entries(&s, Some("notes"), content::Status::All, 1, 100).await.unwrap();
+        assert_eq!(all.value.items.iter().filter(|e| e.title == "Lost reply").count(), 1);
+    });
+}
+
+#[test]
+fn private_routes_refuse_tunnel_ingress_and_weak_keys() {
+    let f = Fleet::start(&["bookmarks", "qr", "scrap", "switchboard"]);
+    let http = reqwest::blocking::Client::builder().redirect(reqwest::redirect::Policy::none()).build().unwrap();
+    for (app, path) in [
+        ("bookmarks", "/api/admin/bookmarks"),
+        ("qr", "/api/admin/codes"),
+        ("scrap", "/api/admin/pastes"),
+        ("switchboard", "/api/admin/messages"),
+    ] {
+        let url = format!("{}{path}", f.url(app));
+        let ok = http.get(&url).header("X-API-Key", key(app)).send().unwrap();
+        assert_eq!(ok.status(), 200, "{app}");
+        assert_eq!(ok.headers()["cache-control"], "no-store");
+        for h in ["Cf-Ray", "Cf-Connecting-IP"] {
+            let r = http.get(&url).header("X-API-Key", key(app)).header(h, "1.2.3.4").send().unwrap();
+            assert_eq!(r.status(), 404, "{app} with {h}");
+        }
+        assert_eq!(http.get(&url).send().unwrap().status(), 401, "{app} no key");
+        if !matches!(app, "scrap" | "switchboard") {
+            let r = http.get(&url).header("X-API-Key", read_key(app)).send().unwrap();
+            assert_eq!(r.status(), 401, "{app} read key on admin");
+        }
+    }
 }

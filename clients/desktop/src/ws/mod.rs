@@ -9,6 +9,7 @@ pub mod daily;
 pub mod feed;
 pub mod keys;
 pub mod library;
+pub mod onboarding;
 pub mod pulse;
 pub mod qr;
 pub mod scrap;

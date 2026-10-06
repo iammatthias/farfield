@@ -62,7 +62,8 @@ const CHUNK: usize = 256 * 1024;
 /// A request body streaming `len` bytes of `path` from `offset`, counting
 /// into `progress` and stopping when it is cancelled.
 pub async fn file_body(path: &Path, offset: u64, len: u64, progress: Progress) -> Result<reqwest::Body, ApiError> {
-    let mut f = tokio::fs::File::open(path).await.map_err(|e| ApiError::BadRequest(format!("open {}: {e}", path.display())))?;
+    let mut f =
+        tokio::fs::File::open(path).await.map_err(|e| ApiError::BadRequest(format!("open {}: {e}", path.display())))?;
     if offset > 0 {
         use tokio::io::AsyncSeekExt;
         f.seek(std::io::SeekFrom::Start(offset)).await.map_err(|e| ApiError::BadRequest(e.to_string()))?;
@@ -161,7 +162,8 @@ impl TusState {
         Ok(TusState { modified_ms: modified_ms(&file), file, size, location: None, collection: collection.into() })
     }
     pub fn file_unchanged(&self) -> bool {
-        std::fs::metadata(&self.file).map(|m| m.len()).ok() == Some(self.size) && modified_ms(&self.file) == self.modified_ms
+        std::fs::metadata(&self.file).map(|m| m.len()).ok() == Some(self.size)
+            && modified_ms(&self.file) == self.modified_ms
     }
 }
 
@@ -177,8 +179,21 @@ pub async fn tus_upload(
     c: &ServiceClient,
     state: &mut TusState,
     progress: &Progress,
+    persist: impl FnMut(&TusState),
+) -> Result<TusOutcome, ApiError> {
+    tus_upload_with(c, state, progress, TUS_CHUNK, persist).await
+}
+
+/// [`tus_upload`] with an explicit chunk size (tests use small chunks to
+/// interrupt an upload part-way through).
+pub async fn tus_upload_with(
+    c: &ServiceClient,
+    state: &mut TusState,
+    progress: &Progress,
+    chunk: u64,
     mut persist: impl FnMut(&TusState),
 ) -> Result<TusOutcome, ApiError> {
+    let chunk = chunk.max(1);
     if !state.file_unchanged() {
         state.location = None;
         state.size = std::fs::metadata(&state.file).map_err(|e| ApiError::BadRequest(e.to_string()))?.len();
@@ -212,7 +227,8 @@ pub async fn tus_upload(
         let r = c.send(rb, true).await?;
         let loc = header_str(&r, "Location").ok_or_else(|| ApiError::Decode("tus: no Location".into()))?;
         // the server answers a relative path; keep only a path on our origin
-        let loc = if loc.starts_with('/') { loc } else { url::Url::parse(&loc).map(|u| u.path().to_string()).unwrap_or(loc) };
+        let loc =
+            if loc.starts_with('/') { loc } else { url::Url::parse(&loc).map(|u| u.path().to_string()).unwrap_or(loc) };
         state.location = Some(loc);
         persist(state);
         offset = 0;
@@ -224,7 +240,7 @@ pub async fn tus_upload(
         if progress.is_cancelled() {
             return Err(ApiError::Cancelled);
         }
-        let n = TUS_CHUNK.min(state.size - offset);
+        let n = chunk.min(state.size - offset);
         let body = file_body(&state.file, offset, n, progress.clone()).await?;
         let rb = c
             .request(Method::PATCH, &loc)?
@@ -257,10 +273,16 @@ pub async fn tus_upload(
 
     // the server ingests in the background: poll until done
     for _ in 0..240 {
+        // stopping the wait does not stop the ingest; the persisted state
+        // finds the result (HEAD) next time
+        if progress.is_cancelled() {
+            return Err(ApiError::Cancelled);
+        }
         let r = c.send(c.request(Method::HEAD, &loc)?.header("Tus-Resumable", "1.0.0"), false).await?;
         match header_str(&r, "X-Library-Status").as_deref() {
             Some("done") => {
-                let cid = header_str(&r, "X-Library-Cid").ok_or_else(|| ApiError::Decode("tus: done without a cid".into()))?;
+                let cid = header_str(&r, "X-Library-Cid")
+                    .ok_or_else(|| ApiError::Decode("tus: done without a cid".into()))?;
                 return Ok(TusOutcome::Done { cid });
             }
             Some("error") => return Ok(TusOutcome::Failed(header_str(&r, "X-Library-Error").unwrap_or_default())),

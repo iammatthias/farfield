@@ -147,7 +147,19 @@ pub struct Editor {
 fn runtime() -> &'static Runtime {
     use std::sync::OnceLock;
     static RT: OnceLock<Runtime> = OnceLock::new();
-    RT.get_or_init(Runtime::default)
+    RT.get_or_init(|| {
+        // iOS forbids JIT: there the module is compiled to Pulley bytecode and
+        // interpreted. FARFIELD_EDITOR_PULLEY=1 forces the same path anywhere,
+        // so the parity suite can prove it on a Mac.
+        let pulley = cfg!(target_os = "ios") || std::env::var("FARFIELD_EDITOR_PULLEY").is_ok_and(|v| v == "1");
+        if pulley {
+            let mut c = wasmtime::Config::new();
+            c.target("pulley64").expect("pulley target");
+            Runtime::new(&c).expect("pulley runtime")
+        } else {
+            Runtime::default()
+        }
+    })
 }
 
 fn module() -> Result<&'static Module> {
@@ -164,9 +176,7 @@ impl Editor {
     pub fn new() -> Result<Self> {
         let mut store = Store::new(runtime(), ());
         let instance = Instance::new(&mut store, module()?, &[]).map_err(|e| anyhow!("editor: instantiate: {e}"))?;
-        let memory = instance
-            .get_memory(&mut store, "memory")
-            .ok_or_else(|| anyhow!("editor: no memory export"))?;
+        let memory = instance.get_memory(&mut store, "memory").ok_or_else(|| anyhow!("editor: no memory export"))?;
         let mut e = Editor { store, instance, memory, fns: HashMap::new(), w: 0, h: 0 };
         e.call("init", &[])?;
         for (slot, font) in assets::FONTS.iter().enumerate() {
@@ -189,10 +199,7 @@ impl Editor {
         if let Some(f) = self.fns.get(name) {
             return Ok(*f);
         }
-        let f = self
-            .instance
-            .get_func(&mut self.store, name)
-            .ok_or_else(|| anyhow!("editor: no export {name}"))?;
+        let f = self.instance.get_func(&mut self.store, name).ok_or_else(|| anyhow!("editor: no export {name}"))?;
         self.fns.insert(name, f);
         Ok(f)
     }
@@ -203,8 +210,7 @@ impl Editor {
         let params: Vec<Val> = args.iter().map(|a| Val::I32(*a)).collect();
         let n = f.ty(&self.store).results().len();
         let mut out = vec![Val::I32(0); n];
-        f.call(&mut self.store, &params, &mut out)
-            .map_err(|e| anyhow!("editor: {name}: {e}"))?;
+        f.call(&mut self.store, &params, &mut out).map_err(|e| anyhow!("editor: {name}: {e}"))?;
         Ok(out.first().and_then(|v| v.i32()).unwrap_or(0))
     }
 
@@ -273,7 +279,7 @@ impl Editor {
         let src = data.get(p..p + n).ok_or_else(|| anyhow!("editor: framebuffer out of bounds"))?;
         dst.clear();
         dst.extend_from_slice(src);
-        for px in dst.chunks_exact_mut(4) {
+        for px in dst.as_chunks_mut::<4>().0 {
             px.swap(0, 2);
         }
         Ok(())
@@ -313,7 +319,7 @@ impl Editor {
             while !rest.is_char_boundary(cut) {
                 cut -= 1;
             }
-            let n = self.put(rest[..cut].as_bytes())?;
+            let n = self.put(&rest.as_bytes()[..cut])?;
             self.call("insert_text", &[n])?;
             rest = &rest[cut..];
         }

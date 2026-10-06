@@ -41,11 +41,7 @@ fn private_dir(p: &Path) -> std::io::Result<()> {
 pub fn write_atomic(path: &Path, bytes: &[u8]) -> std::io::Result<()> {
     let dir = path.parent().expect("path has a parent");
     private_dir(dir)?;
-    let tmp = dir.join(format!(
-        ".{}.{}.tmp",
-        path.file_name().unwrap().to_string_lossy(),
-        std::process::id()
-    ));
+    let tmp = dir.join(format!(".{}.{}.tmp", path.file_name().unwrap().to_string_lossy(), std::process::id()));
     {
         let mut f = fs::OpenOptions::new().write(true).create(true).truncate(true).open(&tmp)?;
         #[cfg(unix)]
@@ -103,8 +99,11 @@ pub struct CacheEntry {
 
 /// A bounded response cache: a small in-memory LRU in front of per-identity
 /// files, with total disk size capped (oldest evicted first).
+/// Entries by path with their last-use tick, and the tick counter.
+type MemCache = (HashMap<PathBuf, (u64, CacheEntry)>, u64);
+
 pub struct Cache {
-    mem: Mutex<(HashMap<PathBuf, (u64, CacheEntry)>, u64)>,
+    mem: Mutex<MemCache>,
     mem_cap: usize,
     disk_cap: u64,
 }
@@ -316,10 +315,16 @@ mod tests {
         let cache = Cache::new(4, 2_000);
         let s = Scope::new(dir.path(), "p", "i");
         for i in 0..50 {
-            cache.put(&s, "x", &format!("k{i}"), CacheEntry { etag: None, fetched_ms: i, body: json!("y".repeat(100)) });
+            cache.put(
+                &s,
+                "x",
+                &format!("k{i}"),
+                CacheEntry { etag: None, fetched_ms: i, body: json!("y".repeat(100)) },
+            );
         }
         assert!(cache.mem.lock().0.len() <= 4);
-        let total: u64 = fs::read_dir(s.root().join("cache/x")).unwrap().flatten().map(|f| f.metadata().unwrap().len()).sum();
+        let total: u64 =
+            fs::read_dir(s.root().join("cache/x")).unwrap().flatten().map(|f| f.metadata().unwrap().len()).sum();
         assert!(total <= 2_000, "disk {total}");
     }
 
@@ -352,8 +357,11 @@ mod tests {
             assert_eq!(fs::metadata(f.parent().unwrap()).unwrap().permissions().mode() & 0o777, 0o700);
         }
         // no temp files left behind
-        let leftovers: Vec<_> = fs::read_dir(s.root().join("drafts/content")).unwrap().flatten()
-            .filter(|f| f.file_name().to_string_lossy().ends_with(".tmp")).collect();
+        let leftovers: Vec<_> = fs::read_dir(s.root().join("drafts/content"))
+            .unwrap()
+            .flatten()
+            .filter(|f| f.file_name().to_string_lossy().ends_with(".tmp"))
+            .collect();
         assert!(leftovers.is_empty());
     }
 }

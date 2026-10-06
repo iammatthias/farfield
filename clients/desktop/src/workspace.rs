@@ -14,7 +14,11 @@ pub struct PaletteItem {
 }
 
 impl PaletteItem {
-    pub fn new(title: impl Into<SharedString>, subtitle: impl Into<SharedString>, run: impl Fn(&mut Window, &mut App) + 'static) -> Self {
+    pub fn new(
+        title: impl Into<SharedString>,
+        subtitle: impl Into<SharedString>,
+        run: impl Fn(&mut Window, &mut App) + 'static,
+    ) -> Self {
         PaletteItem { title: title.into(), subtitle: subtitle.into(), run: Arc::new(run) }
     }
 }
@@ -36,6 +40,12 @@ pub trait Workspace: Render + Sized {
     fn save(&mut self, _w: &mut Window, _cx: &mut Context<Self>) {}
     /// Reload from the server (⌘R).
     fn refresh(&mut self, _w: &mut Window, _cx: &mut Context<Self>) {}
+    /// Commands on the current selection, offered in the palette as
+    /// (id, title, shortcut hint). Run with `run_command`.
+    fn commands(&self, _cx: &App) -> Vec<(&'static str, String, &'static str)> {
+        Vec::new()
+    }
+    fn run_command(&mut self, _id: &str, _w: &mut Window, _cx: &mut Context<Self>) {}
     /// Unsaved local work, for the nav marker and the quit check.
     fn dirty(&self, _cx: &App) -> bool {
         false
@@ -69,7 +79,16 @@ impl Handle {
             title,
             view: e.into(),
             inspector: Box::new(move |w, cx| a.update(cx, |ws, cx| ws.inspector(w, cx))),
-            palette: Box::new(move |cx| b.read(cx).palette(cx)),
+            palette: Box::new(move |cx| {
+                let mut items = b.read(cx).palette(cx);
+                for (id, title, hint) in b.read(cx).commands(cx) {
+                    let e = b.clone();
+                    items.push(PaletteItem::new(title, hint, move |w, cx| {
+                        e.update(cx, |ws, cx| ws.run_command(id, w, cx))
+                    }));
+                }
+                items
+            }),
             focus_search: Box::new(move |w, cx| c.update(cx, |ws, cx| ws.focus_search(w, cx))),
             new_item: Box::new(move |w, cx| d.update(cx, |ws, cx| ws.new_item(w, cx))),
             save: Box::new(move |w, cx| f.update(cx, |ws, cx| ws.save(w, cx))),

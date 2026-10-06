@@ -207,11 +207,7 @@ impl ServiceClient {
     async fn error_from(&self, resp: reqwest::Response) -> ApiError {
         let status = resp.status();
         let etag = resp.headers().get(header::ETAG).and_then(|v| v.to_str().ok()).map(|s| s.to_string());
-        let retry = resp
-            .headers()
-            .get(header::RETRY_AFTER)
-            .and_then(|v| v.to_str().ok())
-            .and_then(|s| s.parse().ok());
+        let retry = resp.headers().get(header::RETRY_AFTER).and_then(|v| v.to_str().ok()).and_then(|s| s.parse().ok());
         if status.is_redirection() {
             return ApiError::Unauthorized(self.service.clone());
         }
@@ -260,7 +256,11 @@ impl ServiceClient {
 
     /// GET JSON, revalidating with If-None-Match when a version is known.
     /// Idempotent, so transient failures are retried twice with backoff.
-    pub async fn get_json<T: DeserializeOwned>(&self, path: &str, if_none_match: Option<&str>) -> Result<Fetched<T>, ApiError> {
+    pub async fn get_json<T: DeserializeOwned>(
+        &self,
+        path: &str,
+        if_none_match: Option<&str>,
+    ) -> Result<Fetched<T>, ApiError> {
         let mut delay = Duration::from_millis(250);
         let mut attempt = 0;
         loop {

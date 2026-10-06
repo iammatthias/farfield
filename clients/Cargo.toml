@@ -11,3 +11,9 @@ publish = false
 [profile.release]
 lto = "thin"
 codegen-units = 4
+
+# Dependencies (image decoding, wasmtime, GPUI) are built optimized even in
+# development, so a debug build of the app decodes photos and runs the editor
+# at a usable speed; only this workspace's own crates stay unoptimized.
+[profile.dev.package."*"]
+opt-level = 2

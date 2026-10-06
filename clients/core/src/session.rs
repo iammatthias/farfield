@@ -53,7 +53,11 @@ impl Session {
 
     fn secret_key(&self, service: &str) -> Result<SecretKey, ApiError> {
         let ep = self.profile.endpoint(service).ok_or(ApiError::NotFound)?;
-        Ok(SecretKey { profile: self.profile.id.clone(), service: service.into(), origin: origin(&validate_base(&ep.api)?) })
+        Ok(SecretKey {
+            profile: self.profile.id.clone(),
+            service: service.into(),
+            origin: origin(&validate_base(&ep.api)?),
+        })
     }
 
     /// Store (or replace) the key for a service. It is bound to the
@@ -131,13 +135,19 @@ impl Session {
                 let value = serde_json::from_value(e.body).map_err(|e| ApiError::Decode(e.to_string()))?;
                 Ok(Loaded { value, etag: e.etag, freshness: Freshness::Live })
             }
-            Err(err @ (ApiError::Offline(_) | ApiError::Server { .. } | ApiError::RateLimited { .. })) => match cached {
-                Some(e) => {
-                    let value = serde_json::from_value(e.body).map_err(|e| ApiError::Decode(e.to_string()))?;
-                    Ok(Loaded { value, etag: e.etag, freshness: Freshness::Stale { age_ms: now_ms().saturating_sub(e.fetched_ms), error: err } })
+            Err(err @ (ApiError::Offline(_) | ApiError::Server { .. } | ApiError::RateLimited { .. })) => {
+                match cached {
+                    Some(e) => {
+                        let value = serde_json::from_value(e.body).map_err(|e| ApiError::Decode(e.to_string()))?;
+                        Ok(Loaded {
+                            value,
+                            etag: e.etag,
+                            freshness: Freshness::Stale { age_ms: now_ms().saturating_sub(e.fetched_ms), error: err },
+                        })
+                    }
+                    None => Err(err),
                 }
-                None => Err(err),
-            },
+            }
             Err(e) => {
                 if matches!(e, ApiError::Unauthorized(_) | ApiError::NotFound) {
                     self.cache.forget(&scope, service, path);

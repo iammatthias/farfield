@@ -203,7 +203,13 @@ pub async fn create_series(s: &Session, title: &str, slug: &str, body: &str) -> 
     r
 }
 
-pub async fn update_series(s: &Session, slug: &str, title: &str, body: &str, if_match: Option<&str>) -> Result<Versioned<Series>, ApiError> {
+pub async fn update_series(
+    s: &Session,
+    slug: &str,
+    title: &str,
+    body: &str,
+    if_match: Option<&str>,
+) -> Result<Versioned<Series>, ApiError> {
     let v = serde_json::json!({"title": title, "body": body});
     let path = format!("/api/series/{}", enc(slug));
     let r = s.client(SERVICE)?.send_json(Method::PUT, &path, Some(&v), if_match).await;
@@ -271,7 +277,8 @@ pub fn series_ref(line: &str) -> Option<String> {
         .and_then(|u| u.strip_suffix(')'))
         .unwrap_or(line);
     let slug = inner.strip_prefix("series://")?;
-    (!slug.is_empty() && slug.chars().all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '-')).then(|| slug.to_string())
+    (!slug.is_empty() && slug.chars().all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '-'))
+        .then(|| slug.to_string())
 }
 
 #[cfg(test)]

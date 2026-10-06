@@ -6,10 +6,10 @@
 
 use crate::theme::{theme, FONT_MONO, FONT_UI};
 use gpui::{
-    actions, div, fill, point, prelude::*, px, relative, size, App, Bounds, ClipboardItem, Context, CursorStyle, ElementId,
-    ElementInputHandler, Entity, EntityInputHandler, EventEmitter, FocusHandle, Focusable, GlobalElementId, KeyBinding,
-    LayoutId, MouseButton, MouseDownEvent, MouseMoveEvent, MouseUpEvent, PaintQuad, Pixels, Point, ShapedLine,
-    SharedString, Style, TextRun, UTF16Selection, UnderlineStyle, Window,
+    actions, div, fill, point, prelude::*, px, relative, size, App, Bounds, ClipboardItem, Context, CursorStyle,
+    ElementId, ElementInputHandler, Entity, EntityInputHandler, EventEmitter, FocusHandle, Focusable, GlobalElementId,
+    KeyBinding, LayoutId, MouseButton, MouseDownEvent, MouseMoveEvent, MouseUpEvent, PaintQuad, Pixels, Point,
+    ShapedLine, SharedString, Style, TextRun, UTF16Selection, UnderlineStyle, Window,
 };
 use std::ops::Range;
 use unicode_segmentation::UnicodeSegmentation;
@@ -107,9 +107,15 @@ pub struct TextField {
 impl EventEmitter<FieldEvent> for TextField {}
 
 impl TextField {
-    pub fn new(w: &mut Window, cx: &mut Context<Self>, label: impl Into<SharedString>, placeholder: impl Into<SharedString>) -> Self {
+    pub fn new(
+        w: &mut Window,
+        cx: &mut Context<Self>,
+        label: impl Into<SharedString>,
+        placeholder: impl Into<SharedString>,
+    ) -> Self {
         let focus = cx.focus_handle();
-        cx.on_blur(&focus, w, |_this: &mut Self, _w: &mut Window, cx: &mut Context<Self>| cx.emit(FieldEvent::Blur)).detach();
+        cx.on_blur(&focus, w, |_this: &mut Self, _w: &mut Window, cx: &mut Context<Self>| cx.emit(FieldEvent::Blur))
+            .detach();
         TextField {
             focus,
             content: "".into(),
@@ -379,7 +385,13 @@ impl TextField {
 }
 
 impl EntityInputHandler for TextField {
-    fn text_for_range(&mut self, r16: Range<usize>, actual: &mut Option<Range<usize>>, _: &mut Window, _: &mut Context<Self>) -> Option<String> {
+    fn text_for_range(
+        &mut self,
+        r16: Range<usize>,
+        actual: &mut Option<Range<usize>>,
+        _: &mut Window,
+        _: &mut Context<Self>,
+    ) -> Option<String> {
         let r = self.range_from16(&r16);
         actual.replace(self.range_to16(&r));
         Some(self.content[r].to_string())
@@ -421,7 +433,13 @@ impl EntityInputHandler for TextField {
             .unwrap_or_else(|| r.start + new.len()..r.start + new.len());
         cx.notify();
     }
-    fn bounds_for_range(&mut self, r16: Range<usize>, b: Bounds<Pixels>, _: &mut Window, _: &mut Context<Self>) -> Option<Bounds<Pixels>> {
+    fn bounds_for_range(
+        &mut self,
+        r16: Range<usize>,
+        b: Bounds<Pixels>,
+        _: &mut Window,
+        _: &mut Context<Self>,
+    ) -> Option<Bounds<Pixels>> {
         let line = self.last_layout.as_ref()?;
         let r = self.range_from16(&r16);
         Some(Bounds::from_corners(
@@ -464,9 +482,17 @@ impl Element for FieldElement {
     fn source_location(&self) -> Option<&'static core::panic::Location<'static>> {
         None
     }
-    fn request_layout(&mut self, _: Option<&GlobalElementId>, _: Option<&gpui::InspectorElementId>, w: &mut Window, cx: &mut App) -> (LayoutId, ()) {
+    fn request_layout(
+        &mut self,
+        _: Option<&GlobalElementId>,
+        _: Option<&gpui::InspectorElementId>,
+        w: &mut Window,
+        cx: &mut App,
+    ) -> (LayoutId, ()) {
         let mut style = Style::default();
         style.size.width = relative(1.).into();
+        style.flex_grow = 1.;
+        style.min_size.width = px(8.).into();
         style.size.height = w.line_height().into();
         (w.request_layout(style, [], cx), ())
     }
@@ -492,8 +518,16 @@ impl Element for FieldElement {
                 o
             }
         };
-        let (text, color) = if content.is_empty() { (input.placeholder.clone(), t.ink_3) } else { (content, style.color) };
-        let run = TextRun { len: text.len(), font: style.font(), color, background_color: None, underline: None, strikethrough: None };
+        let (text, color) =
+            if content.is_empty() { (input.placeholder.clone(), t.ink_3) } else { (content, style.color) };
+        let run = TextRun {
+            len: text.len(),
+            font: style.font(),
+            color,
+            background_color: None,
+            underline: None,
+            strikethrough: None,
+        };
         let runs = match input.marked.as_ref().filter(|_| !input.content.is_empty()) {
             Some(m) => vec![
                 TextRun { len: map(m.start), ..run.clone() },
@@ -521,11 +555,20 @@ impl Element for FieldElement {
         } else if cur_x < scroll {
             scroll = (cur_x - px(24.)).max(px(0.));
         }
-        if line.width <= width {
+        // a field laid out before it has a real width (a first frame, a
+        // collapsed column) must not keep a scroll offset computed from it
+        if line.width <= width || width < px(24.) {
             scroll = px(0.);
         }
+        scroll = scroll.max(px(0.)).min((line.width - width + px(2.)).max(px(0.)));
         let (selection, cursor) = if sel.is_empty() || input.content.is_empty() {
-            (None, Some(fill(Bounds::new(point(bounds.left() + cur_x - scroll, bounds.top()), size(px(1.5), bounds.size.height)), t.accent)))
+            (
+                None,
+                Some(fill(
+                    Bounds::new(point(bounds.left() + cur_x - scroll, bounds.top()), size(px(1.5), bounds.size.height)),
+                    t.accent,
+                )),
+            )
         } else {
             (
                 Some(fill(
@@ -588,6 +631,7 @@ impl Render for TextField {
             .child(
                 div()
                     .id("field")
+                    .flex()
                     .key_context("Field")
                     .track_focus(&self.focus)
                     .cursor(CursorStyle::IBeam)
@@ -623,12 +667,30 @@ impl Render for TextField {
                     .pt(px(4.))
                     .pb(px(5.))
                     .text_color(t.ink)
-                    .font_family(if self.doc { crate::theme::FONT_DOC } else if self.mono { FONT_MONO } else { FONT_UI })
-                    .text_size(px(if self.doc { 26. } else if self.mono { 13. } else { 14. }))
+                    .font_family(if self.doc {
+                        crate::theme::FONT_DOC
+                    } else if self.mono {
+                        FONT_MONO
+                    } else {
+                        FONT_UI
+                    })
+                    .text_size(px(if self.doc {
+                        26.
+                    } else if self.mono {
+                        13.
+                    } else {
+                        14.
+                    }))
                     .line_height(px(if self.doc { 34. } else { 20. }))
                     // the underline is the field's edge; focus thickens it
                     .border_b(if focused { px(2.) } else { px(1.) })
-                    .border_color(if focused { t.accent } else if self.doc { t.rule } else { t.rule_strong })
+                    .border_color(if focused {
+                        t.accent
+                    } else if self.doc {
+                        t.rule
+                    } else {
+                        t.rule_strong
+                    })
                     .mb(if focused { px(0.) } else { px(1.) })
                     .child(FieldElement { input: cx.entity() }),
             )

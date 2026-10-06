@@ -74,7 +74,7 @@ pub fn capture_own_window(path: &Path) -> Result<(u32, u32), String> {
     let mut rgba = Vec::with_capacity((w * h * 4) as usize);
     for y in 0..h as usize {
         let row = &bytes[y * bpr..y * bpr + w as usize * 4];
-        for px in row.chunks_exact(4) {
+        for px in row.as_chunks::<4>().0 {
             // BGRA (premultiplied, little-endian) → RGBA
             rgba.extend_from_slice(&[px[2], px[1], px[0], 255]);
         }
@@ -103,7 +103,10 @@ pub fn maybe_run<V: 'static>(win: WindowHandle<V>, cx: &mut App) {
     let Ok(path) = std::env::var("FARFIELD_SCRIPT") else { return };
     let out = PathBuf::from(std::env::var("FARFIELD_EVIDENCE_DIR").unwrap_or_else(|_| "evidence".into()));
     let _ = std::fs::create_dir_all(&out);
-    let steps: Vec<Step> = match std::fs::read(&path).map_err(|e| e.to_string()).and_then(|b| serde_json::from_slice(&b).map_err(|e| e.to_string())) {
+    let steps: Vec<Step> = match std::fs::read(&path)
+        .map_err(|e| e.to_string())
+        .and_then(|b| serde_json::from_slice(&b).map_err(|e| e.to_string()))
+    {
         Ok(s) => s,
         Err(e) => {
             eprintln!("script {path}: {e}");
@@ -131,7 +134,11 @@ pub fn maybe_run<V: 'static>(win: WindowHandle<V>, cx: &mut App) {
                             let k = if ch == '\n' {
                                 Keystroke::parse("enter").unwrap()
                             } else {
-                                Keystroke { modifiers: Modifiers::default(), key: ch.to_string(), key_char: Some(ch.to_string()) }
+                                Keystroke {
+                                    modifiers: Modifiers::default(),
+                                    key: ch.to_string(),
+                                    key_char: Some(ch.to_string()),
+                                }
                             };
                             w.dispatch_keystroke(k, cx);
                         });
@@ -142,7 +149,8 @@ pub fn maybe_run<V: 'static>(win: WindowHandle<V>, cx: &mut App) {
                     // delivered to the focused document through the same
                     // FilesDropped path a Finder drop takes
                     let _ = cx.update(|cx| cx.set_global(PendingDrop(drop)));
-                    let _ = any.update(cx, |_, w, cx| w.dispatch_action(Box::new(crate::ui::doc_editor::DropPending), cx));
+                    let _ =
+                        any.update(cx, |_, w, cx| w.dispatch_action(Box::new(crate::ui::doc_editor::DropPending), cx));
                 }
                 Step::Snap { snap } => {
                     // let the frame land first
@@ -150,7 +158,9 @@ pub fn maybe_run<V: 'static>(win: WindowHandle<V>, cx: &mut App) {
                     cx.background_executor().timer(Duration::from_millis(350)).await;
                     let file = out.join(format!("{snap}.png"));
                     match capture_own_window(&file) {
-                        Ok((w, h)) => log("snap", &[("file", &file.display().to_string()), ("size", &format!("{w}x{h}"))]),
+                        Ok((w, h)) => {
+                            log("snap", &[("file", &file.display().to_string()), ("size", &format!("{w}x{h}"))])
+                        }
                         Err(e) => log("snap-failed", &[("file", &file.display().to_string()), ("error", &e)]),
                     }
                 }

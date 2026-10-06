@@ -13,9 +13,13 @@ farfield-editor = { version = "0.1.0", path = "../editor" }
 gpui = { version = "0.2.2", features = ["runtime_shaders"] }
 image = { version = "0.25", default-features = false, features = ["png", "jpeg", "gif", "webp"] }
 parking_lot = "0.12.5"
+# the daily art plate is SVG: rasterized off-thread (same crate and features
+# gpui already builds, so nothing new compiles)
+resvg = { version = "0.45", default-features = false, features = ["text", "system-fonts", "memmap-fonts"] }
 serde = { version = "1.0.229", features = ["derive"] }
 serde_json = "1.0.151"
 smallvec = "1.16.2"
+tokio = { version = "1.53.2", features = ["sync"] }
 unicode-segmentation = "1.13.3"
 
 [build-dependencies]

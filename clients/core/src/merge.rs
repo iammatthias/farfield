@@ -29,7 +29,8 @@ pub fn refs(body: &str) -> BTreeSet<String> {
         let mut rest = body;
         while let Some(i) = rest.find(scheme) {
             let tail = &rest[i + scheme.len()..];
-            let n = tail.find(|c: char| !(c.is_ascii_lowercase() || c.is_ascii_digit() || c == '-')).unwrap_or(tail.len());
+            let n =
+                tail.find(|c: char| !(c.is_ascii_lowercase() || c.is_ascii_digit() || c == '-')).unwrap_or(tail.len());
             if n > 0 {
                 out.insert(format!("{scheme}{}", &tail[..n]));
             }

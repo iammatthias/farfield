@@ -1,7 +1,29 @@
-//! keys — stub, replaced by the real workspace.
-use crate::theme::theme;
+//! Keys: no API by design. Keys are minted in the private keys console — a
+//! browser page on the tailnet, behind the administrator password, which is
+//! typed there and never here. This workspace explains them, shows which
+//! services this profile holds a key for (a hint only, never the key), and
+//! hands off: to the console to mint or revoke, to Connections to paste.
+
+use crate::app::{self, state, Health};
+use crate::shell::goto;
+use crate::theme::{theme, FONT_MONO, S2, S3, S4, S5};
+use crate::ui::{self, Kind as BtnKind};
 use crate::workspace::Workspace;
-use gpui::{div, prelude::*, Context, Window};
+use gpui::{div, prelude::*, px, App, Context, Hsla, Window};
+
+/// How each service is keyed, from lib/keys.Attach and each app's web.Auth.
+fn accepts(service: &str) -> &'static str {
+    match service {
+        "blobs" | "bookmarks" | "content" | "feed" | "library" | "qr" | "scrap" | "sideload" | "switchboard" => {
+            "minted or env key"
+        }
+        "pulse" => "PULSE_READ_KEY only",
+        "backup" => "BACKUP_API_KEY only",
+        "keys" => "password (console)",
+        "daily" | "apex" => "public — no key",
+        _ => "",
+    }
+}
 
 pub struct KeysWs;
 
@@ -11,10 +33,121 @@ impl KeysWs {
     }
 }
 
-impl Workspace for KeysWs {}
+impl Workspace for KeysWs {
+    fn commands(&self, _cx: &App) -> Vec<(&'static str, String, &'static str)> {
+        vec![
+            ("console", "Keys: open the keys console (browser)".into(), ""),
+            ("paste", "Keys: paste a new key in Connections".into(), "⌘,"),
+        ]
+    }
+
+    fn run_command(&mut self, id: &str, _w: &mut Window, cx: &mut Context<Self>) {
+        match id {
+            "console" => crate::ws::connections::open_console(cx, "keys"),
+            "paste" => goto(cx, "connections"),
+            _ => {}
+        }
+    }
+}
 
 impl Render for KeysWs {
     fn render(&mut self, _w: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
-        div().p_6().text_color(theme(cx).ink_2).child("keys")
+        let t = theme(cx).clone();
+        let session = app::session(cx);
+        let health = state(cx).health.clone();
+        let para = |s: &'static str| div().text_sm().line_height(px(21.)).text_color(t.ink_2).max_w(px(640.)).child(s);
+        let scope = |name: &'static str, what: &'static str| {
+            div()
+                .flex()
+                .gap(S3)
+                .py(px(6.))
+                .border_b_1()
+                .border_color(t.rule)
+                .child(div().w(px(70.)).flex_none().font_family(FONT_MONO).text_xs().text_color(t.ink).child(name))
+                .child(div().text_sm().text_color(t.ink_2).child(what))
+        };
+
+        let mut rows = div().flex().flex_col();
+        rows = rows.child(
+            div()
+                .flex()
+                .items_center()
+                .px(px(14.))
+                .pb(px(6.))
+                .border_b_1()
+                .border_color(t.rule_strong)
+                .text_xs()
+                .text_color(t.ink_2)
+                .child(div().w(px(130.)).flex_none().child("SERVICE"))
+                .child(div().w(px(190.)).flex_none().child("ACCEPTS"))
+                .child(div().flex_1().child("STORED ON THIS MAC"))
+                .child(div().w(px(110.)).flex_none().child("STATUS")),
+        );
+        for s in farfield_core::registry::services() {
+            let name = s.name.clone();
+            let hint = session.client(&name).ok().and_then(|c| c.credential().map(|k| k.hint()));
+            let needs = !matches!(name.as_str(), "daily" | "apex" | "keys");
+            let (word, color): (&str, Hsla) = match health.get(&name) {
+                Some(Health::Up) => ("online", t.good),
+                Some(Health::NoAuth) => ("needs key", t.warn),
+                Some(Health::Down(_)) => ("offline", t.bad),
+                _ => ("unknown", t.ink_3),
+            };
+            rows = rows.child(
+                div()
+                    .flex()
+                    .items_center()
+                    .px(px(14.))
+                    .py(px(8.))
+                    .border_b_1()
+                    .border_color(t.rule)
+                    .child(div().w(px(130.)).flex_none().text_sm().text_color(t.ink).child(name.clone()))
+                    .child(div().w(px(190.)).flex_none().text_xs().text_color(t.ink_2).child(accepts(&name)))
+                    .child(
+                        div()
+                            .flex_1()
+                            .min_w_0()
+                            .font_family(FONT_MONO)
+                            .text_xs()
+                            .text_color(if hint.is_some() { t.ink } else { t.ink_3 })
+                            .truncate()
+                            .child(match (&hint, needs) {
+                                (Some(h), _) if h == "…" => "stored · too short to hint".to_string(),
+                                (Some(h), _) => h.clone(),
+                                (None, true) => "no key".to_string(),
+                                (None, false) => "—".to_string(),
+                            }),
+                    )
+                    .child(div().w(px(110.)).flex_none().child(ui::chip(word, color, cx))),
+            );
+        }
+
+        div().id("keys").size_full().overflow_y_scroll().child(
+            div()
+                .flex()
+                .flex_col()
+                .gap(S4)
+                .px(px(40.))
+                .py(S5)
+                .max_w(px(920.))
+                .child(div().text_xl().text_color(t.ink).child("Keys"))
+                .child(para(
+                    "Each service checks the key you send with every request. Minted keys are ffk_ tokens made in the keys console: one per app, one scope each, revocable at any moment — revoking takes effect on the next request, everywhere. They are deliberately not JWTs: the server looks every key up, so nothing outlives a revocation.",
+                ))
+                .child(div().flex().flex_col().child(scope("read", "see private things: drafts, admin lists, logs")).child(scope("upload", "add media and files, nothing else")).child(scope("write", "create, change and delete — what this app uses for editing")))
+                .child(para(
+                    "A minted token is shown once, in the console. Copy it there, then paste it into Connections for that service; it is stored in your Keychain for this profile and this address only. The administrator password is typed in the browser — this app never asks for it and never stores it.",
+                ))
+                .child(
+                    div()
+                        .flex()
+                        .gap(S2)
+                        .child(ui::button("console", "Open the keys console", BtnKind::Primary, cx, |_, _, cx| crate::ws::connections::open_console(cx, "keys")))
+                        .child(ui::button("paste", "Paste a key in Connections", BtnKind::Quiet, cx, |_, _, cx| goto(cx, "connections"))),
+                )
+                .child(div().pt(S3).child(ui::eyebrow(format!("Keys in “{}”", session.profile.name), cx)))
+                .child(rows)
+                .child(div().text_xs().text_color(t.ink_3).child("Hints show a key's last four characters, never the key. Status comes from the last health check; a refused key shows as “needs key”.")),
+        )
     }
 }

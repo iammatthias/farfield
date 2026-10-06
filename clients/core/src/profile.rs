@@ -55,7 +55,10 @@ pub fn validate_base(raw: &str) -> Result<Url, EndpointError> {
         "http" => return Err(EndpointError::Insecure(raw.into())),
         _ => return Err(EndpointError::Invalid(raw.into())),
     }
-    if !u.username().is_empty() || u.password().is_some() || u.query().is_some() || (u.path() != "/" && !u.path().is_empty())
+    if !u.username().is_empty()
+        || u.password().is_some()
+        || u.query().is_some()
+        || (u.path() != "/" && !u.path().is_empty())
     {
         return Err(EndpointError::NotOrigin(raw.into()));
     }
@@ -75,9 +78,7 @@ impl Profile {
         let host = host.trim_end_matches('.');
         let endpoints = registry::services()
             .iter()
-            .map(|s| {
-                (s.name.clone(), Endpoint { api: format!("https://{host}:{}", s.port), public: s.public_url() })
-            })
+            .map(|s| (s.name.clone(), Endpoint { api: format!("https://{host}:{}", s.port), public: s.public_url() }))
             .collect();
         Profile { id: id.into(), name: name.into(), endpoints }
     }
@@ -164,10 +165,7 @@ mod tests {
         assert!(validate_base("http://127.0.0.1:8787").is_ok());
         assert!(validate_base("http://localhost:8787").is_ok());
         assert!(validate_base("http://[::1]:8787").is_ok());
-        assert_eq!(
-            validate_base("http://homelab:8787"),
-            Err(EndpointError::Insecure("http://homelab:8787".into()))
-        );
+        assert_eq!(validate_base("http://homelab:8787"), Err(EndpointError::Insecure("http://homelab:8787".into())));
         assert!(matches!(validate_base("https://x/api"), Err(EndpointError::NotOrigin(_))));
         assert!(matches!(validate_base("https://u:p@x"), Err(EndpointError::NotOrigin(_))));
         assert!(matches!(validate_base("ftp://x"), Err(EndpointError::Invalid(_))));
@@ -192,5 +190,92 @@ mod tests {
         let (running, peers) = parse_tailscale_status(j).unwrap();
         assert!(running);
         assert_eq!(peers[0].dns_name, "homelab.t.ts.net");
+    }
+}
+
+/// What a person types for "where is my fleet": a tailnet name
+/// (`homelab.tail1234.ts.net`), the same as a URL, or a loopback address for
+/// the dev fleet. Scheme defaults to https; any port or path is dropped
+/// because each service has its own port.
+pub fn parse_fleet_address(input: &str) -> Result<(String, String), EndpointError> {
+    let raw = input.trim().trim_end_matches('/');
+    if raw.is_empty() {
+        return Err(EndpointError::Invalid(input.into()));
+    }
+    let with_scheme = if raw.contains("://") {
+        raw.to_string()
+    } else if is_loopback(raw.split(':').next().unwrap_or("")) {
+        format!("http://{raw}")
+    } else {
+        format!("https://{raw}")
+    };
+    let u = Url::parse(&with_scheme).map_err(|_| EndpointError::Invalid(input.into()))?;
+    let host = u.host_str().ok_or_else(|| EndpointError::Invalid(input.into()))?.trim_end_matches('.').to_string();
+    match u.scheme() {
+        "https" => {}
+        "http" if is_loopback(&host) => {}
+        "http" => return Err(EndpointError::Insecure(input.into())),
+        _ => return Err(EndpointError::Invalid(input.into())),
+    }
+    Ok((u.scheme().to_string(), host))
+}
+
+impl Profile {
+    /// A profile from a typed fleet address: every service at
+    /// `<scheme>://<host>:<port>`, public share links from the registry.
+    pub fn from_address(id: &str, name: &str, address: &str) -> Result<Self, EndpointError> {
+        let (scheme, host) = parse_fleet_address(address)?;
+        let host_url = if host.contains(':') { format!("[{host}]") } else { host.clone() };
+        let endpoints = registry::services()
+            .iter()
+            .map(|s| {
+                (s.name.clone(), Endpoint { api: format!("{scheme}://{host_url}:{}", s.port), public: s.public_url() })
+            })
+            .collect();
+        let p = Profile { id: id.into(), name: name.into(), endpoints };
+        p.validate()?;
+        Ok(p)
+    }
+
+    /// Replace one service's private address (validated).
+    pub fn set_api(&mut self, service: &str, api: &str) -> Result<(), EndpointError> {
+        let u = validate_base(api)?;
+        let api = u.as_str().trim_end_matches('/').to_string();
+        let public = registry::lookup(service).and_then(|s| s.public_url());
+        self.endpoints.entry(service.into()).and_modify(|e| e.api = api.clone()).or_insert(Endpoint { api, public });
+        Ok(())
+    }
+
+    /// The host most endpoints share — what Settings shows as "the fleet's
+    /// address". None when they disagree.
+    pub fn common_host(&self) -> Option<String> {
+        let mut hosts =
+            self.endpoints.values().filter_map(|e| Url::parse(&e.api).ok()?.host_str().map(|h| h.to_string()));
+        let first = hosts.next()?;
+        hosts.all(|h| h == first).then_some(first)
+    }
+}
+
+#[cfg(test)]
+mod address_tests {
+    use super::*;
+
+    #[test]
+    fn typed_addresses() {
+        assert_eq!(
+            parse_fleet_address("homelab.tail1234.ts.net").unwrap(),
+            ("https".into(), "homelab.tail1234.ts.net".into())
+        );
+        assert_eq!(parse_fleet_address("https://homelab.tail1234.ts.net:8787/x").unwrap().1, "homelab.tail1234.ts.net");
+        assert_eq!(parse_fleet_address("127.0.0.1").unwrap(), ("http".into(), "127.0.0.1".into()));
+        assert!(matches!(parse_fleet_address("http://homelab"), Err(EndpointError::Insecure(_))));
+        assert!(parse_fleet_address("  ").is_err());
+        let p = Profile::from_address("home", "Home", "homelab.t.ts.net").unwrap();
+        assert_eq!(p.endpoint("feed").unwrap().api, "https://homelab.t.ts.net:8788");
+        assert_eq!(p.common_host().as_deref(), Some("homelab.t.ts.net"));
+        let mut p = p;
+        p.set_api("feed", "https://other.t.ts.net:9000").unwrap();
+        assert_eq!(p.common_host(), None);
+        assert!(p.set_api("feed", "http://other:1").is_err());
     }
 }

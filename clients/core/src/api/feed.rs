@@ -95,7 +95,13 @@ pub async fn create_with_media(
 }
 
 /// Replace a post's body and tags (full replace; omitted tags clear them).
-pub async fn update(s: &Session, slug: &str, body: &str, tags: &[String], if_match: Option<&str>) -> Result<Versioned<Post>, ApiError> {
+pub async fn update(
+    s: &Session,
+    slug: &str,
+    body: &str,
+    tags: &[String],
+    if_match: Option<&str>,
+) -> Result<Versioned<Post>, ApiError> {
     let v = serde_json::json!({"body": body, "tags": tags});
     let path = format!("/api/posts/{}", enc(slug));
     let r = s.client(SERVICE)?.send_json(Method::PUT, &path, Some(&v), if_match).await;
@@ -117,19 +123,26 @@ pub async fn delete(s: &Session, slug: &str, release_media: bool, if_match: Opti
 /// `#hashtags` at the end of a post become tags, the way the capability
 /// `/feed` command reads them.
 pub fn split_hashtags(text: &str) -> (String, Vec<String>) {
-    let mut words: Vec<&str> = text.trim_end().split(' ').collect();
+    // peel words off the end (across spaces and newlines) while they are
+    // hashtags; everything before the first non-tag stays exactly as typed
+    let mut rest = text.trim_end();
     let mut tags = Vec::new();
-    while let Some(w) = words.last() {
-        if let Some(t) = w.strip_prefix('#') {
-            if !t.is_empty() && t.chars().all(|c| c.is_alphanumeric() || c == '-' || c == '_') {
+    loop {
+        let start =
+            rest.rfind(char::is_whitespace).map(|i| i + rest[i..].chars().next().unwrap().len_utf8()).unwrap_or(0);
+        let w = &rest[start..];
+        match w.strip_prefix('#') {
+            Some(t) if !t.is_empty() && t.chars().all(|c| c.is_alphanumeric() || c == '-' || c == '_') => {
                 tags.insert(0, t.to_lowercase());
-                words.pop();
-                continue;
+                rest = rest[..start].trim_end();
+                if rest.is_empty() {
+                    break;
+                }
             }
+            _ => break,
         }
-        break;
     }
-    (words.join(" ").trim_end().to_string(), tags)
+    (rest.to_string(), tags)
 }
 
 #[cfg(test)]
@@ -139,5 +152,10 @@ mod tests {
     fn hashtags() {
         assert_eq!(split_hashtags("hello world #a #B-c"), ("hello world".into(), vec!["a".into(), "b-c".into()]));
         assert_eq!(split_hashtags("#1 in line"), ("#1 in line".into(), vec![]));
+        assert_eq!(
+            split_hashtags("first\nsecond line\n#a #b "),
+            ("first\nsecond line".into(), vec!["a".into(), "b".into()])
+        );
+        assert_eq!(split_hashtags("#only"), ("".into(), vec!["only".into()]));
     }
 }

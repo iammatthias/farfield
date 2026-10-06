@@ -1,4 +1,9 @@
 //! Farfield — the native client for the farfield fleet.
+
+// GPUI callbacks are boxed closures over (&mut Window, &mut App); spelling
+// them through aliases would hide the signature without simplifying it, and
+// a few view builders take the theme, context and their own options.
+#![allow(clippy::type_complexity, clippy::too_many_arguments)]
 mod app;
 mod evidence;
 mod shell;
@@ -7,14 +12,19 @@ mod ui;
 mod workspace;
 mod ws;
 
-use gpui::{prelude::*, Focusable, px, size, App, Application, Bounds, TitlebarOptions, WindowBounds, WindowOptions};
+use gpui::{prelude::*, px, size, App, Application, Bounds, Focusable, TitlebarOptions, WindowBounds, WindowOptions};
 use shell::{Entry, Overlay, Shell};
 use workspace::Handle;
 
 fn entries() -> Vec<Entry> {
     macro_rules! e {
         ($id:literal, $title:literal, $svc:literal, $ty:path) => {
-            Entry { id: $id, title: $title, service: $svc, make: |w, cx| Handle::new($id, $title, cx.new(|cx| <$ty>::new(w, cx))) }
+            Entry {
+                id: $id,
+                title: $title,
+                service: $svc,
+                make: |w, cx| Handle::new($id, $title, cx.new(|cx| <$ty>::new(w, cx))),
+            }
         };
     }
     vec![
@@ -32,7 +42,7 @@ fn entries() -> Vec<Entry> {
         e!("backup", "Backup", "backup", ws::backup::BackupWs),
         e!("keys", "Keys", "keys", ws::keys::KeysWs),
         e!("apex", "Apex", "apex", ws::apex::ApexWs),
-        e!("connections", "Connections", "apex", ws::connections::Connections),
+        e!("connections", "Settings", "apex", ws::connections::Connections),
     ]
 }
 
@@ -45,6 +55,7 @@ fn main() {
         ui::input::bind_keys(cx);
         ui::doc_editor::bind_keys(cx);
         shell::bind_keys(cx);
+        ws::onboarding::bind_keys(cx);
         let bounds = Bounds::centered(None, size(px(1280.), px(820.)), cx);
         let win = cx
             .open_window(

@@ -13,10 +13,10 @@ use crate::theme::theme;
 use farfield_core::Session;
 use farfield_editor::{mods, pointer, Command, Editor, Key};
 use gpui::{
-    actions, div, point, prelude::*, px, size, App, Bounds, ClipboardItem, Context, Corners, ElementId, ElementInputHandler,
-    Entity, EntityInputHandler, EventEmitter, ExternalPaths, FocusHandle, Focusable, GlobalElementId, KeyBinding, LayoutId,
-    MouseButton, MouseDownEvent, MouseMoveEvent, MouseUpEvent, Pixels, Point, RenderImage, ScrollWheelEvent, Style, Task,
-    UTF16Selection, Window,
+    actions, div, point, prelude::*, px, size, App, Bounds, ClipboardItem, Context, Corners, ElementId,
+    ElementInputHandler, Entity, EntityInputHandler, EventEmitter, ExternalPaths, FocusHandle, Focusable,
+    GlobalElementId, KeyBinding, LayoutId, MouseButton, MouseDownEvent, MouseMoveEvent, MouseUpEvent, Pixels, Point,
+    RenderImage, ScrollWheelEvent, Style, Task, UTF16Selection, Window,
 };
 use std::ops::Range;
 use std::path::PathBuf;
@@ -26,12 +26,64 @@ use std::time::{Duration, Instant};
 actions!(
     doc,
     [
-        KLeft, KRight, KUp, KDown, KHome, KEnd, KPageUp, KPageDown, KBackspace, KDelete, KEnter, KTab, KEscape,
-        SLeft, SRight, SUp, SDown, SHome, SEnd, SPageUp, SPageDown, STab,
-        WLeft, WRight, WSLeft, WSRight, WBackspace, WDelete,
-        CLeft, CRight, CUp, CDown, CSLeft, CSRight, CSUp, CSDown, CBackspace,
-        Bold, Italic, Code, Link, Strike, H1, H2, H3, Quote, Bullets, Numbers, CodeBlock, Undo, Redo, SelectAll, Rule,
-        Copy, Cut, Paste, CharPalette, DropPending,
+        KLeft,
+        KRight,
+        KUp,
+        KDown,
+        KHome,
+        KEnd,
+        KPageUp,
+        KPageDown,
+        KBackspace,
+        KDelete,
+        KEnter,
+        KTab,
+        KEscape,
+        SLeft,
+        SRight,
+        SUp,
+        SDown,
+        SHome,
+        SEnd,
+        SPageUp,
+        SPageDown,
+        STab,
+        WLeft,
+        WRight,
+        WSLeft,
+        WSRight,
+        WBackspace,
+        WDelete,
+        CLeft,
+        CRight,
+        CUp,
+        CDown,
+        CSLeft,
+        CSRight,
+        CSUp,
+        CSDown,
+        CBackspace,
+        Bold,
+        Italic,
+        Code,
+        Link,
+        Strike,
+        H1,
+        H2,
+        H3,
+        Quote,
+        Bullets,
+        Numbers,
+        CodeBlock,
+        Undo,
+        Redo,
+        SelectAll,
+        Rule,
+        Copy,
+        Cut,
+        Paste,
+        CharPalette,
+        DropPending,
     ]
 );
 
@@ -133,7 +185,13 @@ pub struct DocEditor {
 impl EventEmitter<DocEvent> for DocEditor {}
 
 impl DocEditor {
-    pub fn new(w: &mut Window, cx: &mut Context<Self>, text: &str, placeholder: &str, session: Option<Arc<Session>>) -> Self {
+    pub fn new(
+        w: &mut Window,
+        cx: &mut Context<Self>,
+        text: &str,
+        placeholder: &str,
+        session: Option<Arc<Session>>,
+    ) -> Self {
         let focus = cx.focus_handle();
         cx.on_focus(&focus, w, |this: &mut Self, _w, cx| {
             this.with(|e| e.focus(true));
@@ -304,11 +362,12 @@ impl DocEditor {
             let u = url.clone();
             let col = if self.surface.0 > 100 { self.surface.0 } else { 1520 };
             let fetch = farfield_core::spawn(async move {
-                let bytes = if let Some(cid) = u.strip_prefix("blob://") {
-                    farfield_core::api::blobs::bytes(&session, cid, 64 << 20).await.ok()?
-                } else {
-                    return None; // remote http(s) images are not fetched by the native host
-                };
+                // at most four image fetches+decodes at once, app-wide
+                static LIMIT: std::sync::OnceLock<tokio::sync::Semaphore> = std::sync::OnceLock::new();
+                let _permit = LIMIT.get_or_init(|| tokio::sync::Semaphore::new(4)).acquire().await.ok()?;
+                // remote http(s) images are not fetched by the native host
+                let cid = u.strip_prefix("blob://")?;
+                let bytes = farfield_core::api::blobs::bytes(&session, cid, 64 << 20).await.ok()?;
                 let img = image::load_from_memory(&bytes).ok()?;
                 let w = img.width().min(col);
                 let h = ((img.height() as u64 * w as u64) / img.width().max(1) as u64) as u32;
@@ -420,7 +479,13 @@ impl DocEditor {
 }
 
 impl EntityInputHandler for DocEditor {
-    fn text_for_range(&mut self, r16: Range<usize>, actual: &mut Option<Range<usize>>, _: &mut Window, _: &mut Context<Self>) -> Option<String> {
+    fn text_for_range(
+        &mut self,
+        r16: Range<usize>,
+        actual: &mut Option<Range<usize>>,
+        _: &mut Window,
+        _: &mut Context<Self>,
+    ) -> Option<String> {
         let (t, _) = self.virtual_text();
         let r = farfield_editor::utf16_to_utf8(&t, r16.start)..farfield_editor::utf16_to_utf8(&t, r16.end);
         actual.replace(farfield_editor::utf8_to_utf16(&t, r.start)..farfield_editor::utf8_to_utf16(&t, r.end));
@@ -462,7 +527,14 @@ impl EntityInputHandler for DocEditor {
         }
         self.after(cx);
     }
-    fn replace_and_mark_text_in_range(&mut self, _r16: Option<Range<usize>>, new: &str, _sel: Option<Range<usize>>, _: &mut Window, cx: &mut Context<Self>) {
+    fn replace_and_mark_text_in_range(
+        &mut self,
+        _r16: Option<Range<usize>>,
+        new: &str,
+        _sel: Option<Range<usize>>,
+        _: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
         if self.marked.is_none() {
             let t = self.text();
             let (a, _) = self.with(|e| e.selection_range()).unwrap_or((0, 0));
@@ -471,11 +543,20 @@ impl EntityInputHandler for DocEditor {
         self.marked = (!new.is_empty()).then(|| new.to_string());
         cx.notify();
     }
-    fn bounds_for_range(&mut self, _r16: Range<usize>, el: Bounds<Pixels>, _: &mut Window, _: &mut Context<Self>) -> Option<Bounds<Pixels>> {
+    fn bounds_for_range(
+        &mut self,
+        _r16: Range<usize>,
+        el: Bounds<Pixels>,
+        _: &mut Window,
+        _: &mut Context<Self>,
+    ) -> Option<Bounds<Pixels>> {
         // the IME candidate window sits under the caret
         let r = self.with(|e| e.caret_rect())?;
         let s = self.surface.2.max(1.0);
-        Some(Bounds::new(point(el.left() + px(r.x as f32 / s), el.top() + px(r.y as f32 / s)), size(px(2.), px(r.h as f32 / s))))
+        Some(Bounds::new(
+            point(el.left() + px(r.x as f32 / s), el.top() + px(r.y as f32 / s)),
+            size(px(2.), px(r.h as f32 / s)),
+        ))
     }
     fn character_index_for_point(&mut self, _p: Point<Pixels>, _: &mut Window, _: &mut Context<Self>) -> Option<usize> {
         None
@@ -502,13 +583,28 @@ impl Element for Surface {
     fn source_location(&self) -> Option<&'static core::panic::Location<'static>> {
         None
     }
-    fn request_layout(&mut self, _: Option<&GlobalElementId>, _: Option<&gpui::InspectorElementId>, w: &mut Window, cx: &mut App) -> (LayoutId, ()) {
+    fn request_layout(
+        &mut self,
+        _: Option<&GlobalElementId>,
+        _: Option<&gpui::InspectorElementId>,
+        w: &mut Window,
+        cx: &mut App,
+    ) -> (LayoutId, ()) {
         let mut style = Style::default();
         style.size.width = gpui::relative(1.).into();
         style.size.height = gpui::relative(1.).into();
         (w.request_layout(style, [], cx), ())
     }
-    fn prepaint(&mut self, _: Option<&GlobalElementId>, _: Option<&gpui::InspectorElementId>, _: Bounds<Pixels>, _: &mut (), _: &mut Window, _: &mut App) {}
+    fn prepaint(
+        &mut self,
+        _: Option<&GlobalElementId>,
+        _: Option<&gpui::InspectorElementId>,
+        _: Bounds<Pixels>,
+        _: &mut (),
+        _: &mut Window,
+        _: &mut App,
+    ) {
+    }
     fn paint(
         &mut self,
         _: Option<&GlobalElementId>,
@@ -543,7 +639,10 @@ impl Element for Surface {
                 }
                 this.buf = buf;
             }
-            let caret = match this.marked.clone() { Some(m) => this.with(|e| e.caret_rect()).map(|r| (m, r)), None => None };
+            let caret = match this.marked.clone() {
+                Some(m) => this.with(|e| e.caret_rect()).map(|r| (m, r)),
+                None => None,
+            };
             (this.image.clone(), std::mem::take(&mut this.retired), caret)
         });
         // every replaced frame leaves the sprite atlas, or GPU memory grows
@@ -623,13 +722,6 @@ cmds! {
     Bold => Bold; Italic => Italic; Code => Code; Link => Link; Strike => Strike;
     H1 => H1; H2 => H2; H3 => H3; Quote => Quote; Bullets => Bullets; Numbers => Numbers;
     CodeBlock => CodeBlock; Undo => Undo; Redo => Redo; SelectAll => SelectAll; Rule => Rule;
-}
-
-impl DocEditor {
-    /// Run an editor command from outside (a toolbar, the palette).
-    pub fn command(&mut self, c: Command, cx: &mut Context<Self>) {
-        self.cmd(c, cx)
-    }
 }
 
 impl Render for DocEditor {

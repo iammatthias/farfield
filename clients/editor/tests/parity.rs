@@ -56,8 +56,8 @@ fn key(k: i32) -> Key {
 fn command(c: i32) -> Command {
     use Command::*;
     [
-        Bold, Italic, Code, Link, Strike, H1, H2, H3, Quote, Bullets, Numbers, CodeBlock, Undo, Redo, SelectAll,
-        Rule, SelectWord, SelectLine,
+        Bold, Italic, Code, Link, Strike, H1, H2, H3, Quote, Bullets, Numbers, CodeBlock, Undo, Redo, SelectAll, Rule,
+        SelectWord, SelectLine,
     ][(c - 1) as usize]
 }
 

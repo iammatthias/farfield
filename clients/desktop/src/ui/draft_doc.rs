@@ -43,8 +43,6 @@ pub enum DraftEvent {
     Renamed { from: String, to: String },
     /// Saved to the server.
     Saved,
-    /// The record is gone (deleted here).
-    Closed,
     /// Local state changed (for list markers).
     Touched,
 }
@@ -84,7 +82,14 @@ fn text_to_tags(s: &str) -> Value {
 }
 
 impl<K: Kind + 'static> DraftDoc<K> {
-    pub fn new(draft: Draft, title_key: Option<&'static str>, specs: Vec<FieldSpec>, placeholder: &str, w: &mut Window, cx: &mut Context<Self>) -> Self {
+    pub fn new(
+        draft: Draft,
+        title_key: Option<&'static str>,
+        specs: Vec<FieldSpec>,
+        placeholder: &str,
+        w: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> Self {
         let body = draft.local[K::TEXT].as_str().unwrap_or("").to_string();
         let session = app::session(cx);
         let editor = cx.new(|cx| DocEditor::new(w, cx, &body, placeholder, Some(session)));
@@ -114,7 +119,8 @@ impl<K: Kind + 'static> DraftDoc<K> {
             .into_iter()
             .map(|spec| {
                 let v = &draft.local[spec.key];
-                let text = if spec.kind == FieldKind::Tags { tags_to_text(v) } else { v.as_str().unwrap_or("").to_string() };
+                let text =
+                    if spec.kind == FieldKind::Tags { tags_to_text(v) } else { v.as_str().unwrap_or("").to_string() };
                 let mono = spec.kind == FieldKind::Mono;
                 let (label, ph) = (spec.label, spec.placeholder);
                 let f = cx.new(|cx| {
@@ -135,15 +141,17 @@ impl<K: Kind + 'static> DraftDoc<K> {
             })
             .collect();
         let _ = title_key;
-        DraftDoc { draft, editor, title, fields, persist: None, saving: false, error: None, uploads: Vec::new(), _k: PhantomData }
-    }
-
-    pub fn key(&self) -> &str {
-        &self.draft.key
-    }
-
-    pub fn state(&self) -> SaveState {
-        self.draft.state
+        DraftDoc {
+            draft,
+            editor,
+            title,
+            fields,
+            persist: None,
+            saving: false,
+            error: None,
+            uploads: Vec::new(),
+            _k: PhantomData,
+        }
     }
 
     pub fn is_dirty(&self) -> bool {
@@ -234,7 +242,14 @@ impl<K: Kind + 'static> DraftDoc<K> {
         cx.notify();
     }
 
-    fn saved(&mut self, r: Result<SaveOutcome, farfield_core::ApiError>, mut d: Draft, snapshot: Value, old_key: String, cx: &mut Context<Self>) {
+    fn saved(
+        &mut self,
+        r: Result<SaveOutcome, farfield_core::ApiError>,
+        mut d: Draft,
+        snapshot: Value,
+        old_key: String,
+        cx: &mut Context<Self>,
+    ) {
         self.saving = false;
         // edits made while the save was in flight stay local
         let now = self.current(cx);
@@ -294,7 +309,8 @@ impl<K: Kind + 'static> DraftDoc<K> {
     fn reload_fields(&mut self, v: &Value, cx: &mut Context<Self>) {
         for (spec, f) in &self.fields {
             let val = &v[spec.key];
-            let text = if spec.kind == FieldKind::Tags { tags_to_text(val) } else { val.as_str().unwrap_or("").to_string() };
+            let text =
+                if spec.kind == FieldKind::Tags { tags_to_text(val) } else { val.as_str().unwrap_or("").to_string() };
             f.update(cx, |f, cx| f.set_text(text, cx));
         }
     }
@@ -402,7 +418,9 @@ impl<K: Kind + 'static> DraftDoc<K> {
                             this.editor.update(cx, |e, cx| e.insert(&md, cx));
                             log("upload-done", &[("file", &name), ("cid", &meta.value.cid)]);
                         }
-                        Ok(Err(farfield_core::ApiError::Cancelled)) => toast(cx, format!("Upload of {name} cancelled."), false),
+                        Ok(Err(farfield_core::ApiError::Cancelled)) => {
+                            toast(cx, format!("Upload of {name} cancelled."), false)
+                        }
                         Ok(Err(e)) => toast(cx, format!("{name}: {}", describe(&e)), true),
                         Err(e) => toast(cx, e.to_string(), true),
                     }
@@ -415,7 +433,12 @@ impl<K: Kind + 'static> DraftDoc<K> {
     }
 
     pub fn pick_and_upload(&mut self, w: &mut Window, cx: &mut Context<Self>) {
-        let rx = cx.prompt_for_paths(gpui::PathPromptOptions { files: true, directories: false, multiple: true, prompt: Some("Insert".into()) });
+        let rx = cx.prompt_for_paths(gpui::PathPromptOptions {
+            files: true,
+            directories: false,
+            multiple: true,
+            prompt: Some("Insert".into()),
+        });
         cx.spawn_in(w, async move |this, cx| {
             if let Ok(Ok(Some(paths))) = rx.await {
                 let _ = this.update_in(cx, |this, w, cx| this.upload_and_insert(paths, w, cx));
@@ -443,7 +466,14 @@ impl<K: Kind + 'static> DraftDoc<K> {
                     .px(px(32.))
                     .pt(px(28.))
                     .when_some(self.title.clone(), |d, title| {
-                        d.child(div().font_family(FONT_DOC).text_size(px(26.)).line_height(px(34.)).text_color(t.ink).child(title))
+                        d.child(
+                            div()
+                                .font_family(FONT_DOC)
+                                .text_size(px(26.))
+                                .line_height(px(34.))
+                                .text_color(t.ink)
+                                .child(title),
+                        )
                     })
                     .child(div().flex_1().min_h_0().pt(S3).child(self.editor.clone())),
             )
@@ -471,15 +501,22 @@ impl<K: Kind + 'static> DraftDoc<K> {
         let save_label = if self.draft.base.is_none() { "Create on server  ⌘S" } else { "Save to server  ⌘S" };
         if self.draft.state != SaveState::Conflict {
             let e = ent.clone();
-            row = row.child(ui::button("save", save_label, BtnKind::Primary, cx, move |_, _, cx| e.update(cx, |d, cx| d.save_server(cx))));
+            row = row.child(ui::button("save", save_label, BtnKind::Primary, cx, move |_, _, cx| {
+                e.update(cx, |d, cx| d.save_server(cx))
+            }));
         }
         if self.draft.base.is_some() && self.draft.state == SaveState::Local {
             let e = ent.clone();
             row = row.child(ui::button("revert", "Discard local changes", BtnKind::Quiet, cx, move |_, _, cx| {
                 let e = e.clone();
-                confirm(cx, "Discard local changes?", "Your edits on this Mac are dropped and the server's version comes back.", "Discard", true, move |_, cx| {
-                    e.update(cx, |d, cx| d.revert(cx))
-                })
+                confirm(
+                    cx,
+                    "Discard local changes?",
+                    "Your edits on this Mac are dropped and the server's version comes back.",
+                    "Discard",
+                    true,
+                    move |_, cx| e.update(cx, |d, cx| d.revert(cx)),
+                )
             }));
         }
         out.push(row.into_any_element());
@@ -488,7 +525,11 @@ impl<K: Kind + 'static> DraftDoc<K> {
             let remote = self.draft.remote.clone().unwrap_or(Value::Null);
             let local = self.draft.local.clone();
             let deleted = remote.is_null();
-            let differing: Vec<&str> = K::EDITABLE.iter().copied().filter(|f| remote.get(*f) != local.get(*f)).collect();
+            let differing: Vec<&str> = K::EDITABLE
+                .iter()
+                .copied()
+                .filter(|f| sync::norm(remote.get(*f)) != sync::norm(local.get(*f)))
+                .collect();
             out.push(ui::rule(cx).into_any_element());
             out.push(ui::eyebrow("Resolve", cx).into_any_element());
             out.push(
@@ -509,19 +550,37 @@ impl<K: Kind + 'static> DraftDoc<K> {
                     .flex_col()
                     .gap(S2)
                     .pt(S2)
-                    .child(ui::button("merge", "Merge for review", BtnKind::Primary, cx, move |_, _, cx| a.update(cx, |d, cx| d.resolve(Resolution::Merge, cx))))
+                    .child(ui::button("merge", "Merge for review", BtnKind::Primary, cx, move |_, _, cx| {
+                        a.update(cx, |d, cx| d.resolve(Resolution::Merge, cx))
+                    }))
                     .child(ui::button("keep", "Keep mine (overwrite server)", BtnKind::Quiet, cx, move |_, _, cx| {
                         let b = b.clone();
-                        confirm(cx, "Overwrite the server's version?", "The server's changes are replaced by yours.", "Overwrite", true, move |_, cx| {
-                            b.update(cx, |d, cx| d.resolve(Resolution::KeepMine, cx))
-                        })
+                        confirm(
+                            cx,
+                            "Overwrite the server's version?",
+                            "The server's changes are replaced by yours.",
+                            "Overwrite",
+                            true,
+                            move |_, cx| b.update(cx, |d, cx| d.resolve(Resolution::KeepMine, cx)),
+                        )
                     }))
-                    .when(!deleted, |d| d.child(ui::button("theirs", "Take theirs", BtnKind::Quiet, cx, move |_, _, cx| c.update(cx, |d, cx| d.resolve(Resolution::TakeTheirs, cx)))))
+                    .when(!deleted, |d| {
+                        d.child(ui::button("theirs", "Take theirs", BtnKind::Quiet, cx, move |_, _, cx| {
+                            c.update(cx, |d, cx| d.resolve(Resolution::TakeTheirs, cx))
+                        }))
+                    })
                     .into_any_element(),
             );
             if !deleted {
                 let theirs = remote.get(K::TEXT).and_then(|v| v.as_str()).unwrap_or("").to_string();
-                out.push(ui::field_row("Server's text", div().text_xs().text_color(t.ink_2).max_h(px(160.)).overflow_hidden().child(theirs), cx).into_any_element());
+                out.push(
+                    ui::field_row(
+                        "Server's text",
+                        div().text_xs().text_color(t.ink_2).max_h(px(160.)).overflow_hidden().child(theirs),
+                        cx,
+                    )
+                    .into_any_element(),
+                );
             }
         }
 
@@ -540,10 +599,18 @@ impl<K: Kind + 'static> DraftDoc<K> {
                 .items_center()
                 .justify_between()
                 .child(ui::eyebrow("Media", cx))
-                .child(ui::button("insert", "Insert file…", BtnKind::Quiet, cx, move |_, w, cx| e.update(cx, |d, cx| d.pick_and_upload(w, cx))))
+                .child(ui::button("insert", "Insert file…", BtnKind::Quiet, cx, move |_, w, cx| {
+                    e.update(cx, |d, cx| d.pick_and_upload(w, cx))
+                }))
                 .into_any_element(),
         );
-        out.push(div().text_xs().text_color(t.ink_3).child("Or drop files on the document. Images go to blobs and are referenced as blob://.").into_any_element());
+        out.push(
+            div()
+                .text_xs()
+                .text_color(t.ink_3)
+                .child("Or drop files on the document. Images go to blobs and are referenced as blob://.")
+                .into_any_element(),
+        );
         for (i, u) in self.uploads.iter().enumerate() {
             let p = u.progress.clone();
             let frac = p.fraction();
@@ -553,15 +620,37 @@ impl<K: Kind + 'static> DraftDoc<K> {
                     .flex_col()
                     .gap(px(3.))
                     .py(px(4.))
-                    .child(div().flex().justify_between().text_xs().child(u.name.clone()).child(format!("{}%", (frac * 100.0) as u32)))
-                    .child(div().w_full().h(px(2.)).bg(t.rule).child(div().h_full().w(gpui::relative(frac)).bg(t.accent)))
-                    .child(ui::button(SharedString::from(format!("cancel-{i}")), "Cancel", BtnKind::Quiet, cx, move |_, _, _| p.cancel()))
+                    .child(
+                        div()
+                            .flex()
+                            .justify_between()
+                            .text_xs()
+                            .child(u.name.clone())
+                            .child(format!("{}%", (frac * 100.0) as u32)),
+                    )
+                    .child(
+                        div().w_full().h(px(2.)).bg(t.rule).child(div().h_full().w(gpui::relative(frac)).bg(t.accent)),
+                    )
+                    .child(ui::button(
+                        SharedString::from(format!("cancel-{i}")),
+                        "Cancel",
+                        BtnKind::Quiet,
+                        cx,
+                        move |_, _, _| p.cancel(),
+                    ))
                     .into_any_element(),
             );
         }
         let refs = farfield_core::merge::refs(self.draft.local[K::TEXT].as_str().unwrap_or(""));
         if !refs.is_empty() {
-            out.push(ui::field_row("References", div().flex().flex_col().children(refs.into_iter().map(|r| ui::mono(r, cx))), cx).into_any_element());
+            out.push(
+                ui::field_row(
+                    "References",
+                    div().flex().flex_col().children(refs.into_iter().map(|r| ui::mono(r, cx))),
+                    cx,
+                )
+                .into_any_element(),
+            );
         }
         let words = self.editor.update(cx, |e, _| e.words());
         out.push(ui::mono(format!("{words} words · key {}", self.draft.key), cx).pt(S4).into_any_element());

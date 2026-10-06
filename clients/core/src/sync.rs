@@ -39,7 +39,12 @@ pub trait Kind {
     const EDITABLE: &'static [&'static str];
     fn key_of(v: &Value) -> String;
     fn get(s: &Session, key: &str) -> impl std::future::Future<Output = Result<Versioned<Value>, ApiError>> + Send;
-    fn put(s: &Session, key: &str, v: &Value, if_match: Option<&str>) -> impl std::future::Future<Output = Result<Versioned<Value>, ApiError>> + Send;
+    fn put(
+        s: &Session,
+        key: &str,
+        v: &Value,
+        if_match: Option<&str>,
+    ) -> impl std::future::Future<Output = Result<Versioned<Value>, ApiError>> + Send;
     fn post(s: &Session, v: &Value) -> impl std::future::Future<Output = Result<Versioned<Value>, ApiError>> + Send;
 }
 
@@ -47,7 +52,18 @@ pub fn same_edits<K: Kind>(a: &Value, b: &Value) -> bool {
     K::EDITABLE.iter().all(|f| norm(a.get(*f)) == norm(b.get(*f)))
 }
 
-fn norm(v: Option<&Value>) -> Value {
+/// As `same_edits`, ignoring the fields the server names on create (a new
+/// record's slug is stamped by the server, so the draft never had it).
+fn same_created<K: Kind>(server: &Value, local: &Value) -> bool {
+    // a requested slug comes back stamped: "<ms>-<slug>"
+    let want = local.get("slug").and_then(|v| v.as_str()).unwrap_or("");
+    let got = server.get("slug").and_then(|v| v.as_str()).unwrap_or("");
+    (want.is_empty() || got == want || got.ends_with(&format!("-{want}")))
+        && K::EDITABLE.iter().filter(|f| **f != "slug").all(|f| norm(server.get(*f)) == norm(local.get(*f)))
+}
+
+/// A field value with "absent", null, "", [] and false treated alike.
+pub fn norm(v: Option<&Value>) -> Value {
     match v {
         None | Some(Value::Null) => Value::Null,
         Some(Value::String(s)) if s.is_empty() => Value::Null,
@@ -261,7 +277,7 @@ async fn find_created<K: Kind>(s: &Session, local: &Value) -> Result<Option<Vers
             continue;
         }
         let full = K::get(s, &key).await?;
-        if same_edits::<K>(&full.value, local) {
+        if same_created::<K>(&full.value, local) {
             return Ok(Some(full));
         }
     }
@@ -306,9 +322,17 @@ pub async fn resolve<K: Kind>(s: &Session, d: &mut Draft, how: Resolution) -> Re
             d.base = Some(remote);
             d.base_etag = d.remote_etag.take();
             d.remote = None;
-            d.state = if d.base.as_ref().is_some_and(|b| same_edits::<K>(b, &d.local)) { SaveState::Saved } else { SaveState::Local };
+            d.state = if d.base.as_ref().is_some_and(|b| same_edits::<K>(b, &d.local)) {
+                SaveState::Saved
+            } else {
+                SaveState::Local
+            };
             s.drafts(K::DRAFTS)?.save(d).map_err(|e| ApiError::BadRequest(e.to_string()))?;
-            Ok(if d.state == SaveState::Saved { SaveOutcome::Saved } else { SaveOutcome::NotSaved(ApiError::Cancelled) })
+            Ok(if d.state == SaveState::Saved {
+                SaveOutcome::Saved
+            } else {
+                SaveOutcome::NotSaved(ApiError::Cancelled)
+            })
         }
         Resolution::Merge => {
             let m = merge3(&base, &d.local, &remote, K::TEXT);
@@ -393,9 +417,26 @@ impl Kind for ContentSeries {
         to_value(Versioned { value: l.value, etag: l.etag })
     }
     async fn put(s: &Session, key: &str, v: &Value, if_match: Option<&str>) -> Result<Versioned<Value>, ApiError> {
-        to_value(content::update_series(s, key, v["title"].as_str().unwrap_or(""), v["body"].as_str().unwrap_or(""), if_match).await?)
+        to_value(
+            content::update_series(
+                s,
+                key,
+                v["title"].as_str().unwrap_or(""),
+                v["body"].as_str().unwrap_or(""),
+                if_match,
+            )
+            .await?,
+        )
     }
     async fn post(s: &Session, v: &Value) -> Result<Versioned<Value>, ApiError> {
-        to_value(content::create_series(s, v["title"].as_str().unwrap_or(""), v["slug"].as_str().unwrap_or(""), v["body"].as_str().unwrap_or("")).await?)
+        to_value(
+            content::create_series(
+                s,
+                v["title"].as_str().unwrap_or(""),
+                v["slug"].as_str().unwrap_or(""),
+                v["body"].as_str().unwrap_or(""),
+            )
+            .await?,
+        )
     }
 }

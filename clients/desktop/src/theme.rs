@@ -7,7 +7,7 @@
 //! Inter for interface chrome, Newsreader only inside documents, IBM Plex Mono
 //! for technical readouts.
 
-use gpui::{px, App, BoxShadow, Global, Hsla, Pixels, Rgba, SharedString, WindowAppearance};
+use gpui::{px, App, BoxShadow, Global, Hsla, Pixels, Rgba, WindowAppearance};
 use std::borrow::Cow;
 
 pub mod tokens {
@@ -25,9 +25,7 @@ pub const S3: Pixels = px(12.);
 pub const S4: Pixels = px(16.);
 pub const S5: Pixels = px(24.);
 pub const S6: Pixels = px(32.);
-pub const S7: Pixels = px(48.);
 pub const R_S: Pixels = px(3.);
-pub const R_M: Pixels = px(6.);
 pub const TOP_H: Pixels = px(48.);
 /// --measure, the reading width of a document (47rem).
 pub const MEASURE: Pixels = px(752.);
@@ -86,7 +84,9 @@ pub fn parse_color(v: &str) -> Option<u32> {
         return None;
     }
     let a = parts.get(3).copied().unwrap_or(1.0);
-    Some(((parts[0] as u32) << 24) | ((parts[1] as u32) << 16) | ((parts[2] as u32) << 8) | ((a * 255.0).round() as u32))
+    Some(
+        ((parts[0] as u32) << 24) | ((parts[1] as u32) << 16) | ((parts[2] as u32) << 8) | ((a * 255.0).round() as u32),
+    )
 }
 
 fn hsla(c: u32) -> Hsla {
@@ -174,7 +174,12 @@ impl Theme {
     }
 
     pub fn editor_palette(&self) -> farfield_editor::Palette {
-        farfield_editor::Palette { paper: self.raw_paper, ink: self.raw_ink, accent: self.raw_accent, bad: self.raw_bad }
+        farfield_editor::Palette {
+            paper: self.raw_paper,
+            ink: self.raw_ink,
+            accent: self.raw_accent,
+            bad: self.raw_bad,
+        }
     }
 }
 
@@ -186,15 +191,16 @@ pub fn theme(cx: &App) -> &Theme {
 /// editor's static Newsreader and Plex Mono (the same files the editor
 /// rasterizes, so document chrome and document text match).
 pub fn load_fonts(cx: &mut App) {
-    let mut fonts: Vec<Cow<'static, [u8]>> = tokens::FONTS.iter().map(|(_, b)| Cow::Borrowed(*b)).collect();
+    // the theme's Newsreader is a latin-subset variable face that registers
+    // under the same name as the editor's static cuts; two faces behind one
+    // name shape with one and rasterize with the other, so only the editor's
+    // complete static Newsreader is registered
+    let mut fonts: Vec<Cow<'static, [u8]>> =
+        tokens::FONTS.iter().filter(|(family, _)| *family != "Newsreader").map(|(_, b)| Cow::Borrowed(*b)).collect();
     for f in farfield_editor::assets::FONTS {
         fonts.push(Cow::Borrowed(f));
     }
     cx.text_system().add_fonts(fonts).expect("register brand fonts");
-}
-
-pub fn ui_font() -> SharedString {
-    FONT_UI.into()
 }
 
 #[cfg(test)]

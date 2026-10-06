@@ -158,7 +158,8 @@ pub fn redact(s: &str) -> String {
     for k in ["token=", "?t=", "&t=", "key="] {
         while let Some(i) = out.find(k) {
             let start = i + k.len();
-            let end = out[start..].find(|c: char| c == '&' || c.is_whitespace() || c == '"').map_or(out.len(), |j| start + j);
+            let end =
+                out[start..].find(|c: char| c == '&' || c.is_whitespace() || c == '"').map_or(out.len(), |j| start + j);
             if out[start..end] == *"[redacted]" {
                 break;
             }

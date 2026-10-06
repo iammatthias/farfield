@@ -84,15 +84,26 @@ pub mod bookmarks {
     }
 
     /// Partial update: only the fields given change on the server.
-    pub async fn update(s: &Session, id: &str, fields: &Value, if_match: Option<&str>) -> Result<Versioned<Bookmark>, ApiError> {
-        let r = s.client(SERVICE)?.send_json(Method::PUT, &format!("/api/bookmarks/{}", enc(id)), Some(fields), if_match).await;
+    pub async fn update(
+        s: &Session,
+        id: &str,
+        fields: &Value,
+        if_match: Option<&str>,
+    ) -> Result<Versioned<Bookmark>, ApiError> {
+        let r = s
+            .client(SERVICE)?
+            .send_json(Method::PUT, &format!("/api/bookmarks/{}", enc(id)), Some(fields), if_match)
+            .await;
         s.invalidate(SERVICE, "/api/admin/bookmarks");
         s.invalidate(SERVICE, &format!("/api/admin/bookmarks/{}", enc(id)));
         r
     }
 
     pub async fn delete(s: &Session, id: &str, if_match: Option<&str>) -> Result<(), ApiError> {
-        let r = s.client(SERVICE)?.send_json::<Value>(Method::DELETE, &format!("/api/bookmarks/{}", enc(id)), None, if_match).await;
+        let r = s
+            .client(SERVICE)?
+            .send_json::<Value>(Method::DELETE, &format!("/api/bookmarks/{}", enc(id)), None, if_match)
+            .await;
         s.invalidate(SERVICE, "/api/admin/bookmarks");
         r.map(|_| ())
     }
@@ -173,14 +184,23 @@ pub mod qr {
         r
     }
 
-    pub async fn update(s: &Session, id: &str, fields: &Value, if_match: Option<&str>) -> Result<Versioned<Code>, ApiError> {
-        let r = s.client(SERVICE)?.send_json(Method::PUT, &format!("/api/codes/{}", enc(id)), Some(fields), if_match).await;
+    pub async fn update(
+        s: &Session,
+        id: &str,
+        fields: &Value,
+        if_match: Option<&str>,
+    ) -> Result<Versioned<Code>, ApiError> {
+        let r =
+            s.client(SERVICE)?.send_json(Method::PUT, &format!("/api/codes/{}", enc(id)), Some(fields), if_match).await;
         s.invalidate(SERVICE, "/api/admin/codes");
         r
     }
 
     pub async fn delete(s: &Session, id: &str, if_match: Option<&str>) -> Result<(), ApiError> {
-        let r = s.client(SERVICE)?.send_json::<Value>(Method::DELETE, &format!("/api/codes/{}", enc(id)), None, if_match).await;
+        let r = s
+            .client(SERVICE)?
+            .send_json::<Value>(Method::DELETE, &format!("/api/codes/{}", enc(id)), None, if_match)
+            .await;
         s.invalidate(SERVICE, "/api/admin/codes");
         r.map(|_| ())
     }
@@ -294,7 +314,10 @@ pub mod scrap {
         if magic_link {
             path.push_str("&token=generate");
         }
-        let rb = c.request(Method::POST, &path)?.header(header::CONTENT_TYPE, "text/plain; charset=utf-8").body(body.to_string());
+        let rb = c
+            .request(Method::POST, &path)?
+            .header(header::CONTENT_TYPE, "text/plain; charset=utf-8")
+            .body(body.to_string());
         let r = c.send(rb, true).await?;
         let text = String::from_utf8_lossy(&ServiceClient::body(r, 1 << 20).await?).to_string();
         s.invalidate(SERVICE, "/api/admin/pastes?page=1&limit=50");
@@ -303,13 +326,19 @@ pub mod scrap {
 
     /// Change title, language, visibility or expiry.
     pub async fn update(s: &Session, id: &str, fields: &Value) -> Result<Versioned<Paste>, ApiError> {
-        let r = s.client(SERVICE)?.send_json(Method::PUT, &format!("/api/admin/pastes/{}", enc(id)), Some(fields), None).await;
+        let r = s
+            .client(SERVICE)?
+            .send_json(Method::PUT, &format!("/api/admin/pastes/{}", enc(id)), Some(fields), None)
+            .await;
         s.invalidate(SERVICE, &format!("/api/admin/pastes/{}", enc(id)));
         r
     }
 
     pub async fn delete(s: &Session, id: &str) -> Result<(), ApiError> {
-        s.client(SERVICE)?.send_json::<Value>(Method::DELETE, &format!("/api/pastes/{}", enc(id)), None, None).await.map(|_| ())
+        s.client(SERVICE)?
+            .send_json::<Value>(Method::DELETE, &format!("/api/pastes/{}", enc(id)), None, None)
+            .await
+            .map(|_| ())
     }
 
     /// Issue a new magic-link token, invalidating the old one. Returns it
@@ -388,6 +417,9 @@ pub mod library {
         pub books: Vec<Book>,
         #[serde(default)]
         pub collections: Vec<CollectionCount>,
+        /// Books with no collection (not a folder of their own).
+        #[serde(default)]
+        pub uncategorized: i64,
     }
 
     pub async fn catalog(s: &Session) -> Result<Loaded<Catalog>, ApiError> {
@@ -410,9 +442,13 @@ pub mod library {
         r.map(|_| ())
     }
 
+    /// A cover (or its thumbnail) by its own CID. The OPDS routes speak HTTP
+    /// Basic (what e-readers send), so the key rides as the Basic password.
     pub async fn cover(s: &Session, cid: &str) -> Result<bytes::Bytes, ApiError> {
         let c = s.client(SERVICE)?;
-        let r = c.send(c.request(Method::GET, &format!("/opds/cover/{cid}"))?, false).await?;
+        let cred = c.credential().ok_or_else(|| ApiError::Unauthorized(SERVICE.into()))?.expose().to_string();
+        let rb = c.request(Method::GET, &format!("/opds/cover/{cid}"))?.basic_auth("farfield", Some(cred));
+        let r = c.send(rb, false).await?;
         ServiceClient::body(r, 8 << 20).await
     }
 
@@ -469,8 +505,32 @@ pub mod sideload {
         pub share_url: String,
         #[serde(default)]
         pub expires_at: String,
+        /// 0 = unlimited.
         #[serde(default)]
         pub max_installs: i64,
+        // The admin list carries the rest; a freshly minted share only the above.
+        #[serde(default)]
+        pub build_id: String,
+        #[serde(default)]
+        pub app_name: String,
+        #[serde(default)]
+        pub version: String,
+        #[serde(default)]
+        pub label: String,
+        /// active | consumed | revoked
+        #[serde(default)]
+        pub state: String,
+        #[serde(default)]
+        pub installs: i64,
+        #[serde(default)]
+        pub revoked: bool,
+        /// A fresh install can start on this link right now.
+        #[serde(default)]
+        pub live: bool,
+        #[serde(default)]
+        pub created_at: String,
+        #[serde(default)]
+        pub consumed_at: String,
         #[serde(flatten)]
         pub extra: Map<String, Value>,
     }
@@ -504,7 +564,12 @@ pub mod sideload {
     }
 
     /// Upload an IPA, streamed. Idempotent by content (same IPA = same build).
-    pub async fn upload(s: &Session, path: &Path, notes: &str, progress: &Progress) -> Result<Versioned<Build>, ApiError> {
+    pub async fn upload(
+        s: &Session,
+        path: &Path,
+        notes: &str,
+        progress: &Progress,
+    ) -> Result<Versioned<Build>, ApiError> {
         let c = s.client(SERVICE)?;
         let len = std::fs::metadata(path).map_err(|e| ApiError::BadRequest(e.to_string()))?.len();
         let name = path.file_name().map(|n| n.to_string_lossy().to_string()).unwrap_or_default();
@@ -520,13 +585,19 @@ pub mod sideload {
     }
 
     pub async fn delete_build(s: &Session, id: &str) -> Result<(), ApiError> {
-        let r = s.client(SERVICE)?.send_json::<Value>(Method::DELETE, &format!("/api/builds/{}", enc(id)), None, None).await;
+        let r = s
+            .client(SERVICE)?
+            .send_json::<Value>(Method::DELETE, &format!("/api/builds/{}", enc(id)), None, None)
+            .await;
         s.invalidate(SERVICE, "/api/builds");
         r.map(|_| ())
     }
 
     pub async fn delete_app(s: &Session, bundle: &str) -> Result<(), ApiError> {
-        let r = s.client(SERVICE)?.send_json::<Value>(Method::DELETE, &format!("/api/apps/{}", enc(bundle)), None, None).await;
+        let r = s
+            .client(SERVICE)?
+            .send_json::<Value>(Method::DELETE, &format!("/api/apps/{}", enc(bundle)), None, None)
+            .await;
         s.invalidate(SERVICE, "/api/builds");
         r.map(|_| ())
     }
@@ -555,9 +626,10 @@ pub mod sideload {
 
     /// The canonical install page for a build (public host).
     pub fn install_url(s: &Session, b: &Build) -> Option<String> {
+        // always the public host: the upload reply's installURL is absolute
+        // (the server's own idea of its public URL), the list carries none
         let base = s.public_base(SERVICE)?;
-        let path = if b.install_url.is_empty() { format!("/b/{}", b.id) } else { b.install_url.clone() };
-        Some(format!("{}{}", base.trim_end_matches('/'), path))
+        Some(format!("{}/b/{}", base.trim_end_matches('/'), enc(&b.id)))
     }
 }
 
@@ -626,11 +698,11 @@ pub mod daily {
             None => s.load(SERVICE, "/api/art").await,
         }
     }
-    /// The art plate as SVG.
+    /// The art plate as SVG (`/art/{date}.svg`; the bare `/art/{date}` is the HTML page).
     pub async fn art_svg(s: &Session, date: Option<&str>) -> Result<bytes::Bytes, ApiError> {
         let c = s.client(SERVICE)?;
         let path = match date {
-            Some(d) => format!("/art/{}", enc(d)),
+            Some(d) => format!("/art/{}.svg", enc(d)),
             None => "/art.svg".into(),
         };
         let r = c.send(c.request(Method::GET, &path)?, false).await?;
@@ -668,8 +740,8 @@ pub mod switchboard {
     pub async fn messages(s: &Session, limit: u32) -> Result<Loaded<Value>, ApiError> {
         s.load(SERVICE, &format!("/api/admin/messages?limit={limit}")).await
     }
-    pub async fn jobs(s: &Session) -> Result<Loaded<Value>, ApiError> {
-        s.load(SERVICE, "/api/admin/jobs").await
+    pub async fn jobs(s: &Session, limit: u32) -> Result<Loaded<Value>, ApiError> {
+        s.load(SERVICE, &format!("/api/admin/jobs?limit={limit}")).await
     }
 }
 
@@ -698,18 +770,6 @@ pub async fn status(s: &Session, service: &str) -> Result<Value, ApiError> {
         return Err(ApiError::Server { status: 200, message: "status not ok".into() });
     }
     Ok(v.value)
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    #[test]
-    fn scrap_created_reply() {
-        let c = scrap::parse_created("https://scrap.farfield.systems/abc123\ntoken: s3cr3t\n").unwrap();
-        assert_eq!(c.id, "abc123");
-        assert_eq!(c.token.as_deref(), Some("s3cr3t"));
-        assert!(scrap::parse_created("oops").is_err());
-    }
 }
 
 /// A cheap request that needs the key the desktop client relies on for each
@@ -741,6 +801,34 @@ pub async fn probe(s: &Session, service: &str) -> Result<(), ApiError> {
             return Err(ApiError::Unauthorized(service.into()));
         }
         c.get::<Value>(p).await?;
+        // Where the read above can pass without a write key (a fleet with
+        // no read key configured), prove the key writes with a request the
+        // server rejects for its body only after authorising it: 400 means
+        // the key was accepted, 401 that it was not. Nothing is created.
+        let write_check = match service {
+            "feed" => Some(c.request(reqwest::Method::POST, "/api/posts")?.json(&json!({}))),
+            "blobs" => Some(c.request(reqwest::Method::POST, "/blobs")?.body(Vec::<u8>::new())),
+            _ => None,
+        };
+        if let Some(rb) = write_check {
+            match c.send(rb, true).await {
+                Err(ApiError::BadRequest(_)) => {}
+                Err(e) => return Err(e),
+                Ok(_) => return Err(ApiError::Decode("write check unexpectedly succeeded".into())),
+            }
+        }
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    #[test]
+    fn scrap_created_reply() {
+        let c = scrap::parse_created("https://scrap.farfield.systems/abc123\ntoken: s3cr3t\n").unwrap();
+        assert_eq!(c.id, "abc123");
+        assert_eq!(c.token.as_deref(), Some("s3cr3t"));
+        assert!(scrap::parse_created("oops").is_err());
+    }
 }

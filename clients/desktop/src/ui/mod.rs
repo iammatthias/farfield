@@ -6,7 +6,7 @@ pub mod draft_doc;
 pub mod input;
 
 use crate::theme::{theme, Theme, FONT_DOC, FONT_MONO, R_S};
-use gpui::{div, prelude::*, px, AnyElement, App, ClickEvent, Div, ElementId, Hsla, SharedString, Stateful, Window};
+use gpui::{div, prelude::*, px, App, ClickEvent, Div, ElementId, Hsla, SharedString, Stateful, Window};
 
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub enum Kind {
@@ -38,11 +38,9 @@ pub fn button(
         .child(label)
         .on_click(on_click);
     match kind {
-        Kind::Primary => d
-            .bg(t.accent)
-            .text_color(t.accent_ink)
-            .font_weight(gpui::FontWeight::MEDIUM)
-            .hover(|s| s.opacity(0.9)),
+        Kind::Primary => {
+            d.bg(t.accent).text_color(t.accent_ink).font_weight(gpui::FontWeight::MEDIUM).hover(|s| s.opacity(0.9))
+        }
         Kind::Quiet => {
             let ink = t.ink;
             d.text_color(t.ink_2).hover(move |s| s.text_color(ink).bg(t.wash))
@@ -105,21 +103,14 @@ pub fn chip(label: impl Into<SharedString>, color: Hsla, cx: &App) -> Div {
         .gap(px(5.))
         .text_xs()
         .text_color(t.ink_2)
-        .child(div().w(px(6.)).h(px(6.)).rounded_full().bg(color))
+        .child(div().flex_none().w(px(6.)).h(px(6.)).rounded_full().bg(color))
         .child(label.into())
 }
 
 /// A notice line (not a box): coloured text with a left rule.
 pub fn notice(s: impl Into<SharedString>, color: Hsla, cx: &App) -> Div {
     let t = theme(cx);
-    div()
-        .border_l_2()
-        .border_color(color)
-        .pl(px(10.))
-        .py(px(4.))
-        .text_sm()
-        .text_color(t.ink)
-        .child(s.into())
+    div().border_l_2().border_color(color).pl(px(10.)).py(px(4.)).text_sm().text_color(t.ink).child(s.into())
 }
 
 /// An empty or loading state.
@@ -171,8 +162,4 @@ pub fn when(s: &str) -> String {
 pub fn floating(cx: &App) -> Div {
     let t = theme(cx);
     div().bg(t.float).rounded(px(8.)).shadow(t.float_shadow()).border_1().border_color(t.rule)
-}
-
-pub fn any<E: IntoElement>(e: E) -> AnyElement {
-    e.into_any_element()
 }

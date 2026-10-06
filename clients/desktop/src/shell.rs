@@ -7,17 +7,39 @@ use crate::ui::input::{FieldEvent, TextField};
 use crate::ui::{self, floating, Kind};
 use crate::workspace::{Handle, PaletteItem};
 use gpui::{
-    actions, div, prelude::*, px, AnyElement, App, Context, Entity, FocusHandle, Focusable, Global, KeyBinding, MouseButton,
-    MouseMoveEvent, MouseUpEvent, Pixels, SharedString, Subscription, Window,
+    actions, div, prelude::*, px, AnyElement, App, Context, Entity, FocusHandle, Focusable, Global, KeyBinding,
+    MouseButton, MouseMoveEvent, MouseUpEvent, Pixels, SharedString, Subscription, Window,
 };
-use std::sync::Arc;
 use std::time::Duration;
 
 actions!(
     shell,
     [
-        OpenPalette, ToggleNav, ToggleInspector, Search, NewItem, Save, Refresh, Connections, CloseOverlay,
-        PaletteUp, PaletteDown, Ws1, Ws2, Ws3, Ws4, Ws5, Ws6, Ws7, Ws8, Ws9, CycleTheme, NextWs, PrevWs
+        OpenPalette,
+        ToggleNav,
+        ToggleInspector,
+        Search,
+        NewItem,
+        Save,
+        Refresh,
+        Connections,
+        CloseOverlay,
+        PaletteUp,
+        PaletteDown,
+        ConfirmAccept,
+        ConfirmCancel,
+        Ws1,
+        Ws2,
+        Ws3,
+        Ws4,
+        Ws5,
+        Ws6,
+        Ws7,
+        Ws8,
+        Ws9,
+        CycleTheme,
+        NextWs,
+        PrevWs
     ]
 );
 
@@ -34,6 +56,8 @@ pub fn bind_keys(cx: &mut App) {
         KeyBinding::new("cmd-r", Refresh, s),
         KeyBinding::new("cmd-,", Connections, None),
         KeyBinding::new("escape", CloseOverlay, Some("Palette")),
+        KeyBinding::new("enter", ConfirmAccept, Some("Confirm")),
+        KeyBinding::new("escape", ConfirmCancel, Some("Confirm")),
         KeyBinding::new("up", PaletteUp, Some("Palette")),
         KeyBinding::new("down", PaletteDown, Some("Palette")),
         KeyBinding::new("cmd-1", Ws1, s),
@@ -80,13 +104,8 @@ pub fn confirm(
     danger: bool,
     run: impl FnOnce(&mut Window, &mut App) + 'static,
 ) {
-    cx.global_mut::<Overlay>().confirm = Some(Confirm {
-        title: title.into(),
-        body: body.into(),
-        action: action.into(),
-        danger,
-        run: Box::new(run),
-    });
+    cx.global_mut::<Overlay>().confirm =
+        Some(Confirm { title: title.into(), body: body.into(), action: action.into(), danger, run: Box::new(run) });
     cx.refresh_windows();
 }
 
@@ -140,6 +159,8 @@ pub struct Shell {
     drag: Option<Drag>,
     palette: Option<Entity<TextField>>,
     palette_sel: usize,
+    confirm_focus: FocusHandle,
+    onboarding: Option<Entity<crate::ws::onboarding::Onboarding>>,
     _subs: Vec<Subscription>,
 }
 
@@ -155,6 +176,8 @@ impl Shell {
             drag: None,
             palette: None,
             palette_sel: 0,
+            confirm_focus: cx.focus_handle(),
+            onboarding: None,
             _subs: Vec::new(),
         };
         this.switch(&active, w, cx);
@@ -303,24 +326,29 @@ impl Shell {
                 "pulse" => "pulse",
                 _ => continue,
             };
-            items.push(PaletteItem::new(format!("/{} — {}", c.name, c.summary), c.usage.clone(), move |_, cx| goto(cx, target)));
+            items.push(PaletteItem::new(format!("/{} — {}", c.name, c.summary), c.usage.clone(), move |_, cx| {
+                goto(cx, target)
+            }));
         }
-        items.push(PaletteItem::new("Theme: cycle system / light / dark", "⌘⌥T", |w, cx| cycle_theme(w, cx)));
+        items.push(PaletteItem::new("Theme: cycle system / light / dark", "⌘⌥T", cycle_theme));
         items.push(PaletteItem::new("Toggle reduced motion", "", |w, cx| {
             let st = cx.global_mut::<AppState>();
             st.prefs.reduced_motion = !st.prefs.reduced_motion;
             st.save_prefs();
             apply_theme(w, cx);
         }));
-        items.push(PaletteItem::new("Connections and keys", "⌘,", |_, cx| goto(cx, "connections")));
+        items.push(PaletteItem::new("Settings", "⌘,", |_, cx| goto(cx, "connections")));
         items
     }
 
     fn filtered(&self, cx: &mut Context<Self>) -> Vec<PaletteItem> {
         let q = self.palette.as_ref().map(|f| f.read(cx).text()).unwrap_or_default().to_lowercase();
-        let mut scored: Vec<(i32, PaletteItem)> =
-            self.palette_items(cx).into_iter().filter_map(|it| fuzzy(&q, &it.title.to_lowercase()).map(|s| (s, it))).collect();
-        scored.sort_by(|a, b| b.0.cmp(&a.0));
+        let mut scored: Vec<(i32, PaletteItem)> = self
+            .palette_items(cx)
+            .into_iter()
+            .filter_map(|it| fuzzy(&q, &it.title.to_lowercase()).map(|s| (s, it)))
+            .collect();
+        scored.sort_by_key(|s| std::cmp::Reverse(s.0));
         scored.into_iter().map(|(_, i)| i).take(40).collect()
     }
 
@@ -393,7 +421,9 @@ impl Shell {
                     .child(div().w(px(6.)).h(px(6.)).rounded_full().bg(dot))
                     .child(div().flex_1().child(e.title))
                     .when(dirty, |d| d.child(div().text_xs().text_color(t.signal).child("●")))
-                    .when(i < 9, |d| d.child(div().text_xs().font_family(FONT_MONO).text_color(t.ink_3).child(format!("⌘{}", i + 1))))
+                    .when(i < 9, |d| {
+                        d.child(div().text_xs().font_family(FONT_MONO).text_color(t.ink_3).child(format!("⌘{}", i + 1)))
+                    })
                     .on_click(cx.listener(move |this, _, w, cx| this.switch(id, w, cx)))
             }))
     }
@@ -451,13 +481,18 @@ impl Shell {
                         }))
                         .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
                         .w(px(560.))
-                        .max_h(px(460.))
                         .flex()
                         .flex_col()
                         .child(div().px(S4).pt(S3).pb(S2).child(f))
                         .child(
-                            div().id("palette-items").flex().flex_col().overflow_y_scroll().pb(S2).children(
-                                items.into_iter().enumerate().map(|(i, it)| {
+                            div()
+                                .id("palette-items")
+                                .flex()
+                                .flex_col()
+                                .max_h(px(400.))
+                                .overflow_y_scroll()
+                                .pb(S2)
+                                .children(items.into_iter().enumerate().map(|(i, it)| {
                                     let run = it.run.clone();
                                     let title = it.title.clone();
                                     div()
@@ -471,14 +506,19 @@ impl Shell {
                                         .text_color(t.ink)
                                         .when(i == sel, |d| d.bg(t.accent_soft))
                                         .child(it.title.clone())
-                                        .child(div().text_xs().font_family(FONT_MONO).text_color(t.ink_3).child(it.subtitle.clone()))
+                                        .child(
+                                            div()
+                                                .text_xs()
+                                                .font_family(FONT_MONO)
+                                                .text_color(t.ink_3)
+                                                .child(it.subtitle.clone()),
+                                        )
                                         .on_click(cx.listener(move |this, _, w, cx| {
                                             this.close_palette(w, cx);
                                             log("palette", &[("run", &title)]);
                                             (run)(w, cx);
                                         }))
-                                }),
-                            ),
+                                })),
                         ),
                 )
                 .into_any_element(),
@@ -499,6 +539,21 @@ impl Shell {
                 .child(
                     floating(cx)
                         .id("confirm")
+                        .key_context("Confirm")
+                        .track_focus(&self.confirm_focus)
+                        .on_action(cx.listener(|this, _: &ConfirmAccept, w, cx| {
+                            if let Some(c) = cx.global_mut::<Overlay>().confirm.take() {
+                                log("confirmed", &[("what", &c.title)]);
+                                (c.run)(w, cx);
+                            }
+                            w.focus(&this.focus);
+                            cx.refresh_windows();
+                        }))
+                        .on_action(cx.listener(|this, _: &ConfirmCancel, w, cx| {
+                            cx.global_mut::<Overlay>().confirm = None;
+                            w.focus(&this.focus);
+                            cx.refresh_windows();
+                        }))
                         .w(px(440.))
                         .p(px(22.))
                         .flex()
@@ -506,6 +561,7 @@ impl Shell {
                         .gap(S3)
                         .child(div().text_base().font_weight(gpui::FontWeight::SEMIBOLD).text_color(t.ink).child(title))
                         .child(div().text_sm().text_color(t.ink_2).child(body))
+                        .child(div().text_xs().text_color(t.ink_3).child("Enter to confirm · Esc to cancel"))
                         .child(
                             div()
                                 .flex()
@@ -590,6 +646,44 @@ fn cycle_theme(w: &mut Window, cx: &mut App) {
 
 impl Render for Shell {
     fn render(&mut self, w: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        // first run (or "Run setup again"): the onboarding owns the window
+        if !state(cx).prefs.onboarded {
+            let ob = match &self.onboarding {
+                Some(o) => o.clone(),
+                None => {
+                    let o = cx.new(|cx| crate::ws::onboarding::Onboarding::new(w, cx));
+                    self.onboarding = Some(o.clone());
+                    o
+                }
+            };
+            // the shell's own root is not drawn during onboarding: hand focus over
+            if w.focused(cx).is_none_or(|f| f == self.focus) {
+                let h = ob.read(cx).focus_handle(cx);
+                w.focus(&h);
+            }
+            let t = theme(cx).clone();
+            let toasts = state(cx).toasts.clone();
+            return div()
+                .size_full()
+                .child(ob)
+                .child(div().absolute().bottom(px(24.)).right(px(16.)).flex().flex_col().gap(S2).children(
+                    toasts.into_iter().map(|to| {
+                        floating(cx)
+                            .px(S4)
+                            .py(px(9.))
+                            .max_w(px(420.))
+                            .text_sm()
+                            .text_color(if to.bad { t.bad } else { t.ink })
+                            .child(to.text.clone())
+                    }),
+                ))
+                .into_any_element();
+        }
+        self.onboarding = None;
+        // a confirmation takes the keyboard: Enter confirms, Esc cancels
+        if cx.global::<Overlay>().confirm.is_some() && !self.confirm_focus.is_focused(w) {
+            w.focus(&self.confirm_focus);
+        }
         if std::mem::take(&mut cx.global_mut::<Overlay>().reset) {
             self.reset_workspaces(w, cx);
         }
@@ -729,10 +823,13 @@ impl Render for Shell {
                                 .border_l_1()
                                 .border_color(t.rule)
                                 .hover(|s| s.bg(t.wash))
-                                .on_mouse_down(MouseButton::Left, cx.listener(|this, _, _, cx| {
-                                    this.drag = Some(Drag::Nav);
-                                    cx.notify()
-                                })),
+                                .on_mouse_down(
+                                    MouseButton::Left,
+                                    cx.listener(|this, _, _, cx| {
+                                        this.drag = Some(Drag::Nav);
+                                        cx.notify()
+                                    }),
+                                ),
                         )
                     })
                     .child(div().flex_1().min_w_0().h_full().children(view))
@@ -746,10 +843,13 @@ impl Render for Shell {
                                 .border_r_1()
                                 .border_color(t.rule)
                                 .hover(|s| s.bg(t.wash))
-                                .on_mouse_down(MouseButton::Left, cx.listener(|this, _, _, cx| {
-                                    this.drag = Some(Drag::Inspector);
-                                    cx.notify()
-                                })),
+                                .on_mouse_down(
+                                    MouseButton::Left,
+                                    cx.listener(|this, _, _, cx| {
+                                        this.drag = Some(Drag::Inspector);
+                                        cx.notify()
+                                    }),
+                                ),
                         )
                         .child(
                             div()
@@ -767,8 +867,8 @@ impl Render for Shell {
             .child(self.render_status(&t, cx))
             .children(self.render_palette(&t, cx))
             .children(self.render_confirm(&t, cx))
-            .child(
-                div().absolute().bottom(px(36.)).right(px(16.)).flex().flex_col().gap(S2).children(toasts.into_iter().map(|to| {
+            .child(div().absolute().bottom(px(36.)).right(px(16.)).flex().flex_col().gap(S2).children(
+                toasts.into_iter().map(|to| {
                     floating(cx)
                         .px(S4)
                         .py(px(9.))
@@ -776,8 +876,9 @@ impl Render for Shell {
                         .text_sm()
                         .text_color(if to.bad { t.bad } else { t.ink })
                         .child(to.text.clone())
-                })),
-            )
+                }),
+            ))
+            .into_any_element()
     }
 }
 
@@ -785,11 +886,6 @@ impl Focusable for Shell {
     fn focus_handle(&self, _: &App) -> FocusHandle {
         self.focus.clone()
     }
-}
-
-/// Hook the AppState's session for workspaces created later.
-pub fn session_of(cx: &App) -> Arc<farfield_core::Session> {
-    app::session(cx)
 }
 
 #[allow(dead_code)]

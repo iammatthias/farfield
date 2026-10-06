@@ -24,6 +24,8 @@ pub struct Prefs {
     pub nav_open: bool,
     pub workspace: String,
     pub profile: String,
+    /// First-run setup has been completed (or skipped).
+    pub onboarded: bool,
 }
 
 impl Default for Prefs {
@@ -37,6 +39,7 @@ impl Default for Prefs {
             nav_open: true,
             workspace: "content".into(),
             profile: String::new(),
+            onboarded: false,
         }
     }
 }
@@ -44,7 +47,6 @@ impl Default for Prefs {
 #[derive(Clone, Debug, PartialEq)]
 pub enum Health {
     Unknown,
-    Checking,
     Up,
     /// Up, but the stored key was refused (or none is stored).
     NoAuth,
@@ -55,7 +57,6 @@ impl Health {
     pub fn word(&self) -> &'static str {
         match self {
             Health::Unknown => "unknown",
-            Health::Checking => "checking",
             Health::Up => "online",
             Health::NoAuth => "needs key",
             Health::Down(_) => "offline",
@@ -114,12 +115,18 @@ impl AppState {
         // seeded from FARFIELD_KEY_<SERVICE> — for scripted development runs,
         // which must never write to (or prompt for) the real Keychain.
         let memory = std::env::var("FARFIELD_SECRETS").as_deref() == Ok("memory");
-        let secrets: Arc<dyn SecretStore> =
-            if memory { Arc::new(farfield_core::secret::MemoryStore::default()) } else { Arc::new(PlatformStore::new()) };
+        let secrets: Arc<dyn SecretStore> = if memory {
+            Arc::new(farfield_core::secret::MemoryStore::default())
+        } else {
+            Arc::new(PlatformStore::new())
+        };
         let session = Arc::new(Session::new(active, data_dir.clone(), secrets.clone()));
         if memory {
             for s in farfield_core::registry::services() {
-                if let Some(k) = std::env::var(format!("FARFIELD_KEY_{}", s.name.to_uppercase())).ok().and_then(farfield_core::secret::Credential::new) {
+                if let Some(k) = std::env::var(format!("FARFIELD_KEY_{}", s.name.to_uppercase()))
+                    .ok()
+                    .and_then(farfield_core::secret::Credential::new)
+                {
                     let _ = session.set_credential(&s.name, &k);
                 }
             }
@@ -183,7 +190,10 @@ pub fn session(cx: &App) -> Arc<Session> {
 pub fn describe(e: &ApiError) -> String {
     match e {
         ApiError::Offline(_) => "Offline — the service can't be reached. Your work is kept on this Mac.".into(),
-        ApiError::Uncertain(_) => "The connection dropped mid-save. It's kept as pending and will be checked before anything is resent.".into(),
+        ApiError::Uncertain(_) => {
+            "The connection dropped mid-save. It's kept as pending and will be checked before anything is resent."
+                .into()
+        }
         ApiError::Unauthorized(s) => format!("Not signed in to {s}: add or replace its key in Connections."),
         ApiError::Precondition { .. } => "Changed on the server since you opened it.".into(),
         ApiError::Unavailable(m) => format!("Unavailable: {m}"),

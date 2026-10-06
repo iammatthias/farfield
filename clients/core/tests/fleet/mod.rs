@@ -48,8 +48,18 @@ fn build(apps: &[&str]) {
     }
 }
 
+/// An unused loopback port, never the same one twice in this test process —
+/// concurrent tests asking the OS for "any free port" can otherwise be handed
+/// the same number between one test closing its probe and its service binding.
 fn free_port() -> u16 {
-    TcpListener::bind("127.0.0.1:0").unwrap().local_addr().unwrap().port()
+    static GIVEN: OnceLock<Mutex<std::collections::HashSet<u16>>> = OnceLock::new();
+    let given = GIVEN.get_or_init(Default::default);
+    loop {
+        let p = TcpListener::bind("127.0.0.1:0").unwrap().local_addr().unwrap().port();
+        if given.lock().unwrap().insert(p) {
+            return p;
+        }
+    }
 }
 
 pub struct Fleet {
@@ -89,6 +99,9 @@ impl Fleet {
         let d = data.path();
         let blobs_url = ports.get("blobs").map(|p| format!("http://127.0.0.1:{p}")).unwrap_or_default();
         let content_url = ports.get("content").map(|p| format!("http://127.0.0.1:{p}")).unwrap_or_default();
+        // blobs scans feed for references before a guarded delete
+        let feed_url =
+            ports.get("feed").map(|p| format!("http://127.0.0.1:{p}")).unwrap_or_else(|| "http://127.0.0.1:9".into()); // closed port: never the dev fleet
         let mut env = HashMap::new();
         for app in &want {
             let up = app.to_uppercase();
@@ -116,6 +129,8 @@ impl Fleet {
                 ("CONTENT_API_KEY".into(), key("content")),
                 ("CONTENT_PUBLIC_URL".into(), content_url.clone()),
                 ("PULSE_READ_KEY".into(), read_key("pulse")),
+                ("FEED_URL".into(), feed_url.clone()),
+                ("FEED_READ_KEY".into(), read_key("feed")),
             ];
             env.insert(app.to_string(), vars);
         }
@@ -183,7 +198,12 @@ impl Fleet {
         let endpoints: BTreeMap<String, Endpoint> = self
             .ports
             .iter()
-            .map(|(a, p)| (a.clone(), Endpoint { api: format!("http://127.0.0.1:{p}"), public: Some(format!("http://127.0.0.1:{p}")) }))
+            .map(|(a, p)| {
+                (
+                    a.clone(),
+                    Endpoint { api: format!("http://127.0.0.1:{p}"), public: Some(format!("http://127.0.0.1:{p}")) },
+                )
+            })
             .collect();
         Profile { id: "test".into(), name: "test fleet".into(), endpoints }
     }
