@@ -12,9 +12,27 @@ use shell::{Entry, Overlay, Shell};
 use workspace::Handle;
 
 fn entries() -> Vec<Entry> {
+    macro_rules! e {
+        ($id:literal, $title:literal, $svc:literal, $ty:path) => {
+            Entry { id: $id, title: $title, service: $svc, make: |w, cx| Handle::new($id, $title, cx.new(|cx| <$ty>::new(w, cx))) }
+        };
+    }
     vec![
-        Entry { id: "content", title: "Content", service: "content", make: |w, cx| Handle::new("content", "Content", cx.new(|cx| ws::content::ContentWs::new(w, cx))) },
-        Entry { id: "connections", title: "Connections", service: "apex", make: |w, cx| Handle::new("connections", "Connections", cx.new(|cx| ws::connections::Connections::new(w, cx))) },
+        e!("content", "Content", "content", ws::content::ContentWs),
+        e!("feed", "Feed", "feed", ws::feed::FeedWs),
+        e!("blobs", "Blobs", "blobs", ws::blobs::BlobsWs),
+        e!("bookmarks", "Bookmarks", "bookmarks", ws::bookmarks::BookmarksWs),
+        e!("library", "Library", "library", ws::library::LibraryWs),
+        e!("daily", "Daily", "daily", ws::daily::DailyWs),
+        e!("qr", "QR", "qr", ws::qr::QrWs),
+        e!("scrap", "Scrap", "scrap", ws::scrap::ScrapWs),
+        e!("sideload", "Sideload", "sideload", ws::sideload::SideloadWs),
+        e!("pulse", "Pulse", "pulse", ws::pulse::PulseWs),
+        e!("switchboard", "Switchboard", "switchboard", ws::switchboard::SwitchboardWs),
+        e!("backup", "Backup", "backup", ws::backup::BackupWs),
+        e!("keys", "Keys", "keys", ws::keys::KeysWs),
+        e!("apex", "Apex", "apex", ws::apex::ApexWs),
+        e!("connections", "Connections", "apex", ws::connections::Connections),
     ]
 }
 
