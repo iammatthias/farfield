@@ -53,7 +53,7 @@ fn keyed(service: &str) -> bool {
 
 impl Connections {
     pub fn new(w: &mut Window, cx: &mut Context<Self>) -> Self {
-        let address = cx.new(|cx| TextField::new(w, cx, "Address", "name.tailnet.ts.net").mono());
+        let address = cx.new(|cx| TextField::new(w, cx, "Address", "host, URL, or IP").mono());
         if let Some(h) = state(cx).session.profile.common_host() {
             address.update(cx, |f, cx| f.set_text(h, cx));
         }
@@ -112,7 +112,7 @@ impl Connections {
         let typed = self.address.read(cx).text();
         let cur = state(cx).session.profile.clone();
         // a tailnet profile keeps its id, so its drafts and cache stay with it
-        let p = crate::ws::onboarding::profile_for(&typed).map(|mut p| {
+        let p = crate::ws::onboarding::profile_for(&typed, None).map(|mut p| {
             if cur.id != "local" && p.id != "local" {
                 p.id = cur.id.clone();
             }

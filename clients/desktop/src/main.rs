@@ -6,6 +6,7 @@
 #![allow(clippy::type_complexity, clippy::too_many_arguments)]
 mod app;
 mod evidence;
+mod menu;
 mod perf;
 mod shell;
 mod signin;
@@ -61,6 +62,7 @@ fn main() {
         ui::doc_editor::bind_keys(cx);
         shell::bind_keys(cx);
         ws::onboarding::bind_keys(cx);
+        menu::install(cx);
         let bounds = Bounds::centered(None, size(px(1280.), px(820.)), cx);
         let win = cx
             .open_window(

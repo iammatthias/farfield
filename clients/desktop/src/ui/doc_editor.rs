@@ -779,6 +779,11 @@ impl Render for DocEditor {
             .on_action(cx.listener(Self::copy))
             .on_action(cx.listener(Self::cut))
             .on_action(cx.listener(Self::paste))
+            // the Edit menu speaks the text field's actions
+            .on_action(cx.listener(|this, _: &crate::ui::input::Copy, w, cx| this.copy(&Copy, w, cx)))
+            .on_action(cx.listener(|this, _: &crate::ui::input::Cut, w, cx| this.cut(&Cut, w, cx)))
+            .on_action(cx.listener(|this, _: &crate::ui::input::Paste, w, cx| this.paste(&Paste, w, cx)))
+            .on_action(cx.listener(|this, _: &crate::ui::input::SelectAll, w, cx| this.SelectAll(&SelectAll, w, cx)))
             .on_action(cx.listener(|_, _: &CharPalette, w, _| w.show_character_palette()))
             .on_action(cx.listener(|_, _: &DropPending, _, cx| {
                 if let Some(p) = cx.try_global::<crate::evidence::PendingDrop>().map(|p| p.0.clone()) {

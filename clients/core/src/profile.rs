@@ -45,13 +45,36 @@ pub fn is_loopback(host: &str) -> bool {
     h == "localhost" || h == "::1" || h.starts_with("127.")
 }
 
+/// A Tailscale address (100.64.0.0/10, or fd7a:115c:a1e0::/48). Traffic to it
+/// is WireGuard-encrypted end to end, so plain HTTP to it is not plaintext on
+/// the wire — the one exception, beside loopback, to "TLS everywhere".
+pub fn is_tailnet_ip(host: &str) -> bool {
+    let h = host.trim_start_matches('[').trim_end_matches(']');
+    match h.parse::<std::net::IpAddr>() {
+        Ok(std::net::IpAddr::V4(v4)) => {
+            let o = v4.octets();
+            o[0] == 100 && (64..128).contains(&o[1])
+        }
+        Ok(std::net::IpAddr::V6(v6)) => {
+            let s = v6.segments();
+            s[0] == 0xfd7a && s[1] == 0x115c && s[2] == 0xa1e0
+        }
+        Err(_) => false,
+    }
+}
+
+/// Hosts that may be reached over plain HTTP.
+pub fn plain_http_ok(host: &str) -> bool {
+    is_loopback(host) || is_tailnet_ip(host)
+}
+
 /// Validate an endpoint base and return it normalised (no trailing slash).
 pub fn validate_base(raw: &str) -> Result<Url, EndpointError> {
     let u = Url::parse(raw.trim()).map_err(|_| EndpointError::Invalid(raw.into()))?;
     let host = u.host_str().ok_or_else(|| EndpointError::Invalid(raw.into()))?;
     match u.scheme() {
         "https" => {}
-        "http" if is_loopback(host) => {}
+        "http" if plain_http_ok(host) => {}
         "http" => return Err(EndpointError::Insecure(raw.into())),
         _ => return Err(EndpointError::Invalid(raw.into())),
     }
@@ -118,6 +141,48 @@ pub struct TailnetPeer {
     pub host_name: String,
     pub dns_name: String,
     pub online: bool,
+    /// Its Tailscale addresses, IPv4 first.
+    pub ips: Vec<String>,
+}
+
+/// What `tailscale status` says about this machine's tailnet.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct TailnetStatus {
+    pub running: bool,
+    /// The tailnet's name (e.g. its MagicDNS domain).
+    pub tailnet: Option<String>,
+    /// This machine.
+    pub this_device: Option<TailnetPeer>,
+    /// Every other device, online first, then by name.
+    pub peers: Vec<TailnetPeer>,
+}
+
+fn peer_of(p: &serde_json::Value) -> Option<TailnetPeer> {
+    Some(TailnetPeer {
+        host_name: p["HostName"].as_str()?.to_string(),
+        dns_name: p["DNSName"].as_str().unwrap_or("").trim_end_matches('.').to_string(),
+        online: p["Online"].as_bool().unwrap_or(false),
+        ips: p["TailscaleIPs"]
+            .as_array()
+            .map(|a| a.iter().filter_map(|v| v.as_str().map(str::to_string)).collect())
+            .unwrap_or_default(),
+    })
+}
+
+/// Parse `tailscale status --json` in full.
+pub fn parse_tailnet(json: &str) -> Result<TailnetStatus, String> {
+    let v: serde_json::Value = serde_json::from_str(json).map_err(|e| e.to_string())?;
+    let running = v["BackendState"].as_str() == Some("Running");
+    let tailnet = v["CurrentTailnet"]["Name"]
+        .as_str()
+        .or(v["MagicDNSSuffix"].as_str())
+        .map(|s| s.trim_end_matches('.').to_string())
+        .filter(|s| !s.is_empty());
+    let this_device = peer_of(&v["Self"]);
+    let mut peers: Vec<TailnetPeer> =
+        v["Peer"].as_object().map(|m| m.values().filter_map(peer_of).collect()).unwrap_or_default();
+    peers.sort_by_key(|p| (!p.online, p.host_name.to_lowercase()));
+    Ok(TailnetStatus { running, tailnet, this_device, peers })
 }
 
 /// Parse `tailscale status --json` into the devices to offer: online first,
@@ -125,20 +190,8 @@ pub struct TailnetPeer {
 pub fn parse_tailscale_status(json: &str) -> Result<(bool, Vec<TailnetPeer>), String> {
     let v: serde_json::Value = serde_json::from_str(json).map_err(|e| e.to_string())?;
     let running = v["BackendState"].as_str() == Some("Running");
-    let mut peers: Vec<TailnetPeer> = v["Peer"]
-        .as_object()
-        .map(|m| {
-            m.values()
-                .filter_map(|p| {
-                    Some(TailnetPeer {
-                        host_name: p["HostName"].as_str()?.to_string(),
-                        dns_name: p["DNSName"].as_str()?.trim_end_matches('.').to_string(),
-                        online: p["Online"].as_bool().unwrap_or(false),
-                    })
-                })
-                .collect()
-        })
-        .unwrap_or_default();
+    let mut peers: Vec<TailnetPeer> =
+        v["Peer"].as_object().map(|m| m.values().filter_map(peer_of).collect()).unwrap_or_default();
     peers.sort_by_key(|p| (!p.online, p.host_name.to_lowercase()));
     Ok((running, peers))
 }
@@ -204,18 +257,25 @@ pub fn parse_fleet_address(input: &str) -> Result<(String, String), EndpointErro
     if raw.is_empty() {
         return Err(EndpointError::Invalid(input.into()));
     }
+    // a bare IPv6 address needs brackets to be a URL host
+    let raw_host = if raw.parse::<std::net::Ipv6Addr>().is_ok() { format!("[{raw}]") } else { raw.to_string() };
+    let bare = raw_host
+        .rsplit_once(':')
+        .filter(|(h, p)| !h.ends_with(':') && p.chars().all(|c| c.is_ascii_digit()))
+        .map(|(h, _)| h)
+        .unwrap_or(&raw_host);
     let with_scheme = if raw.contains("://") {
         raw.to_string()
-    } else if is_loopback(raw.split(':').next().unwrap_or("")) {
-        format!("http://{raw}")
+    } else if plain_http_ok(bare) {
+        format!("http://{raw_host}")
     } else {
-        format!("https://{raw}")
+        format!("https://{raw_host}")
     };
     let u = Url::parse(&with_scheme).map_err(|_| EndpointError::Invalid(input.into()))?;
     let host = u.host_str().ok_or_else(|| EndpointError::Invalid(input.into()))?.trim_end_matches('.').to_string();
     match u.scheme() {
         "https" => {}
-        "http" if is_loopback(&host) => {}
+        "http" if plain_http_ok(&host) => {}
         "http" => return Err(EndpointError::Insecure(input.into())),
         _ => return Err(EndpointError::Invalid(input.into())),
     }
@@ -227,7 +287,7 @@ impl Profile {
     /// `<scheme>://<host>:<port>`, public share links from the registry.
     pub fn from_address(id: &str, name: &str, address: &str) -> Result<Self, EndpointError> {
         let (scheme, host) = parse_fleet_address(address)?;
-        let host_url = if host.contains(':') { format!("[{host}]") } else { host.clone() };
+        let host_url = if host.contains(':') && !host.starts_with('[') { format!("[{host}]") } else { host.clone() };
         let endpoints = registry::services()
             .iter()
             .map(|s| {
@@ -279,5 +339,39 @@ mod address_tests {
         p.set_api("feed", "https://other.t.ts.net:9000").unwrap();
         assert_eq!(p.common_host(), None);
         assert!(p.set_api("feed", "http://other:1").is_err());
+    }
+}
+
+#[cfg(test)]
+mod ip_tests {
+    use super::*;
+
+    #[test]
+    fn tailnet_ips_may_use_http_others_may_not() {
+        assert!(is_tailnet_ip("100.101.102.103"));
+        assert!(is_tailnet_ip("[fd7a:115c:a1e0::1]"));
+        assert!(!is_tailnet_ip("100.128.0.1"));
+        assert!(!is_tailnet_ip("192.168.1.10"));
+        assert_eq!(parse_fleet_address("100.101.102.103").unwrap(), ("http".into(), "100.101.102.103".into()));
+        assert_eq!(parse_fleet_address("fd7a:115c:a1e0::1").unwrap().0, "http");
+        assert_eq!(parse_fleet_address("192.168.1.10").unwrap().0, "https");
+        assert!(matches!(parse_fleet_address("http://192.168.1.10"), Err(EndpointError::Insecure(_))));
+        assert_eq!(parse_fleet_address("https://box.example.com:8787").unwrap().1, "box.example.com");
+        let p = Profile::from_address("fleet", "x", "100.101.102.103").unwrap();
+        assert_eq!(p.endpoint("feed").unwrap().api, "http://100.101.102.103:8788");
+        let p6 = Profile::from_address("fleet", "x", "fd7a:115c:a1e0::1").unwrap();
+        assert_eq!(p6.endpoint("feed").unwrap().api, "http://[fd7a:115c:a1e0::1]:8788");
+    }
+
+    #[test]
+    fn tailnet_status_is_read_not_assumed() {
+        let j = r#"{"BackendState":"Running","MagicDNSSuffix":"tail1.ts.net",
+            "Self":{"HostName":"laptop","DNSName":"laptop.tail1.ts.net.","Online":true,"TailscaleIPs":["100.64.0.1"]},
+            "Peer":{"a":{"HostName":"server","DNSName":"server.tail1.ts.net.","Online":true,"TailscaleIPs":["100.64.0.2","fd7a:115c:a1e0::2"]}}}"#;
+        let s = parse_tailnet(j).unwrap();
+        assert!(s.running);
+        assert_eq!(s.tailnet.as_deref(), Some("tail1.ts.net"));
+        assert_eq!(s.this_device.unwrap().host_name, "laptop");
+        assert_eq!(s.peers[0].ips[0], "100.64.0.2");
     }
 }

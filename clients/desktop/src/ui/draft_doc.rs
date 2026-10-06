@@ -59,6 +59,7 @@ pub struct DraftDoc<K: Kind + 'static> {
     pub title: Option<Entity<TextField>>,
     fields: Vec<(FieldSpec, Entity<TextField>)>,
     persist: Option<Task<()>>,
+    _on_quit: gpui::Subscription,
     saving: bool,
     pub error: Option<String>,
     uploads: Vec<Upload>,
@@ -141,12 +142,18 @@ impl<K: Kind + 'static> DraftDoc<K> {
             })
             .collect();
         let _ = title_key;
+        // quitting mid-pause still keeps the last keystrokes
+        let _on_quit = cx.on_app_quit(|this, cx| {
+            this.flush_with(true, cx);
+            async {}
+        });
         DraftDoc {
             draft,
             editor,
             title,
             fields,
             persist: None,
+            _on_quit,
             saving: false,
             error: None,
             uploads: Vec::new(),
@@ -188,6 +195,12 @@ impl<K: Kind + 'static> DraftDoc<K> {
 
     /// Write the current state to the draft file now (atomic, background).
     pub fn flush(&mut self, cx: &mut Context<Self>) {
+        self.flush_with(false, cx)
+    }
+
+    /// `sync` writes before returning — for quitting, when a background
+    /// write might not finish.
+    fn flush_with(&mut self, sync: bool, cx: &mut Context<Self>) {
         self.persist = None;
         let local = self.current(cx);
         if local == self.draft.local && self.draft.state != SaveState::Local {
@@ -204,11 +217,16 @@ impl<K: Kind + 'static> DraftDoc<K> {
         let d = self.draft.clone();
         let session = app::session(cx);
         let area = K::DRAFTS;
-        farfield_core::spawn(async move {
+        let write = move || {
             if let Ok(drafts) = session.drafts(area) {
                 let _ = drafts.save(&d);
             }
-        });
+        };
+        if sync {
+            write()
+        } else {
+            farfield_core::spawn(async move { write() });
+        }
         cx.emit(DraftEvent::Touched);
         cx.notify();
     }
