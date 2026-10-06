@@ -156,3 +156,11 @@ func TestDocsCoverFleet(t *testing.T) {
 		}
 	}
 }
+
+func TestRelatedOrigins(t *testing.T) {
+	got := relatedOrigins(" https://keys.iam.casa/, ,http://keys.iam.casa,https://x.example/path,https://keys.farfield.systems")
+	want := []string{"https://keys.iam.casa", "https://keys.farfield.systems"}
+	if strings.Join(got, " ") != strings.Join(want, " ") {
+		t.Fatalf("relatedOrigins = %v, want %v", got, want)
+	}
+}

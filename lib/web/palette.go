@@ -49,15 +49,24 @@ func fleetHost() string {
 // (the site root, not a subdomain) and switchboard. backup is tailnet-only in
 // production: listed only when FARFIELD_URL_BACKUP names its tailnet address,
 // which a device on the tailnet reaches and any other fails quietly.
-func paletteFleet() []map[string]string {
+//
+// Links follow the domain r arrived on (RebaseFleetURL) — except apex, the
+// public site, which has no tailnet twin. r may be nil: canonical URLs.
+func paletteFleet(r *http.Request) []map[string]string {
+	base := func(u string) string {
+		if r == nil {
+			return u
+		}
+		return RebaseFleetURL(r, u)
+	}
 	out := []map[string]string{}
 	for _, a := range fleetApps {
 		if a.Name == "backup" && !local() && os.Getenv("FARFIELD_URL_BACKUP") == "" {
 			continue
 		}
-		out = append(out, map[string]string{"name": a.Name, "url": FleetBase(a.Name)})
+		out = append(out, map[string]string{"name": a.Name, "url": base(FleetBase(a.Name))})
 	}
-	out = append(out, map[string]string{"name": "switchboard", "url": paletteBase("switchboard")})
+	out = append(out, map[string]string{"name": "switchboard", "url": base(paletteBase("switchboard"))})
 	out = append(out, map[string]string{"name": "apex", "url": paletteBase("apex")})
 	return out
 }
@@ -76,15 +85,17 @@ func paletteBase(name string) string {
 }
 
 // fleetOrigin reports whether an Origin header is one of the fleet's own:
-// farfield.systems and its subdomains over https, or — for a local preview —
-// any port on the preview host.
+// farfield.systems, any other SESSION_COOKIE_DOMAIN parent, and their
+// subdomains over https, or — for a local preview — any port on the preview
+// host.
 func fleetOrigin(origin string) bool {
 	u, err := url.Parse(origin)
 	if err != nil || u.Host == "" {
 		return false
 	}
 	host := u.Hostname()
-	if u.Scheme == "https" && (host == "farfield.systems" || strings.HasSuffix(host, ".farfield.systems")) {
+	canonical := host == canonicalDomain || strings.HasSuffix(host, "."+canonicalDomain)
+	if u.Scheme == "https" && (canonical || fleetDomainOf(host) != "") {
 		return true
 	}
 	if local() && u.Scheme == "http" {
@@ -130,7 +141,11 @@ func (rd *Renderer) MountPalette(mux *http.ServeMux, a *Auth, src PaletteSource)
 		if app == "" {
 			app = "farfield"
 		}
-		out := map[string]any{"app": app, "base": paletteBase(app), "fleet": paletteFleet()}
+		base := paletteBase(app)
+		if app != "apex" {
+			base = RebaseFleetURL(r, base)
+		}
+		out := map[string]any{"app": app, "base": base, "fleet": paletteFleet(r)}
 
 		signedIn := a == nil || a.SessionValid(r)
 		out["signedIn"] = signedIn
@@ -143,6 +158,9 @@ func (rd *Renderer) MountPalette(mux *http.ServeMux, a *Auth, src PaletteSource)
 		var own []PaletteItem
 		if src != nil {
 			own = src(r)
+		}
+		for i := range own { // an absolute sibling link follows the request's domain
+			own[i].URL = RebaseFleetURL(r, own[i].URL)
 		}
 		// a source item at a Nav page's URL (an app's "New post" is often in
 		// its masthead too) says more than the bare link: it replaces it

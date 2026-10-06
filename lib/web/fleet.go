@@ -1,8 +1,10 @@
 package web
 
 import (
+	"encoding/json"
 	"html/template"
 	"os"
+	"strconv"
 	"strings"
 	"sync"
 )
@@ -58,7 +60,7 @@ func FleetBase(name string) string {
 			}
 		}
 	}
-	return "https://" + name + ".farfield.systems"
+	return "https://" + name + "." + canonicalDomain
 }
 
 // fleetNav renders the cross-app switcher menu. Renderer.Render injects it
@@ -77,6 +79,18 @@ func fleetNav() template.HTML {
 			b.WriteString(`<a href="` + FleetBase(a.Name) + `">` + a.Name + `</a>`)
 		}
 		b.WriteString(`</nav></details>`)
+		// The menu is rendered once for every request, so its links are on the
+		// canonical domain. Seen from another fleet domain (a console reached
+		// on *.iam.casa), move them onto that one — the session cookie there
+		// does not reach farfield.systems. The palette does the same server
+		// side, where it has the request (RebaseFleetURL).
+		if ds := fleetDomains(); len(ds) > 1 {
+			list, _ := json.Marshal(ds)
+			b.WriteString(`<script>(function(){var c=` + strconv.Quote(canonicalDomain) + `,h=location.hostname,` +
+				`t=` + string(list) + `.filter(function(d){return h===d||h.endsWith("."+d)})[0];` +
+				`if(!t||t===c)return;document.currentScript.previousElementSibling.querySelectorAll("a").forEach(function(a){` +
+				`var u=new URL(a.href);if(u.hostname.endsWith("."+c)){u.hostname=u.hostname.slice(0,-c.length)+t;a.href=u.href}})})()</script>`)
+		}
 		fleetHTML = template.HTML(b.String())
 	})
 	return fleetHTML

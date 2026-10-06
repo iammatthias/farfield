@@ -18,9 +18,9 @@ import (
 // Fleet-wide session config, read from the environment because it must be
 // identical in every app for single sign-on to hold: SESSION_SECRET turns on
 // signed fleet sessions (one login spans every app sharing the secret), and
-// SESSION_COOKIE_DOMAIN widens the cookie to the fleet's parent domain
-// (e.g. .farfield.systems). With no secret set, each app keeps its own
-// database-backed sessions exactly as before.
+// SESSION_COOKIE_DOMAIN widens the cookie to the fleet's parent domains
+// (.farfield.systems,.iam.casa — see domains.go). With no secret set, each
+// app keeps its own database-backed sessions exactly as before.
 var (
 	fleetOnceAuth sync.Once
 	fleetSecret   string
@@ -226,15 +226,9 @@ func allowedOrigin(r *http.Request) bool {
 		return true
 	}
 	// Fleet siblings share the session cookie, so they are same-site by
-	// construction; treat the configured cookie domain as the trust boundary.
-	if _, domain := fleetSessionConfig(); domain != "" {
-		suffix := "." + strings.TrimPrefix(domain, ".")
-		host := u.Hostname()
-		if strings.HasSuffix("."+host, suffix) {
-			return true
-		}
-	}
-	return false
+	// construction; the cookie's domain — the request's own fleet domain,
+	// not merely any of them — is the trust boundary.
+	return sameFleetDomain(r, u.Hostname())
 }
 
 // RequireAPIKey guards the JSON write endpoints. A missing or wrong key
@@ -371,11 +365,11 @@ const sessionTTL = 7 * 24 * time.Hour
 // stateless token on the fleet cookie domain that every sibling accepts;
 // otherwise a row in the app's own sessions table.
 func (a *Auth) OpenSession(w http.ResponseWriter, r *http.Request) error {
-	secret, domain := fleetSessionConfig()
+	secret, _ := fleetSessionConfig()
 	if secret != "" {
 		token := auth.SignSession(secret, sessionEpoch(), time.Now().Add(sessionTTL))
 		c := auth.SessionCookie(token, a.CookieSecure)
-		c.Domain = domain
+		c.Domain = cookieDomainFor(r)
 		http.SetCookie(w, c)
 		return nil
 	}
@@ -425,7 +419,7 @@ func (a *Auth) HandleLogout(w http.ResponseWriter, r *http.Request) {
 		_ = store.DeleteSession(a.DB, token)
 	}
 	c := auth.ClearCookie(a.CookieSecure)
-	_, c.Domain = fleetSessionConfig()
+	c.Domain = cookieDomainFor(r)
 	http.SetCookie(w, c)
 	http.Redirect(w, r, "/login", http.StatusSeeOther)
 }

@@ -374,8 +374,23 @@ go to the bare URL. Unset, each app sends you to its own `/login`, which keeps
 working either way (backup always uses its own — it is tailnet-only).
 
 `next` is honored only when it is a same-origin path, a URL on the keys host,
-a URL under `SESSION_COOKIE_DOMAIN`, or — only when the request itself is on
-loopback — a loopback URL. Anything else is dropped (you land on `/`).
+a URL under the request's own `SESSION_COOKIE_DOMAIN` domain, or — only when the
+request itself is on loopback — a loopback URL. Anything else is dropped (you
+land on `/`).
+
+**Two domains.** The fleet answers on `*.farfield.systems` (the tunnel) and
+`*.iam.casa` (the tailnet), so `SESSION_COOKIE_DOMAIN` is a comma list —
+prod `.farfield.systems,.iam.casa`. A cookie can span only one, so each
+request is placed under the domain its host belongs to: the session cookie is
+set there, the login redirect goes to that domain's keys
+(`keys.iam.casa` for a console on `content.iam.casa`), `next` and the
+cross-origin write check accept only that domain, and the fleet menu links
+follow it. A host under neither (the `*.ts.net` serve ports) gets a host-only
+cookie and its own `/login`. Passkeys stay bound to `farfield.systems`;
+`keys.iam.casa` uses them through WebAuthn related origins — apex serves
+`/.well-known/webauthn` from `WEBAUTHN_RELATED_ORIGINS`, and keys lists the
+same origin in `WEBAUTHN_ORIGINS` (Safari 18+, Chrome 128+; elsewhere the
+password).
 
 **Passkeys** (on when `WEBAUTHN_RP_ID` is set; prod `farfield.systems` with
 `WEBAUTHN_ORIGINS=https://keys.farfield.systems`). One owner, any number of

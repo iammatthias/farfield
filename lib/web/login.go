@@ -31,6 +31,15 @@ func (a *Auth) loginRedirect(r *http.Request) string {
 	if login == "" {
 		return "/login"
 	}
+	// The fleet login lives on one parent domain; send the browser to its twin
+	// on the domain it is already on, whose cookie will come back here. Off the
+	// fleet's domains no fleet cookie can reach this host: its own /login.
+	if u, err := url.Parse(login); err == nil && fleetDomainOf(u.Hostname()) != "" {
+		if fleetDomainOf(requestHostname(r)) == "" {
+			return "/login"
+		}
+		login = RebaseFleetURL(r, login)
+	}
 	if r.Method != http.MethodGet && r.Method != http.MethodHead {
 		return login
 	}
@@ -46,8 +55,8 @@ func (a *Auth) loginRedirect(r *http.Request) string {
 // most trusted page — a phishing link that really does start at keys.
 //
 // Allowed: a same-origin path ("/passkeys", never "//host"); an absolute
-// http(s) URL on this host; one on the fleet cookie domain (any sibling the
-// session will open); and, only when this request itself arrived on loopback,
+// http(s) URL on this host; one on the request's own fleet domain (any
+// sibling the session will open); and, only when this request itself arrived on loopback,
 // a loopback URL — the dev fleet runs every app on its own localhost port. A
 // production login never redirects to loopback.
 func ValidNext(r *http.Request, next string) bool {
@@ -66,11 +75,8 @@ func ValidNext(r *http.Request, next string) bool {
 		return true
 	}
 	host := strings.ToLower(u.Hostname())
-	if _, domain := fleetSessionConfig(); domain != "" {
-		d := strings.ToLower(strings.TrimPrefix(domain, "."))
-		if host == d || strings.HasSuffix(host, "."+d) {
-			return true
-		}
+	if sameFleetDomain(r, host) {
+		return true
 	}
 	return isLoopback(host) && isLoopback(requestHostname(r))
 }

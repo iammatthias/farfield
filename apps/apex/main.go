@@ -13,6 +13,7 @@ import (
 	"io/fs"
 	"log/slog"
 	"net/http"
+	"net/url"
 	"os"
 	"strconv"
 	"strings"
@@ -257,6 +258,20 @@ func routes() (http.Handler, error) {
 	profile := newProfileServer()
 	mux.HandleFunc("GET /api/profile", web.RateLimit(profile.rl, nil, profile.handle))
 
+	// WebAuthn related origins: the fleet's passkeys are bound to the RP ID
+	// farfield.systems, which the keys login on the tailnet (keys.iam.casa)
+	// is not under. A browser asked to use that RP ID from another origin
+	// fetches this file from the RP ID's own host and allows it only when the
+	// origin is listed. Unset, the route 404s and passkeys stay on
+	// farfield.systems; keys checks the same origins on its side
+	// (WEBAUTHN_ORIGINS).
+	if origins := relatedOrigins(os.Getenv("WEBAUTHN_RELATED_ORIGINS")); len(origins) > 0 {
+		mux.HandleFunc("GET /.well-known/webauthn", func(w http.ResponseWriter, r *http.Request) {
+			w.Header().Set("Cache-Control", "public, max-age=300")
+			web.WriteJSON(w, http.StatusOK, map[string][]string{"origins": origins})
+		})
+	}
+
 	mux.HandleFunc("GET /robots.txt", web.RobotsHandler("/sitemap.xml"))
 	mux.HandleFunc("GET /sitemap.xml", web.SitemapHandler(sitemapPaths()...))
 
@@ -295,4 +310,17 @@ func routes() (http.Handler, error) {
 	mux.HandleFunc("GET /{$}", landing.serve)
 	mux.Handle("/", files)
 	return mux, nil
+}
+
+// relatedOrigins parses WEBAUTHN_RELATED_ORIGINS — comma-separated https
+// origins — dropping blanks and anything that is not an https origin.
+func relatedOrigins(raw string) []string {
+	var out []string
+	for _, o := range strings.Split(raw, ",") {
+		o = strings.TrimRight(strings.TrimSpace(o), "/")
+		if u, err := url.Parse(o); err == nil && u.Scheme == "https" && u.Host != "" && u.Path == "" {
+			out = append(out, o)
+		}
+	}
+	return out
 }

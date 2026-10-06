@@ -152,7 +152,7 @@ func TestRequireFleetSession(t *testing.T) {
 
 func TestPaletteFleetOmitsBackupInProduction(t *testing.T) {
 	t.Setenv("FARFIELD_FLEET", "")
-	for _, f := range paletteFleet() {
+	for _, f := range paletteFleet(nil) {
 		if f["name"] == "backup" {
 			t.Fatal("backup is tailnet-only; a browser on the public fleet cannot reach it")
 		}
@@ -194,7 +194,7 @@ func TestFleetBaseOverride(t *testing.T) {
 		t.Fatalf("FleetBase(feed) = %q — the override leaked", got)
 	}
 	found := false
-	for _, f := range paletteFleet() {
+	for _, f := range paletteFleet(nil) {
 		found = found || (f["name"] == "backup" && f["url"] == "https://box.example.ts.net:8791")
 	}
 	if !found {

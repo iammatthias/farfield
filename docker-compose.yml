@@ -244,6 +244,8 @@ services:
       - HOST=0.0.0.0
       - SESSION_EPOCH=${SESSION_EPOCH:-}
       - FARFIELD_TRUSTED_PROXIES=${FARFIELD_TRUSTED_PROXIES:-}
+      # Passkey related origins (/.well-known/webauthn): the tailnet keys login.
+      - WEBAUTHN_RELATED_ORIGINS=${WEBAUTHN_RELATED_ORIGINS:-}
       - APEX_PORT=8790
       - APEX_DB_PATH=/data/apex.sqlite
     volumes:
