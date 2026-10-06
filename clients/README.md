@@ -45,10 +45,10 @@ shown again (only a hint). For the dev fleet each app's key is `dev-<app>-key`.
      sudo tailscale serve --bg --https=$p http://172.17.0.1:$p
    done
    ```
-   (switchboard runs on the host: use `http://127.0.0.1:8802` for it.) Consoles opened from
-   the app (keys, pulse, backup) use these private addresses too; like backup, a console
-   reached on a `ts.net` name needs `SESSION_COOKIE_DOMAIN` empty for its sign-in cookie to
-   stick, or it loops back to the login page. API and media traffic
+   (switchboard runs on the host, bound to the same `172.17.0.1`.) Consoles opened from
+   the app (keys, pulse, backup) use these private addresses too; a console reached on a
+   host outside the fleet's cookie domains (a `ts.net` name) gets a host-only sign-in
+   cookie automatically, so nothing needs blanking. API and media traffic
    then stays on the tailnet and keeps working when Cloudflare or the tunnel doesn't.
    The new `/api/admin/*` routes refuse anything that arrives through the tunnel
    (`Cf-Ray`/`Cf-Connecting-IP` → 404), so they are reachable only this way.
