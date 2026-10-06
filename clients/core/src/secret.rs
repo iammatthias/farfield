@@ -155,7 +155,7 @@ pub fn redact(s: &str) -> String {
         }
     }
     // query-string secrets: token=, t=, key=
-    for k in ["token=", "?t=", "&t=", "key="] {
+    for k in ["token=", "?t=", "&t=", "key=", "code=", "code_verifier="] {
         while let Some(i) = out.find(k) {
             let start = i + k.len();
             let end =

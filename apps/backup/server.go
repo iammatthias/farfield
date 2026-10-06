@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/iammatthias/farfield/lib/backup"
+	"github.com/iammatthias/farfield/lib/keys"
 	"github.com/iammatthias/farfield/lib/pulse"
 	"github.com/iammatthias/farfield/lib/store"
 	"github.com/iammatthias/farfield/lib/theme"
@@ -54,9 +55,11 @@ func run(host, port string) error {
 		auth: &web.Auth{
 			DB:       db,
 			Password: store.Env("PASSWORD", ""),
-			// BACKUP_API_KEY gates only the read-only admin API (admin.go).
-			// Unset, that API answers 503 — no admin-issued key store is
-			// attached here, so there is no second way in.
+			// BACKUP_API_KEY gates only the read-only admin API (admin.go),
+			// beside write-scoped ffk_ keys for "backup" (or "*") once
+			// KEYS_DB_PATH attaches the key store below — so the desktop
+			// client's minted key reaches it too. With neither configured
+			// the API answers 503: no key, no way in.
 			APIKey:       store.Env("BACKUP_API_KEY", ""),
 			CookieSecure: store.Env("COOKIE_SECURE", "false") == "true",
 		},
@@ -68,6 +71,10 @@ func run(host, port string) error {
 			},
 		},
 	}
+
+	// minted keys open the admin API too (when KEYS_DB_PATH is set); the key
+	// store is the only addition — the console stays password/session-only
+	defer keys.Attach(s.auth, "backup")()
 
 	// In-process scheduler: snapshots no longer depend on a host cron
 	// existing. BACKUP_INTERVAL accepts any Go duration; "0" disables.

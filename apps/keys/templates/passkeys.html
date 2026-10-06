@@ -1,0 +1,37 @@
+{{define "title"}}Passkeys · farfield keys{{end}}
+{{define "head"}}<script src="/static/passkey.js?v={{.AssetVer}}" defer></script>{{end}}
+{{define "content"}}
+  {{template "topbar" .}}
+  <h2 class="page-title">Passkeys</h2>
+  {{with .Error}}<p class="error">{{.}}</p>{{end}}
+  <div data-passkey-error></div>
+  {{if .Passkeys}}
+    <div class="table-wrap stack-wrap">
+      <table class="admin stack">
+        <thead><tr><th>Name</th><th>Added</th><th>Last used</th><th class="actions">Actions</th></tr></thead>
+        <tbody>
+          {{range .Passkeys}}
+            <tr>
+              <td data-label="Name">{{.Name}}</td>
+              <td class="mono" data-label="Added">{{day .Created}}</td>
+              <td class="mono" data-label="Last used">{{if .LastUsed}}{{day .LastUsed}}{{else}}never{{end}}</td>
+              <td class="actions" data-label="">
+                <form method="post" action="/passkeys/{{.ID}}/delete"
+                      onsubmit="return confirm('Remove this passkey?')">
+                  <button class="danger" type="submit">Remove</button>
+                </form>
+              </td>
+            </tr>
+          {{end}}
+        </tbody>
+      </table>
+    </div>
+  {{else}}
+    <div class="empty"><p class="line">No passkeys.</p></div>
+  {{end}}
+  <form class="row-form" data-passkey-register>
+    <label class="label" for="pk-name">Name</label>
+    <input type="text" id="pk-name" name="name" maxlength="64" placeholder="MacBook" required>
+    <button type="submit">Add passkey</button>
+  </form>
+{{end}}

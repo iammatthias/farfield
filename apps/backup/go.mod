@@ -4,6 +4,7 @@ go 1.27.0
 
 require (
 	github.com/iammatthias/farfield/lib/backup v0.0.0
+	github.com/iammatthias/farfield/lib/keys v0.0.0
 	github.com/iammatthias/farfield/lib/pulse v0.0.0
 	github.com/iammatthias/farfield/lib/store v0.0.0
 	github.com/iammatthias/farfield/lib/theme v0.0.0
@@ -30,6 +31,7 @@ replace (
 	github.com/iammatthias/farfield/lib/auth => ../../lib/auth
 	github.com/iammatthias/farfield/lib/backup => ../../lib/backup
 	github.com/iammatthias/farfield/lib/cid => ../../lib/cid
+	github.com/iammatthias/farfield/lib/keys => ../../lib/keys
 	github.com/iammatthias/farfield/lib/pulse => ../../lib/pulse
 	github.com/iammatthias/farfield/lib/store => ../../lib/store
 	github.com/iammatthias/farfield/lib/theme => ../../lib/theme

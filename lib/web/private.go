@@ -47,6 +47,23 @@ func (a *Auth) PrivateAPI(next http.HandlerFunc) http.HandlerFunc {
 	}
 }
 
+// PrivateIngress is PrivateAPI's first check alone: a request that came
+// through the Cloudflare tunnel gets the JSON 404, everything else passes,
+// and every response is no-store. It is for the rare private route whose
+// credential is not an API key at all — the keys app's /device/token, where
+// the one-time code and its PKCE verifier are the credential, and demanding a
+// key would ask the client for the very thing it is trying to obtain.
+func PrivateIngress(next http.HandlerFunc) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		w = &noStoreWriter{ResponseWriter: w}
+		if viaCloudflare(r) {
+			WriteError(w, http.StatusNotFound, "not found")
+			return
+		}
+		next(w, r)
+	}
+}
+
 // AdminNotFound answers an /api/admin/ path no route claims. Apps mount it
 // behind PrivateAPI on the bare prefix, so an unknown admin path — or a known
 // one with the wrong method — looks exactly like a known one from the

@@ -141,7 +141,9 @@ func keyRoute(r *http.Request) string {
 }
 
 // RequireSession guards the HTML admin UI. An invalid or absent session
-// redirects to the login page. A signed fleet session (SESSION_SECRET) is
+// redirects to the login page — the fleet's (FARFIELD_LOGIN_URL, with next
+// set to this page) when configured, else the app's own /login; see
+// loginRedirect. A signed fleet session (SESSION_SECRET) is
 // accepted first; the app's own database sessions keep working either way,
 // so enabling the secret never logs anyone out.
 //
@@ -158,7 +160,7 @@ func (a *Auth) RequireSession(next http.HandlerFunc) http.HandlerFunc {
 			next(w, r)
 			return
 		}
-		http.Redirect(w, r, "/login", http.StatusSeeOther)
+		http.Redirect(w, r, a.loginRedirect(r), http.StatusSeeOther)
 	}
 }
 
@@ -315,8 +317,9 @@ func APIKeyFrom(r *http.Request) string {
 }
 
 // HandleLogin verifies the posted password, opens a one-week session, and
-// redirects to the admin index. Wire it to POST /login; the GET form stays
-// app-owned (it renders through the app's templates).
+// redirects to the form's next (when it is a fleet URL — see ValidNext) or the
+// admin index. Wire it to POST /login; the GET form stays app-owned (it
+// renders through the app's templates).
 //
 // Failed attempts are rate-limited per client IP — see loginLimiter. A correct
 // password is never throttled, so replaying a valid login stays free.
@@ -325,9 +328,7 @@ func (a *Auth) HandleLogin(w http.ResponseWriter, r *http.Request) {
 	// read whatever an anonymous caller sent into memory before the throttle
 	// below ever looked at it.
 	r.Body = http.MaxBytesReader(w, r.Body, 64<<10)
-	ip := ClientIP(r)
-	limiter := a.loginLimiter()
-	if limiter.Blocked(ip) {
+	if a.LoginBlocked(r) {
 		http.Error(w, "too many attempts — try again shortly", http.StatusTooManyRequests)
 		return
 	}
@@ -335,29 +336,68 @@ func (a *Auth) HandleLogin(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "bad form", http.StatusBadRequest)
 		return
 	}
+	next := SafeNext(r, r.PostFormValue("next"))
 	if a.Password == "" || !auth.VerifyPassword(r.FormValue("password"), a.Password) {
-		limiter.Fail(ip)
-		http.Redirect(w, r, "/login?error=Invalid+password", http.StatusSeeOther)
+		a.LoginFailed(r)
+		q := url.Values{"error": {"Invalid password"}}
+		if next != "" {
+			q.Set("next", next)
+		}
+		if r.PostFormValue("reauth") != "" {
+			q.Set("reauth", "1")
+		}
+		http.Redirect(w, r, "/login?"+q.Encode(), http.StatusSeeOther)
 		return
 	}
-	secret, domain := fleetSessionConfig()
-	if secret != "" {
-		// Fleet mode: a signed, stateless token every sibling app accepts.
-		token := auth.SignSession(secret, sessionEpoch(), time.Now().Add(7*24*time.Hour))
-		c := auth.SessionCookie(token, a.CookieSecure)
-		c.Domain = domain
-		http.SetCookie(w, c)
-		http.Redirect(w, r, "/", http.StatusSeeOther)
-		return
-	}
-	token := auth.NewSessionToken()
-	if err := store.InsertSession(a.DB, token, time.Now().Add(7*24*time.Hour)); err != nil {
+	if err := a.OpenSession(w, r); err != nil {
 		slog.Error("create session", "err", err)
 		http.Error(w, "internal error", http.StatusInternalServerError)
 		return
 	}
+	if next == "" {
+		next = "/"
+	}
+	http.Redirect(w, r, next, http.StatusSeeOther)
+}
+
+// sessionTTL is how long a login lasts, password or passkey alike. The
+// database sessions store only an expiry, so it is also how SessionIssued
+// recovers their issue time.
+const sessionTTL = 7 * 24 * time.Hour
+
+// OpenSession starts an admin session on the response — the one code path
+// every way of signing in goes through, so a passkey login sets exactly the
+// cookie a password login does. In fleet mode (SESSION_SECRET) it is a signed,
+// stateless token on the fleet cookie domain that every sibling accepts;
+// otherwise a row in the app's own sessions table.
+func (a *Auth) OpenSession(w http.ResponseWriter, r *http.Request) error {
+	secret, domain := fleetSessionConfig()
+	if secret != "" {
+		token := auth.SignSession(secret, sessionEpoch(), time.Now().Add(sessionTTL))
+		c := auth.SessionCookie(token, a.CookieSecure)
+		c.Domain = domain
+		http.SetCookie(w, c)
+		return nil
+	}
+	token := auth.NewSessionToken()
+	if err := store.InsertSession(a.DB, token, time.Now().Add(sessionTTL)); err != nil {
+		return err
+	}
 	http.SetCookie(w, auth.SessionCookie(token, a.CookieSecure))
-	http.Redirect(w, r, "/", http.StatusSeeOther)
+	return nil
+}
+
+// LoginBlocked reports whether the client has spent its failed-login budget.
+// Exported with LoginFailed so a second way in (the keys app's passkeys)
+// draws on the same per-client budget as the password: one front door, one
+// limiter, however many locks it has.
+func (a *Auth) LoginBlocked(r *http.Request) bool {
+	return a.loginLimiter().Blocked(ClientIP(r))
+}
+
+// LoginFailed records one failed sign-in attempt for the client.
+func (a *Auth) LoginFailed(r *http.Request) {
+	a.loginLimiter().Fail(ClientIP(r))
 }
 
 // HandleLogout deletes the session and clears the cookie. Fleet sessions

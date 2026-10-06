@@ -8,6 +8,7 @@ mod app;
 mod evidence;
 mod perf;
 mod shell;
+mod signin;
 mod theme;
 mod ui;
 mod workspace;

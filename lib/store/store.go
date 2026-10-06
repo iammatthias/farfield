@@ -139,6 +139,25 @@ func ValidSession(db *sql.DB, token string) (bool, error) {
 	return time.Now().Unix() < exp, nil
 }
 
+// SessionExpires returns a live session's expiry. ok is false for an unknown
+// or expired token. The table keeps no issue time; lib/web derives one from
+// this and the fixed session lifetime it grants.
+func SessionExpires(db *sql.DB, token string) (expires time.Time, ok bool, err error) {
+	var exp int64
+	err = db.QueryRow(
+		`SELECT expires_at FROM sessions WHERE token = ?`, token).Scan(&exp)
+	if errors.Is(err, sql.ErrNoRows) {
+		return time.Time{}, false, nil
+	}
+	if err != nil {
+		return time.Time{}, false, err
+	}
+	if time.Now().Unix() >= exp {
+		return time.Time{}, false, nil
+	}
+	return time.Unix(exp, 0), true, nil
+}
+
 // DeleteSession removes a session token, ending that session.
 func DeleteSession(db *sql.DB, token string) error {
 	_, err := db.Exec(`DELETE FROM sessions WHERE token = ?`, token)

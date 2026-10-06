@@ -565,13 +565,24 @@ impl Connections {
             .flex()
             .flex_col()
             .gap(S4)
+            .child(div().flex().child(ui::button("passkey", "Sign in with passkey", Kind::Primary, cx, {
+                let e = cx.entity();
+                move |_, _, cx| {
+                    let e = e.clone();
+                    crate::signin::run(cx, move |ok, cx| {
+                        if ok {
+                            e.update(cx, |this, cx| this.test_all(cx))
+                        }
+                    })
+                }
+            })))
             .child(
                 div()
                     .flex()
                     .items_end()
                     .gap(S3)
                     .child(div().w(px(420.)).child(self.fleet_key.clone()))
-                    .child(ui::button("key-all", "Use for all", Kind::Primary, cx, {
+                    .child(ui::button("key-all", "Use for all", Kind::Quiet, cx, {
                         let e = cx.entity();
                         move |_, _, cx| {
                             e.update(cx, |this, cx| {

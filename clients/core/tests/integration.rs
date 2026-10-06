@@ -486,3 +486,70 @@ fn every_list_read_revalidates() {
     }
     assert!(missing.is_empty(), "{missing:#?}");
 }
+
+/// The desktop's passkey sign-in, end to end against the real keys app: the
+/// browser side is simulated (a signed-in session approving the authorize
+/// page), the rest is the client's own code — loopback listener, state check,
+/// PKCE redemption — and the minted key must then open another service.
+#[test]
+fn device_sign_in_mints_a_working_key() {
+    use farfield_core::signin;
+    let f = Fleet::start(&["keys", "content"]);
+    make_collection(&f, "notes");
+    let keys = f.url("keys");
+    let http = reqwest::blocking::Client::builder().redirect(reqwest::redirect::Policy::none()).build().unwrap();
+
+    // a browser session on keys (password; passkeys are covered in Go)
+    let enc =
+        |pairs: &[(String, String)]| url::form_urlencoded::Serializer::new(String::new()).extend_pairs(pairs).finish();
+    let login = http
+        .post(format!("{keys}/login"))
+        .header("Content-Type", "application/x-www-form-urlencoded")
+        .body(enc(&[("password".into(), fleet::PASSWORD.into())]))
+        .send()
+        .unwrap();
+    let cookie = login
+        .headers()
+        .get_all("set-cookie")
+        .iter()
+        .filter_map(|v| v.to_str().ok()?.split(';').next().map(str::to_string))
+        .collect::<Vec<_>>()
+        .join("; ");
+    assert!(cookie.contains("session="), "no session cookie");
+
+    let pending = signin::start(&keys, "Integration Mac").unwrap();
+    // the authorize page renders for a signed-in browser
+    let page = http.get(&pending.authorize_url).header("Cookie", &cookie).send().unwrap();
+    assert_eq!(page.status(), 200);
+    let q: std::collections::HashMap<String, String> =
+        url::Url::parse(&pending.authorize_url).unwrap().query_pairs().into_owned().collect();
+    let mut form: Vec<(String, String)> = q.into_iter().collect();
+    form.push(("action".into(), "allow".into()));
+    let approve = http
+        .post(format!("{keys}/device/authorize"))
+        .header("Cookie", &cookie)
+        .header("Content-Type", "application/x-www-form-urlencoded")
+        .body(enc(&form))
+        .send()
+        .unwrap();
+    assert_eq!(approve.status(), 303);
+    let back = approve.headers()["location"].to_str().unwrap().to_string();
+    assert!(back.starts_with(&pending.redirect_uri), "{back}");
+
+    // the "browser" follows the redirect to the app's loopback listener
+    let follow = std::thread::spawn(move || reqwest::blocking::get(&back).unwrap().text().unwrap());
+    let code = pending.wait_for_code(std::time::Duration::from_secs(10)).unwrap();
+    assert!(follow.join().unwrap().contains("Signed in"));
+
+    let (s, _) = f.session_with(&[]);
+    let keys_client = s.client("keys").unwrap();
+    let cred = block(pending.redeem(&keys_client, &code)).unwrap();
+    // the minted key opens content (drafts need write)
+    let (signed_in, _) = f.session_with(&[]);
+    signed_in.set_credential("content", &cred).unwrap();
+    block(async {
+        content::entries(&signed_in, None, content::Status::Drafts, 1, 5).await.unwrap();
+    });
+    // a code works once
+    assert!(block(pending.redeem(&keys_client, &code)).is_err());
+}

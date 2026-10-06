@@ -11,6 +11,7 @@ pub mod profile;
 pub mod registry;
 pub mod secret;
 pub mod session;
+pub mod signin;
 pub mod store;
 pub mod sync;
 pub mod transport;

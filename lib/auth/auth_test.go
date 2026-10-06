@@ -228,3 +228,40 @@ func TestSignedSessionEpochIsUnambiguous(t *testing.T) {
 		}
 	}
 }
+
+// The issue time is what "signed in within the last five minutes" reads. It
+// must round-trip, be covered by the MAC, and be absent — not invented — for
+// tokens minted before it existed.
+func TestSignedSessionIssued(t *testing.T) {
+	const secret = "fleet-secret"
+	exp := time.Now().Add(time.Hour)
+	at := time.Now().Add(-10 * time.Minute).Truncate(time.Second)
+
+	tok := SignSessionAt(secret, "", at, exp)
+	got, ok := SignedSessionIssued(secret, "", tok)
+	if !ok || !got.Equal(at) {
+		t.Fatalf("SignedSessionIssued = %v, %v; want %v, true", got, ok, at)
+	}
+
+	// A pre-issue-time token: same shape, bare nonce. It still verifies (no
+	// one is logged out by the upgrade) but carries no issue time.
+	payload := "9999999999.AAAAAAAAAAAAAAAA"
+	legacy := "v1." + payload + "." + signSessionMAC(secret, "", payload)
+	if !VerifySignedSession(secret, "", legacy) {
+		t.Fatal("a legacy token no longer verifies")
+	}
+	if _, ok := SignedSessionIssued(secret, "", legacy); ok {
+		t.Error("a legacy token reported an issue time")
+	}
+
+	// Moving the issue time forward in transit must break the MAC.
+	parts := strings.Split(tok, ".")
+	nonce, _, _ := strings.Cut(parts[2], issuedSep)
+	parts[2] = nonce + issuedSep + "99999999999"
+	if forged := strings.Join(parts, "."); VerifySignedSession(secret, "", forged) {
+		t.Error("a token with a rewritten issue time verified")
+	}
+	if _, ok := SignedSessionIssued(secret, "", tok+"x"); ok {
+		t.Error("an invalid token reported an issue time")
+	}
+}

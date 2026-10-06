@@ -91,7 +91,7 @@ impl Onboarding {
             _ => {}
         })
         .detach();
-        let key = cx.new(|cx| TextField::new(w, cx, "Key", "ffk_…").secret());
+        let key = cx.new(|cx| TextField::new(w, cx, "Or a key", "ffk_…").secret());
         cx.subscribe_in(&key, w, |this, f, e: &FieldEvent, _, cx| {
             if *e == FieldEvent::Submit {
                 let v = f.read(cx).text();
@@ -431,6 +431,13 @@ impl Onboarding {
                     .flex()
                     .flex_col()
                     .gap(S4)
+                    .child(div().flex().child(ui::button("passkey", "Sign in with passkey", Kind::Primary, cx, {
+                        let e = cx.entity();
+                        move |_, _, cx| {
+                            let e = e.clone();
+                            crate::signin::run(cx, move |_, cx| e.update(cx, |this, cx| this.recheck_keys(cx)))
+                        }
+                    })))
                     .child(div().flex().items_end().gap(S3).child(div().flex_1().child(self.key.clone())).child(
                         ui::button("apply", "Use for all", Kind::Quiet, cx, {
                             let e = cx.entity();
@@ -445,7 +452,7 @@ impl Onboarding {
                     .when_some(self.per_service.clone().map(|(_, f)| f), |d, f| d.child(f))
                     .child(ui::mono(format!("{ready} of {} ready", self.keys.len()), cx))
                     .child(self.grid(&self.keys.clone(), true, t, cx));
-                ("Key", col.into_any_element())
+                ("Sign in", col.into_any_element())
             }
             Step::Look => {
                 let rm = state(cx).prefs.reduced_motion;

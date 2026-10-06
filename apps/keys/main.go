@@ -26,6 +26,14 @@ func main() {
 		return
 	}
 
+	if len(os.Args) > 1 && os.Args[1] == "provision" {
+		if err := runProvision(os.Args[2:]); err != nil {
+			slog.Error("provision", "err", err)
+			os.Exit(1)
+		}
+		return
+	}
+
 	// "health" probes the running server's /status for Docker healthchecks.
 	if len(os.Args) > 1 && os.Args[1] == "health" {
 		os.Exit(web.Health(store.Env("KEYS_PORT", "8801")))

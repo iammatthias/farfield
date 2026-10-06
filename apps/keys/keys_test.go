@@ -11,6 +11,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/go-webauthn/webauthn/webauthn"
 	"github.com/iammatthias/farfield/lib/keys"
 	"github.com/iammatthias/farfield/lib/store"
 	"github.com/iammatthias/farfield/lib/web"
@@ -19,6 +20,12 @@ import (
 // ── helpers ────────────────────────────────────────────────────────────────
 
 func newTestServer(t *testing.T) *Server {
+	t.Helper()
+	return newTestServerWA(t, nil)
+}
+
+// newTestServerWA is newTestServer with a passkey relying party (nil: off).
+func newTestServerWA(t *testing.T, wa *webauthn.WebAuthn) *Server {
 	t.Helper()
 	db, err := store.OpenDB(filepath.Join(t.TempDir(), "keys.sqlite"))
 	if err != nil {
@@ -37,12 +44,12 @@ func newTestServer(t *testing.T) *Server {
 	if err != nil {
 		t.Fatalf("ParseTemplates: %v", err)
 	}
-	return &Server{
-		db:   db,
-		ks:   ks,
-		auth: &web.Auth{DB: db, Password: "secret"},
-		rd:   &web.Renderer{Templates: tmpl, AssetVer: "test"},
+	s, err := newServer(db, ks, &web.Auth{DB: db, Password: "secret"},
+		&web.Renderer{Templates: tmpl, AssetVer: "test"}, wa)
+	if err != nil {
+		t.Fatalf("newServer: %v", err)
 	}
+	return s
 }
 
 func noRedirectClient() *http.Client {

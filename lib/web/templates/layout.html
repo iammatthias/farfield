@@ -82,6 +82,7 @@
     <h1>farfield · {{.App}}</h1>
     {{with .Error}}<p class="error">{{.}}</p>{{end}}
     <form method="post" action="/login">
+      {{with .Next}}<input type="hidden" name="next" value="{{.}}">{{end}}
       <div class="field">
         <label for="password">Password</label>
         <input type="password" id="password" name="password" required autofocus>

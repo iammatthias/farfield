@@ -1,2 +1,29 @@
 {{define "title"}}Log in · farfield · {{.App}}{{end}}
-{{define "content"}}{{template "login_body" .}}{{end}}
+{{/* The fleet login: the shared login body, with a passkey above the password
+     when there is one. next rides along on both paths; reauth marks a
+     "prove it again" before a sensitive change. */}}
+{{define "head"}}{{if .Passkeys}}<script src="/static/passkey.js?v={{.AssetVer}}" defer></script>{{end}}{{end}}
+{{define "content"}}
+  <section class="login">
+    <div class="login-mark" aria-hidden="true">{{.Mark}}</div>
+    <h1>farfield</h1>
+    {{if .Reauth}}<p class="notice">Confirm it's you.</p>{{end}}
+    {{with .Elsewhere}}<p class="notice warn">Signed in, but {{.}} can't see it. <a href="{{.}}/login">Log in there</a></p>{{end}}
+    {{with .Error}}<p class="error">{{.}}</p>{{end}}
+    {{if .Passkeys}}
+      <div class="actions" id="passkey" data-next="{{.Next}}">
+        <button class="primary" type="button" data-passkey-login>Sign in with passkey</button>
+      </div>
+      <div data-passkey-error></div>
+    {{end}}
+    <form method="post" action="/login">
+      {{with .Next}}<input type="hidden" name="next" value="{{.}}">{{end}}
+      {{if .Reauth}}<input type="hidden" name="reauth" value="1">{{end}}
+      <div class="field">
+        <label for="password">Password</label>
+        <input type="password" id="password" name="password" required{{if not .Passkeys}} autofocus{{end}}>
+      </div>
+      <div class="actions"><button type="submit"{{if .Passkeys}} class="quiet"{{end}}>Log in</button></div>
+    </form>
+  </section>
+{{end}}

@@ -10,6 +10,13 @@
 # KEYS_DB_PATH), so a single ffk_ key minted for app "*" opens the whole
 # dev fleet: bin/keys mint <name> "*" write
 #
+# Sign-in runs through the keys app like production: every console with no
+# session goes to http://localhost:8801/login (passkey or password "demo").
+# localhost, not 127.0.0.1 — a passkey needs a domain for its RP ID, and the
+# session cookie belongs to the host it was set on, so a console opened at
+# 127.0.0.1 cannot see a localhost login. Open consoles at localhost:<port>;
+# each app's own /login still works at either address.
+#
 #   PREVIEW_HOST=<name> scripts/devfleet.sh start
 #
 # serves the same fleet for viewing from another device (e.g. a tailnet name):
@@ -21,6 +28,10 @@ cd "$(dirname "$0")/.."
 DATA=tmp/dev
 PUB=${PREVIEW_HOST:-127.0.0.1}
 LOGS=$DATA/logs
+# The fleet login lives on localhost (see above). A preview device cannot reach
+# that, so under PREVIEW_HOST each app keeps its own /login.
+LOGIN_URL=http://localhost:8801/login
+if [ -n "${PREVIEW_HOST:-}" ]; then LOGIN_URL=; fi
 mkdir -p "$DATA/blobs-data" "$LOGS"
 
 # app:port, in dependency order (blobs first — others upload to it)
@@ -50,6 +61,8 @@ start() {
       "${envname}_DB_PATH=$DATA/$app.sqlite" \
       "${envname}_API_KEY=dev-$app-key" \
       KEYS_DB_PATH="$DATA/keys.sqlite" \
+      FARFIELD_LOGIN_URL="$LOGIN_URL" \
+      WEBAUTHN_RP_ID=localhost WEBAUTHN_ORIGINS=http://localhost:8801 \
       BLOBS_BACKEND=local BLOBS_DIR="$DATA/blobs-data" \
       SIDELOAD_DIR="$DATA/sideload-blobs" LIBRARY_TUS_DIR="$DATA/tus-staging" \
       BLOBS_SPOOL_DIR="$DATA/blob-spool" \
@@ -71,7 +84,7 @@ start() {
   done
   echo "$ok/15 services up (password: demo)"
   [ -z "$down" ] || echo "DOWN:$down — see $LOGS/"
-  echo "content admin: http://$PUB:8787"
+  echo "content admin: http://${PREVIEW_HOST:-localhost}:8787"
 }
 
 case "${1:-start}" in

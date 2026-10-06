@@ -45,7 +45,8 @@ backend, and in 2026-08 they moved to the pure-internet monorepo — now
 The `backup` service is internal (tailnet-only); its only API is the read-only
 `GET /api/admin/snapshots` (see **Private admin API**). The
 `keys` service (`https://keys.farfield.systems`) is the admin credential
-minter — a password-gated UI, no public API beyond `/status`. The `pulse`
+minter and the fleet's sign-in — a session-gated UI plus the login and
+native-app routes in **Sign-in (keys)**; no JSON write API. The `pulse`
 service (`https://pulse.farfield.systems`) is uptime monitoring + traffic
 analytics — session-gated console, no public API beyond `/status`; see
 `docs/PULSE.md`.
@@ -363,6 +364,88 @@ The scrap `ETag` hashes the whole record (the paste CID covers only the body).
 // Snapshot — backup
 { "app", "cid", "size", "createdAt" }
 ```
+
+## Sign-in (keys) — `https://keys.farfield.systems`
+
+The keys app is the fleet's login. With `FARFIELD_LOGIN_URL` set (prod:
+`https://keys.farfield.systems/login`), any console with no session `303`s a
+`GET` to `${FARFIELD_LOGIN_URL}?next=<absolute URL it wanted>`; other methods
+go to the bare URL. Unset, each app sends you to its own `/login`, which keeps
+working either way (backup always uses its own — it is tailnet-only).
+
+`next` is honored only when it is a same-origin path, a URL on the keys host,
+a URL under `SESSION_COOKIE_DOMAIN`, or — only when the request itself is on
+loopback — a loopback URL. Anything else is dropped (you land on `/`).
+
+**Passkeys** (on when `WEBAUTHN_RP_ID` is set; prod `farfield.systems` with
+`WEBAUTHN_ORIGINS=https://keys.farfield.systems`). One owner, any number of
+passkeys. A passkey login sets exactly the cookie a password login does.
+Bootstrap: sign in with the password, then add one at `/passkeys`.
+
+| Method & path | Gate | Request → response |
+|---------------|------|--------------------|
+| `GET /login[?next=&reauth=1]` | — | password form, plus a passkey button when one exists; signed in and not `reauth`: `303` to a same-host `next` (or `/`) |
+| `POST /login` | throttled | form `password`, `next`, `reauth` → `303` to `next` or `/`; wrong: `303 /login?error=…&next=…` |
+| `POST /passkey/login/begin` | throttled | `{"next"?}` → `200` WebAuthn request options `{"publicKey":{…}}` + ceremony cookie; `409` no passkeys; `429` |
+| `POST /passkey/login/finish` | throttled | the `PublicKeyCredential` JSON → `200 {"next"}` + session cookie; `401` refused; `400` ceremony missing/expired; `429` |
+| `GET /passkeys` | session | list, add, remove |
+| `POST /passkey/register/begin` | fresh session | `{"name"}` → `200` creation options + ceremony cookie |
+| `POST /passkey/register/finish` | fresh session | the `PublicKeyCredential` JSON → `200 {"id","name"}`; `400` refused |
+| `POST /passkeys/{id}/delete` | fresh session | `303 /passkeys` |
+
+Failed passkey and password logins share one budget per client (5/minute).
+Ceremony state is in memory, single use, 5 minutes, keyed by an HttpOnly
+`ff_ceremony` cookie on `/passkey/`. **Fresh** = the session was opened in the
+last 5 minutes; otherwise those routes `303` to `/login?next=%2Fpasskeys&reauth=1`.
+Sessions from before this change carry no issue time and are never fresh.
+
+**Native apps (RFC 8252 loopback + PKCE S256).** How the desktop client gets
+a key without pasting one:
+
+1. Browser → `GET /device/authorize?client_id=farfield-desktop&redirect_uri=<uri>&code_challenge=<b64url sha256(verifier)>&code_challenge_method=S256&state=<opaque>&device=<name>`.
+   `redirect_uri` must be `http://127.0.0.1:<port><path>`, `http://[::1]:<port><path>`
+   or `http://localhost:<port><path>`; anything else (or another `client_id`,
+   or not S256) is a `400` page and never a redirect. No session → `303
+   /login?next=<this URL>`. Signed in → "Sign in Farfield on `<device>`?" Allow / Deny.
+2. `POST /device/authorize` (same fields as a form, session + origin check):
+   Allow → `303 <redirect_uri>?code=<43 chars>&state=<state>` (code good for
+   5 minutes); Deny → `303 <redirect_uri>?error=access_denied&state=<state>`.
+   No key exists yet.
+3. App → `POST /device/token`, form or JSON:
+   `grant_type=authorization_code`, `code`, `code_verifier`, `redirect_uri`.
+   Private ingress only (`Cf-Ray`/`Cf-Connecting-IP` → `404`, as for
+   `/api/admin/`); no API key — code + verifier is the credential.
+   - `200 {"access_token":"ffk_…","token_type":"api-key","key_id","app":"*","scope":"write"}`,
+     `Cache-Control: no-store`. The key is named "Farfield on `<device>`",
+     never expires, and is revoked from the keys console like any other.
+   - Otherwise `400 {"error":"invalid_grant"}`. The code is spent by any
+     attempt, right or wrong. `429` after 10 failures a minute per client.
+
+## Service keys — `keys provision`
+
+Service-to-service calls (content/feed/backup → blobs, blobs/feed → content,
+blobs/content/apex → feed, content → bookmarks, apex → content, switchboard →
+feed/bookmarks/scrap/qr/pulse) can each run on a minted, revocable key.
+
+```sh
+docker compose run --rm keys provision   # on the host; or bin/keys provision
+```
+
+mints one key per env var those calls read and prints `.env` lines with a
+header — tokens appear only in this output. To rotate:
+
+1. Run `keys provision`.
+2. Replace the matching lines in the host `.env`.
+3. `ff-deploy`.
+4. Revoke the previous keys of the same names in the keys console.
+
+Lines marked `(self)` (`BLOBS_API_KEY`, `CONTENT_API_KEY`, `CONTENT_READ_KEY`,
+`FEED_READ_KEY`, `BOOKMARKS_READ_KEY`) are also the callee's own env key:
+until `.env` changes, revoking that minted key in the console does not stop
+it, and anything else holding the old value (the website's read keys,
+Shortcuts, the Obsidian plugin) must be updated with it. The
+`SWITCHBOARD_*_KEY` lines are switchboard's alone; switchboard runs on the
+host, so they go in its EnvironmentFile.
 
 ## Record shapes
 

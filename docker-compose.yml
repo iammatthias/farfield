@@ -79,6 +79,7 @@ services:
       - PASSWORD=${PASSWORD:?set PASSWORD in .env — refusing to start with a default}
       - SESSION_SECRET=${SESSION_SECRET:-}
       - SESSION_COOKIE_DOMAIN=${SESSION_COOKIE_DOMAIN:-}
+      - FARFIELD_LOGIN_URL=${FARFIELD_LOGIN_URL:-}
       - FARFIELD_URL_BACKUP=${FARFIELD_URL_BACKUP:-}
       - BLOBS_API_KEY=${BLOBS_API_KEY:-}
       - BLOBS_READ_KEY=${BLOBS_READ_KEY:-}
@@ -126,6 +127,7 @@ services:
       - PASSWORD=${PASSWORD:?set PASSWORD in .env — refusing to start with a default}
       - SESSION_SECRET=${SESSION_SECRET:-}
       - SESSION_COOKIE_DOMAIN=${SESSION_COOKIE_DOMAIN:-}
+      - FARFIELD_LOGIN_URL=${FARFIELD_LOGIN_URL:-}
       - FARFIELD_URL_BACKUP=${FARFIELD_URL_BACKUP:-}
       - LIBRARY_API_KEY=${LIBRARY_API_KEY:-}
       - LIBRARY_UPLOAD_KEY=${LIBRARY_UPLOAD_KEY:-}
@@ -164,6 +166,7 @@ services:
       - PASSWORD=${PASSWORD:?set PASSWORD in .env — refusing to start with a default}
       - SESSION_SECRET=${SESSION_SECRET:-}
       - SESSION_COOKIE_DOMAIN=${SESSION_COOKIE_DOMAIN:-}
+      - FARFIELD_LOGIN_URL=${FARFIELD_LOGIN_URL:-}
       - FARFIELD_URL_BACKUP=${FARFIELD_URL_BACKUP:-}
       - CONTENT_API_KEY=${CONTENT_API_KEY:-}
       - CONTENT_READ_KEY=${CONTENT_READ_KEY:-}
@@ -204,6 +207,7 @@ services:
       - PASSWORD=${PASSWORD:?set PASSWORD in .env — refusing to start with a default}
       - SESSION_SECRET=${SESSION_SECRET:-}
       - SESSION_COOKIE_DOMAIN=${SESSION_COOKIE_DOMAIN:-}
+      - FARFIELD_LOGIN_URL=${FARFIELD_LOGIN_URL:-}
       - FARFIELD_URL_BACKUP=${FARFIELD_URL_BACKUP:-}
       - FEED_API_KEY=${FEED_API_KEY:-}
       - FEED_READ_KEY=${FEED_READ_KEY:-}
@@ -262,9 +266,12 @@ services:
       # Read-only key for the overview/traffic JSON, so switchboard can answer
       # "/pulse" over iMessage without holding the shared PASSWORD.
       - PULSE_READ_KEY=${PULSE_READ_KEY:-}
+      # Minted read (or write) keys for "pulse" work beside PULSE_READ_KEY.
+      - KEYS_DB_PATH=/data/keys.sqlite
       - PASSWORD=${PASSWORD:?set PASSWORD in .env — refusing to start with a default}
       - SESSION_SECRET=${SESSION_SECRET:-}
       - SESSION_COOKIE_DOMAIN=${SESSION_COOKIE_DOMAIN:-}
+      - FARFIELD_LOGIN_URL=${FARFIELD_LOGIN_URL:-}
       - FARFIELD_URL_BACKUP=${FARFIELD_URL_BACKUP:-}
       - COOKIE_SECURE=true
     volumes:
@@ -305,6 +312,7 @@ services:
       - PASSWORD=${PASSWORD:?set PASSWORD in .env — refusing to start with a default}
       - SESSION_SECRET=${SESSION_SECRET:-}
       - SESSION_COOKIE_DOMAIN=${SESSION_COOKIE_DOMAIN:-}
+      - FARFIELD_LOGIN_URL=${FARFIELD_LOGIN_URL:-}
       - FARFIELD_URL_BACKUP=${FARFIELD_URL_BACKUP:-}
       - BOOKMARKS_API_KEY=${BOOKMARKS_API_KEY:-}
       - BOOKMARKS_READ_KEY=${BOOKMARKS_READ_KEY:-}
@@ -334,6 +342,7 @@ services:
       - PASSWORD=${PASSWORD:?set PASSWORD in .env — refusing to start with a default}
       - SESSION_SECRET=${SESSION_SECRET:-}
       - SESSION_COOKIE_DOMAIN=${SESSION_COOKIE_DOMAIN:-}
+      - FARFIELD_LOGIN_URL=${FARFIELD_LOGIN_URL:-}
       - FARFIELD_URL_BACKUP=${FARFIELD_URL_BACKUP:-}
       - COOKIE_SECURE=true
     volumes:
@@ -359,6 +368,7 @@ services:
       - PASSWORD=${PASSWORD:?set PASSWORD in .env — refusing to start with a default}
       - SESSION_SECRET=${SESSION_SECRET:-}
       - SESSION_COOKIE_DOMAIN=${SESSION_COOKIE_DOMAIN:-}
+      - FARFIELD_LOGIN_URL=${FARFIELD_LOGIN_URL:-}
       - FARFIELD_URL_BACKUP=${FARFIELD_URL_BACKUP:-}
       - COOKIE_SECURE=true
     volumes:
@@ -391,6 +401,7 @@ services:
       - PASSWORD=${PASSWORD:?set PASSWORD in .env — refusing to start with a default}
       - SESSION_SECRET=${SESSION_SECRET:-}
       - SESSION_COOKIE_DOMAIN=${SESSION_COOKIE_DOMAIN:-}
+      - FARFIELD_LOGIN_URL=${FARFIELD_LOGIN_URL:-}
       - FARFIELD_URL_BACKUP=${FARFIELD_URL_BACKUP:-}
       - COOKIE_SECURE=true
     volumes:
@@ -410,9 +421,17 @@ services:
       - FARFIELD_TRUSTED_PROXIES=${FARFIELD_TRUSTED_PROXIES:-}
       - KEYS_PORT=8801
       - KEYS_DB_PATH=/data/keys.sqlite
+      # Passkey sign-in for the fleet (keys is the login page when
+      # FARFIELD_LOGIN_URL points here). RP ID unset = password only.
+      # e.g. WEBAUTHN_RP_ID=farfield.systems,
+      #      WEBAUTHN_ORIGINS=https://keys.farfield.systems
+      - WEBAUTHN_RP_ID=${WEBAUTHN_RP_ID:-}
+      - WEBAUTHN_ORIGINS=${WEBAUTHN_ORIGINS:-}
+      - WEBAUTHN_RP_NAME=${WEBAUTHN_RP_NAME:-farfield}
       - PASSWORD=${PASSWORD:?set PASSWORD in .env — refusing to start with a default}
       - SESSION_SECRET=${SESSION_SECRET:-}
       - SESSION_COOKIE_DOMAIN=${SESSION_COOKIE_DOMAIN:-}
+      - FARFIELD_LOGIN_URL=${FARFIELD_LOGIN_URL:-}
       - FARFIELD_URL_BACKUP=${FARFIELD_URL_BACKUP:-}
       - COOKIE_SECURE=true
     volumes:
@@ -437,6 +456,8 @@ services:
       - BACKUP_DB_PATH=/data/backup.sqlite
       - BACKUP_INTERVAL=${BACKUP_INTERVAL:-6h}
       - BACKUP_API_KEY=${BACKUP_API_KEY:-}
+      # Minted write keys for "backup" (or "*") also open the admin API.
+      - KEYS_DB_PATH=/data/keys.sqlite
       - CONTENT_DB_PATH=/data/content.sqlite
       - FEED_DB_PATH=/data/feed.sqlite
       - BLOBS_DB_PATH=/data/blobs.sqlite
@@ -449,6 +470,10 @@ services:
       # restore or delete every database in the fleet: a session minted here
       # does not travel, and a session from elsewhere does not open it.
       - SESSION_COOKIE_DOMAIN=
+      # Same reason, same answer: the fleet login at keys would set a cookie
+      # this host never receives, so sending its consoles there would loop.
+      # backup keeps its own /login.
+      - FARFIELD_LOGIN_URL=
       - FARFIELD_URL_BACKUP=${FARFIELD_URL_BACKUP:-}
       - BLOBS_URL=http://blobs:8789
       - BLOBS_API_KEY=${BLOBS_API_KEY:-}

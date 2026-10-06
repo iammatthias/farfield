@@ -7,7 +7,9 @@ import (
 	"net/http/httptest"
 	"path/filepath"
 	"testing"
+	"time"
 
+	"github.com/iammatthias/farfield/lib/keys"
 	"github.com/iammatthias/farfield/lib/web"
 )
 
@@ -89,5 +91,45 @@ func TestAdminSnapshots(t *testing.T) {
 	_ = json.Unmarshal(body, &got)
 	if len(got.Snapshots) != 2 || got.Snapshots[0].CID != "bafytwo" || got.Snapshots[0].App != "feed" {
 		t.Errorf("snapshots = %s, want both, newest first", body)
+	}
+}
+
+// Minted ffk_ keys reach the admin API once the key store is attached — the
+// desktop client's "*" key included — with the same scope rules as every
+// other app: write only, for this app or every app.
+func TestAdminSnapshotsMintedKey(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "keys.sqlite")
+	t.Setenv("KEYS_DB_PATH", path)
+	ks, err := keys.Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer ks.Close()
+	mint := func(app, scope string) string {
+		tok, _, err := ks.Mint("t", app, scope, time.Time{})
+		if err != nil {
+			t.Fatal(err)
+		}
+		return tok
+	}
+
+	s, ts := adminBackupServer(t, "") // no BACKUP_API_KEY: the store alone
+	defer keys.Attach(s.auth, "backup")()
+
+	for _, tc := range []struct {
+		name    string
+		key     string
+		headers map[string]string
+		want    int
+	}{
+		{"backup write", mint("backup", keys.ScopeWrite), nil, 200},
+		{"fleet write", mint(keys.AppAny, keys.ScopeWrite), nil, 200},
+		{"backup read", mint("backup", keys.ScopeRead), nil, 401},
+		{"another app", mint("feed", keys.ScopeWrite), nil, 401},
+		{"tunnel", mint("backup", keys.ScopeWrite), map[string]string{"Cf-Ray": "x"}, 404},
+	} {
+		if code, body := getSnapshots(t, ts, tc.key, tc.headers); code != tc.want {
+			t.Errorf("%s: status = %d, want %d (%s)", tc.name, code, tc.want, body)
+		}
 	}
 }
