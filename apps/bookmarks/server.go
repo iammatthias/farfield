@@ -90,7 +90,7 @@ func (s *Server) routes() http.Handler {
 	// Login — public HTML.
 	mux.HandleFunc("GET /login", s.handleLoginForm)
 	mux.HandleFunc("POST /login", s.auth.HandleLogin)
-	mux.HandleFunc("GET /logout", s.auth.HandleLogout)
+	s.auth.MountLogout(mux)
 
 	// JSON read API — bearer-token-gated when BOOKMARKS_READ_KEY is set (the
 	// write BOOKMARKS_API_KEY is also accepted). /status stays public.

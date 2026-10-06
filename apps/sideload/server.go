@@ -148,7 +148,7 @@ func (s *Server) routes() http.Handler {
 	// Login.
 	mux.HandleFunc("GET /login", s.handleLoginForm)
 	mux.HandleFunc("POST /login", s.auth.HandleLogin)
-	mux.HandleFunc("GET /logout", s.auth.HandleLogout)
+	s.auth.MountLogout(mux)
 
 	// Install session — token-gated, NO cookie (the iOS install daemon fetches
 	// these). Literal final segments outrank one another cleanly under {token}.

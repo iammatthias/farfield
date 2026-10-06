@@ -110,7 +110,7 @@ func (s *Server) routes() http.Handler {
 	// Login — public HTML.
 	mux.HandleFunc("GET /login", s.handleLoginForm)
 	mux.HandleFunc("POST /login", s.auth.HandleLogin)
-	mux.HandleFunc("GET /logout", s.auth.HandleLogout)
+	s.auth.MountLogout(mux)
 
 	// Liveness — the compose healthcheck convention. Exposes a bare target
 	// count and nothing about the targets themselves.

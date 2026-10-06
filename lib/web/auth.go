@@ -401,7 +401,7 @@ func (a *Auth) LoginFailed(r *http.Request) {
 // Logging out is a state change, so it needs a POST and the same origin check
 // RequireSession applies to every other write. As a GET it was logout-CSRF:
 // any page anywhere could embed <img src="https://content.farfield.systems/
-// logout"> and end the reader.s fleet session — every app at once, since the
+// logout"> and end the reader's fleet session — every app at once, since the
 // cookie is shared. A GET now renders a confirmation form instead of acting,
 // which also keeps a stale bookmark working rather than dead-ending.
 func (a *Auth) HandleLogout(w http.ResponseWriter, r *http.Request) {
@@ -424,6 +424,14 @@ func (a *Auth) HandleLogout(w http.ResponseWriter, r *http.Request) {
 	http.Redirect(w, r, "/login", http.StatusSeeOther)
 }
 
+// MountLogout registers /logout for both methods HandleLogout answers: GET
+// shows the confirmation, POST (that form) logs out. Registering GET alone
+// made the router answer the form with 405, so logout never worked.
+func (a *Auth) MountLogout(mux *http.ServeMux) {
+	mux.HandleFunc("GET /logout", a.HandleLogout)
+	mux.HandleFunc("POST /logout", a.HandleLogout)
+}
+
 // logoutConfirmHTML is deliberately self-contained: it is served by every app,
 // including ones whose templates are not loaded on this path.
 const logoutConfirmHTML = `<!DOCTYPE html>
@@ -434,7 +442,7 @@ const logoutConfirmHTML = `<!DOCTYPE html>
 <style>
   body{background:#f3e5d1;color:#0e222d;font-family:system-ui,sans-serif;
     display:grid;place-items:center;min-height:100vh;margin:0;padding:1.5rem}
-   (prefers-color-scheme:dark){body{background:#0e222d;color:#f3e5d1}}
+  @media (prefers-color-scheme:dark){body{background:#0e222d;color:#f3e5d1}}
   form{display:grid;gap:1rem;text-align:center}
   h1{font-size:1.25rem;font-weight:600;margin:0}
   button{font:inherit;padding:.6rem 1.4rem;border:1px solid currentColor;

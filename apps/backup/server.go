@@ -143,7 +143,7 @@ func (s *Server) routes() http.Handler {
 	// Login — public HTML.
 	mux.HandleFunc("GET /login", s.handleLoginForm)
 	mux.HandleFunc("POST /login", s.auth.HandleLogin)
-	mux.HandleFunc("GET /logout", s.auth.HandleLogout)
+	s.auth.MountLogout(mux)
 
 	// Private admin API — tailnet only, BACKUP_API_KEY, read-only (see admin.go).
 	s.mountAdmin(mux)

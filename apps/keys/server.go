@@ -160,7 +160,7 @@ func (s *Server) routes() http.Handler {
 	// ?next= and, with passkeys on, offers one above the password.
 	mux.HandleFunc("GET /login", s.handleLoginForm)
 	mux.HandleFunc("POST /login", s.auth.HandleLogin)
-	mux.HandleFunc("GET /logout", s.auth.HandleLogout)
+	s.auth.MountLogout(mux)
 
 	if s.wa != nil {
 		mux.HandleFunc("POST /passkey/login/begin", s.handlePasskeyLoginBegin)

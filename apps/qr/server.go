@@ -119,7 +119,7 @@ func (s *Server) routes() http.Handler {
 	// Login.
 	mux.HandleFunc("GET /login", s.handleLoginForm)
 	mux.HandleFunc("POST /login", s.auth.HandleLogin)
-	mux.HandleFunc("GET /logout", s.auth.HandleLogout)
+	s.auth.MountLogout(mux)
 
 	// Public QR rendering — must stay open: strangers scan these. Only for
 	// codes marked public AND enabled. The .svg suffix is optional; {id}

@@ -153,7 +153,7 @@ func (s *Server) routes() http.Handler {
 	// Login.
 	mux.HandleFunc("GET /login", s.handleLoginForm)
 	mux.HandleFunc("POST /login", s.auth.HandleLogin)
-	mux.HandleFunc("GET /logout", s.auth.HandleLogout)
+	s.auth.MountLogout(mux)
 
 	// Public reads. Literal /pastes outranks the /{id} wildcard in ServeMux
 	// precedence, as do /login, /status, and /static/*.

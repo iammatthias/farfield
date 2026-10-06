@@ -144,7 +144,7 @@ func (s *Server) routes() http.Handler {
 	// Login — public HTML.
 	mux.HandleFunc("GET /login", s.handleLoginForm)
 	mux.HandleFunc("POST /login", s.auth.HandleLogin)
-	mux.HandleFunc("GET /logout", s.auth.HandleLogout)
+	s.auth.MountLogout(mux)
 
 	// JSON read API. The LIST stays bearer-token-gated when FEED_READ_KEY is set
 	// (it enumerates every post; the write FEED_API_KEY is also accepted). A

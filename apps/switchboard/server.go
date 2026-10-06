@@ -275,7 +275,7 @@ func (s *Server) routes() http.Handler {
 
 	mux.HandleFunc("GET /login", s.handleLoginForm)
 	mux.HandleFunc("POST /login", s.auth.HandleLogin)
-	mux.HandleFunc("GET /logout", s.auth.HandleLogout)
+	s.auth.MountLogout(mux)
 
 	// The webhook. Deliberately not behind RequireAPIKey: Photon signs each
 	// delivery with an HMAC, and handleWebhook verifies that before anything

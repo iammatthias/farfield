@@ -168,7 +168,7 @@ func (s *Server) routes() http.Handler {
 	// Login — public HTML.
 	mux.HandleFunc("GET /login", s.handleLoginForm)
 	mux.HandleFunc("POST /login", s.auth.HandleLogin)
-	mux.HandleFunc("GET /logout", s.auth.HandleLogout)
+	s.auth.MountLogout(mux)
 
 	// Bytes and per-CID metadata stay public: images are embedded as <img> on
 	// public pages and loaded by the browser, which cannot send a bearer, and a

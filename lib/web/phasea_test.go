@@ -138,3 +138,29 @@ func TestMaxBodyExceptSkipsStreamingRoutes(t *testing.T) {
 		t.Errorf("POST /api/entries = %d, want 413 — ordinary write must be capped", rec.Code)
 	}
 }
+
+// TestLogoutRoutesBothMethods goes through a router, as the apps do: the
+// handler above always took the POST, but registering GET alone made the mux
+// answer the confirmation form with 405.
+func TestLogoutRoutesBothMethods(t *testing.T) {
+	a := &Auth{Password: "pw"}
+	mux := http.NewServeMux()
+	a.MountLogout(mux)
+
+	rec := httptest.NewRecorder()
+	mux.ServeHTTP(rec, httptest.NewRequest("GET", "/logout", nil))
+	if rec.Code != http.StatusOK {
+		t.Errorf("GET /logout through the mux = %d, want 200", rec.Code)
+	}
+	req := httptest.NewRequest("POST", "/logout", nil)
+	req.Host = "content.farfield.systems"
+	req.Header.Set("Origin", "https://content.farfield.systems")
+	rec = httptest.NewRecorder()
+	mux.ServeHTTP(rec, req)
+	if rec.Code != http.StatusSeeOther {
+		t.Fatalf("POST /logout through the mux = %d, want 303", rec.Code)
+	}
+	if c := rec.Result().Cookies(); len(c) == 0 || c[0].MaxAge >= 0 {
+		t.Errorf("POST /logout did not clear the session cookie: %v", c)
+	}
+}
