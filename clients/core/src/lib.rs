@@ -1,14 +1,20 @@
-pub fn add(left: u64, right: u64) -> u64 {
-    left + right
-}
+//! farfield-core: everything the native clients share that is not UI —
+//! the fleet registry, connection profiles, credentials, the transport, typed
+//! service clients, the response cache, local drafts and conflict-safe sync.
+//!
+//! Portable by design (macOS, Linux, iOS): no UI types, no platform calls
+//! outside the secret store and the Tailscale CLI probe.
 
-#[cfg(test)]
-mod tests {
-    use super::*;
+pub mod api;
+pub mod merge;
+pub mod profile;
+pub mod registry;
+pub mod secret;
+pub mod session;
+pub mod store;
+pub mod sync;
+pub mod transport;
+pub mod upload;
 
-    #[test]
-    fn it_works() {
-        let result = add(2, 2);
-        assert_eq!(result, 4);
-    }
-}
+pub use session::{Freshness, Latest, Loaded, Session};
+pub use transport::{runtime, spawn, ApiError};
