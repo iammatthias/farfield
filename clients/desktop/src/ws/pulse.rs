@@ -67,7 +67,7 @@ fn pct(s: &str) -> Option<f32> {
 
 impl PulseWs {
     pub fn new(w: &mut Window, cx: &mut Context<Self>) -> Self {
-        let search = cx.new(|cx| TextField::new(w, cx, "", "Filter targets  ⌘F"));
+        let search = cx.new(|cx| TextField::new(w, cx, "", "Filter  ⌘F"));
         cx.subscribe_in(&search, w, |this: &mut Self, _, e: &FieldEvent, _w, cx| match e {
             FieldEvent::Changed => cx.notify(),
             FieldEvent::Down => this.step(1, cx),
@@ -274,11 +274,8 @@ impl PulseWs {
     fn blocked(&self, e: &ApiError, cx: &mut Context<Self>) -> AnyElement {
         let t = theme(cx).clone();
         let (head, body) = match e {
-            ApiError::Unauthorized(_) => (
-                "Pulse needs its read key.",
-                "Pulse answers a scoped read key (PULSE_READ_KEY on the server) and nothing else — the fleet's write keys don't open it. Paste the key in Settings → Keys, or use the console in your browser.",
-            ),
-            ApiError::Offline(_) => ("Pulse can't be reached.", "It's offline or your tailnet is down. The other workspaces keep working; ⌘R tries again."),
+            ApiError::Unauthorized(_) => ("Pulse needs its read key.", "PULSE_READ_KEY — write keys don't open it."),
+            ApiError::Offline(_) => ("Pulse can't be reached.", ""),
             _ => ("Pulse didn't answer as expected.", ""),
         };
         let detail = if body.is_empty() { describe(e) } else { body.to_string() };
@@ -300,7 +297,7 @@ impl PulseWs {
                             goto(cx, "connections")
                         }))
                     })
-                    .child(ui::button("to-console", "Open the pulse console", BtnKind::Quiet, cx, |_, _, cx| {
+                    .child(ui::button("to-console", "Open console", BtnKind::Quiet, cx, |_, _, cx| {
                         crate::ws::connections::open_console(cx, "pulse")
                     })),
             )
@@ -312,7 +309,7 @@ impl PulseWs {
         if self.overview.is_none() {
             return match &self.error {
                 Some(e) => self.blocked(&e.clone(), cx),
-                None => ui::quiet_state("Asking pulse how the fleet is doing…", cx).into_any_element(),
+                None => ui::quiet_state("Loading…", cx).into_any_element(),
             };
         }
         let o = self.overview.clone().unwrap_or_default();
@@ -339,7 +336,7 @@ impl PulseWs {
         );
         if let Some(Freshness::Stale { age_ms, .. }) = &self.freshness {
             col = col.child(ui::notice(
-                format!("Offline — showing what pulse said {} ago.", crate::ws::content::ago(*age_ms)),
+                format!("Offline — showing what was loaded {} ago.", crate::ws::content::ago(*age_ms)),
                 t.warn,
                 cx,
             ));
@@ -390,14 +387,7 @@ impl PulseWs {
                 .child(num("30D".into(), 84., t.ink_2)),
         );
         if rows.is_empty() {
-            col = col.child(ui::quiet_state(
-                if o.targets.is_empty() {
-                    "Pulse isn't watching anything yet — add targets in the console."
-                } else {
-                    "No target matches the filter."
-                },
-                cx,
-            ));
+            col = col.child(ui::quiet_state(if o.targets.is_empty() { "No targets yet." } else { "No matches." }, cx));
         }
         let sel = self.selected;
         for (i, tg) in rows.iter().enumerate() {
@@ -519,7 +509,7 @@ impl PulseWs {
         if self.traffic.is_none() {
             return match &self.traffic_error {
                 Some(e) => self.blocked(&e.clone(), cx),
-                None => ui::quiet_state("Counting visits…", cx).into_any_element(),
+                None => ui::quiet_state("Loading…", cx).into_any_element(),
             };
         }
         let tr = self.traffic.clone().unwrap_or_default();
@@ -582,7 +572,7 @@ impl PulseWs {
                 .flex()
                 .gap(S5)
                 .child(stat("Hits", hits.to_string(), format!("{} → {}", tr.from, tr.to)))
-                .child(stat("Daily uniques, summed", uniq.to_string(), "a visitor counts once a day".into()))
+                .child(stat("Daily uniques, summed", uniq.to_string(), String::new()))
                 .child(stat(
                     "Busiest day",
                     peak.as_ref().filter(|p| p.n > 0).map(|p| p.n.to_string()).unwrap_or_else(|| "—".into()),
@@ -602,7 +592,7 @@ impl PulseWs {
                 let u = tr.uniques_per_day.get(i).map(|u| u.n).unwrap_or(0);
                 format!("{}   {} hits · {} uniques", d.day, d.n, u)
             }
-            None => "Hover a day for its numbers.".into(),
+            None => "—".into(),
         };
         let bars = tr.hits_per_day.iter().enumerate().map(|(i, d)| {
             let u = tr.uniques_per_day.get(i).map(|u| u.n).unwrap_or(0) as f32;
@@ -825,7 +815,7 @@ impl Workspace for PulseWs {
             cx,
         ));
         if !tg.enabled {
-            col = col.child(ui::chip("paused — not being checked", t.ink_3, cx));
+            col = col.child(ui::chip("paused", t.ink_3, cx));
         }
         col = col.child(div().py(S2).child(ui::rule(cx))).child(ui::eyebrow("Latest check", cx));
         match &tg.last {

@@ -156,7 +156,7 @@ pub struct LibraryWs {
 
 impl LibraryWs {
     pub fn new(w: &mut Window, cx: &mut Context<Self>) -> Self {
-        let search = cx.new(|cx| TextField::new(w, cx, "", "Filter books  ⌘F"));
+        let search = cx.new(|cx| TextField::new(w, cx, "", "Filter  ⌘F"));
         cx.subscribe_in(&search, w, |this: &mut Self, _, e: &FieldEvent, w, cx| match e {
             FieldEvent::Changed => cx.notify(),
             FieldEvent::Down => this.step(1, cx),
@@ -165,7 +165,7 @@ impl LibraryWs {
             _ => {}
         })
         .detach();
-        let move_to = cx.new(|cx| TextField::new(w, cx, "", "Type a collection, Enter moves it"));
+        let move_to = cx.new(|cx| TextField::new(w, cx, "", "Move to collection  ↵"));
         cx.subscribe_in(&move_to, w, |this: &mut Self, f, e: &FieldEvent, _w, cx| {
             if let FieldEvent::Submit = e {
                 let name = f.read(cx).text().trim().to_string();
@@ -382,7 +382,7 @@ impl LibraryWs {
         confirm(
             cx,
             "Delete this book?",
-            format!("“{title}” and its EPUB bytes are removed from the library. E-readers lose it on their next sync. This can't be undone."),
+            format!("“{title}” — can't be undone."),
             "Delete",
             true,
             move |_, cx| {
@@ -441,9 +441,9 @@ impl LibraryWs {
                     let name = p.state.file.file_name().map(|n| n.to_string_lossy().to_string()).unwrap_or_default();
                     let progress = Progress::new(p.state.size);
                     let why = if !p.state.file.exists() {
-                        "The file is gone from this Mac — discard it, or put it back to resume.".to_string()
+                        "File missing from this Mac.".to_string()
                     } else {
-                        "Interrupted in an earlier session.".to_string()
+                        "Interrupted.".to_string()
                     };
                     log("library-interrupted", &[("file", &name)]);
                     this.uploads.push(Up {
@@ -529,7 +529,7 @@ impl LibraryWs {
             self.start(i, cx);
         }
         if !skipped.is_empty() {
-            toast(cx, format!("Only EPUBs go to the library — skipped {}.", skipped.join(", ")), true);
+            toast(cx, format!("Skipped (not EPUB): {}.", skipped.join(", ")), true);
         }
         cx.notify();
     }
@@ -571,11 +571,7 @@ impl LibraryWs {
             }
             Ok(TusOutcome::Failed(msg)) => {
                 log("library-upload-failed", &[("file", &name), ("error", &msg)]);
-                self.uploads[i].phase = Phase::Failed(if msg.is_empty() {
-                    "The library could not read this file as an EPUB.".into()
-                } else {
-                    msg
-                });
+                self.uploads[i].phase = Phase::Failed(if msg.is_empty() { "Not a readable EPUB.".into() } else { msg });
             }
             Err(ApiError::Cancelled) if self.uploads[i].discard => {
                 self.uploads.remove(i);
@@ -593,7 +589,7 @@ impl LibraryWs {
                 }
                 log("library-upload-interrupted", &[("file", &name), ("error", &e.to_string())]);
                 let why = if matches!(e, ApiError::Offline(_) | ApiError::Uncertain(_)) {
-                    "The connection dropped. What reached the server is kept; Resume continues from there.".to_string()
+                    "Connection dropped.".to_string()
                 } else {
                     describe(&e)
                 };
@@ -614,9 +610,7 @@ impl LibraryWs {
                     log("library-upload-discarded", &[("file", &name)]);
                     toast(cx, format!("Upload of {name} cancelled."), false)
                 }
-                Ok(Err(e)) => {
-                    toast(cx, format!("Cancelled here, but the server kept the partial upload: {}", describe(&e)), true)
-                }
+                Ok(Err(e)) => toast(cx, format!("Cancelled; server kept the partial upload. {}", describe(&e)), true),
                 Err(e) => toast(cx, e.to_string(), true),
             });
         })
@@ -718,16 +712,7 @@ impl LibraryWs {
             Filter::Uncategorized,
             cx,
         ));
-        col.child(div().flex_1())
-            .child(
-                div()
-                    .px(S4)
-                    .py(S3)
-                    .text_xs()
-                    .text_color(t.ink_3)
-                    .child("Drop EPUBs anywhere here. New books join the collection you're viewing."),
-            )
-            .into_any_element()
+        col.into_any_element()
     }
 
     fn render_uploads(&self, cx: &mut Context<Self>) -> Option<AnyElement> {
@@ -762,7 +747,7 @@ impl LibraryWs {
                 Phase::Running => {
                     let f = u.progress.fraction();
                     if u.progress.total() > 0 && u.progress.sent() >= u.progress.total() {
-                        (1.0, "Finalizing — the library is reading the book…".into(), t.accent)
+                        (1.0, "Finalizing…".into(), t.accent)
                     } else {
                         (f, format!("{} of {}", ui::bytes(u.progress.sent() as i64), ui::bytes(total as i64)), t.accent)
                     }
@@ -934,15 +919,15 @@ impl LibraryWs {
         .flex_1();
         if n == 0 {
             let msg = if self.loading && !self.loaded {
-                "Loading the catalog…".to_string()
+                "Loading…".to_string()
             } else if self.error.is_some() {
                 String::new()
             } else if !self.search.read(cx).text().is_empty() {
-                "Nothing matches that filter.".into()
+                "No matches.".into()
             } else if self.books.is_empty() {
-                "The library is empty. Drop EPUBs here, or press ⌘N to choose some — they upload resumably, so big books survive a dropped connection.".into()
+                "No books yet.".into()
             } else {
-                "No books in this collection yet. Drop EPUBs here to add them to it.".into()
+                "No books in this collection.".into()
             };
             return div()
                 .flex_1()
@@ -1145,7 +1130,7 @@ impl Workspace for LibraryWs {
                 v.push(("uncategorize", "Library: move to Uncategorized".into(), ""));
             }
             v.push(("copy-cid", "Library: copy CID".into(), ""));
-            v.push(("delete", "Library: delete this book…".into(), ""));
+            v.push(("delete", "Library: delete book…".into(), ""));
         }
         v
     }
@@ -1197,7 +1182,7 @@ impl Render for LibraryWs {
         let status_line = match (&self.error, &self.freshness) {
             (Some(e), _) => Some(ui::notice(e.clone(), t.bad, cx)),
             (None, Some(Freshness::Stale { age_ms, .. })) => Some(ui::notice(
-                format!("Offline — showing the catalog as loaded {} ago.", crate::ws::content::ago(*age_ms)),
+                format!("Offline — showing what was loaded {} ago.", crate::ws::content::ago(*age_ms)),
                 t.warn,
                 cx,
             )),

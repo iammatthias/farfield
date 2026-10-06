@@ -74,7 +74,7 @@ fn tag_specs() -> Vec<FieldSpec> {
 impl FeedWs {
     pub fn new(w: &mut Window, cx: &mut Context<Self>) -> Self {
         cx.bind_keys([KeyBinding::new("cmd-enter", Publish, Some("Feed"))]);
-        let search = cx.new(|cx| TextField::new(w, cx, "", "Filter posts by text or #tag  ⌘F"));
+        let search = cx.new(|cx| TextField::new(w, cx, "", "Filter  ⌘F"));
         cx.subscribe_in(&search, w, |this: &mut Self, _, e: &FieldEvent, w, cx| match e {
             FieldEvent::Changed => cx.notify(),
             FieldEvent::Down => this.step(1, cx),
@@ -88,8 +88,7 @@ impl FeedWs {
         })
         .detach();
         let session = app::session(cx);
-        let composer =
-            cx.new(|cx| DocEditor::new(w, cx, "", "What's happening? Trailing #tags become tags.", Some(session)));
+        let composer = cx.new(|cx| DocEditor::new(w, cx, "", "New post…", Some(session)));
         cx.subscribe_in(&composer, w, |this: &mut Self, _, e: &DocEvent, _w, cx| match e {
             DocEvent::Changed => {
                 this.persist_composer(cx);
@@ -195,7 +194,7 @@ impl FeedWs {
                             set_health(cx, "feed", Health::Down(e.to_string()));
                         }
                         this.error = Some(if append && e.is_offline() {
-                            "Offline — the next page wasn't loaded before the connection went. ⌘R tries again.".into()
+                            "Offline — next page not loaded.".into()
                         } else {
                             describe(&e)
                         });
@@ -370,11 +369,11 @@ impl FeedWs {
         let (body, tags) = feed::split_hashtags(&text);
         let files = self.attachments.clone();
         if body.trim().is_empty() && files.is_empty() {
-            toast(cx, "Write something or attach a photo first.", true);
+            toast(cx, "Nothing to post.", true);
             return;
         }
         let first = body.lines().next().unwrap_or("").chars().take(80).collect::<String>();
-        let mut detail = if first.is_empty() { "A post with only media".to_string() } else { format!("“{first}”") };
+        let mut detail = if first.is_empty() { "Media only".to_string() } else { format!("“{first}”") };
         if !files.is_empty() {
             detail.push_str(&format!(" with {} attachment{}", files.len(), if files.len() == 1 { "" } else { "s" }));
         }
@@ -382,7 +381,7 @@ impl FeedWs {
             detail
                 .push_str(&format!(", tagged {}", tags.iter().map(|t| format!("#{t}")).collect::<Vec<_>>().join(" ")));
         }
-        detail.push_str(" goes to the public feed.");
+        detail.push('.');
         let ent = cx.entity();
         confirm(cx, "Post this?", detail, "Post", false, move |_, cx| {
             ent.update(cx, |this, cx| this.send(body, tags, files, cx))
@@ -433,11 +432,11 @@ impl FeedWs {
                     }
                     Ok(Err(ApiError::Cancelled)) => {
                         log("feed-post-cancelled", &[]);
-                        toast(cx, "Cancelled — nothing was posted. Your text and attachments are still here.", false);
+                        toast(cx, "Cancelled — not posted.", false);
                     }
                     Ok(Err(e @ ApiError::Uncertain(_))) => {
                         log("feed-post-uncertain", &[("error", &e.to_string())]);
-                        toast(cx, "The connection dropped mid-post — it may or may not have gone up. Check the timeline before posting again.", true);
+                        toast(cx, "Connection dropped mid-post — check the timeline before retrying.", true);
                         this.load(None, cx);
                     }
                     Ok(Err(e)) => {
@@ -522,15 +521,12 @@ impl FeedWs {
         let media = post.as_ref().map(|p| ext_media::blob_refs(&p.body).len()).unwrap_or(0);
         let release = self.release_media && media > 0;
         let body = if release {
-            format!("The post is removed, and its {media} media file{} too — unless another post or entry still embeds {}. Blobs have no backup.", if media == 1 { "" } else { "s" }, if media == 1 { "it" } else { "them" })
-        } else if media > 0 {
             format!(
-                "The post is removed. Its {media} media file{} stay{} in blobs.",
-                if media == 1 { "" } else { "s" },
-                if media == 1 { "s" } else { "" }
+                "Also deletes {media} media file{} unless embedded elsewhere. No backup.",
+                if media == 1 { "" } else { "s" }
             )
         } else {
-            "The post is removed from the feed.".into()
+            String::new()
         };
         let ent = cx.entity();
         confirm(cx, "Delete this post?", body, "Delete", true, move |_, cx| {
@@ -553,21 +549,15 @@ impl FeedWs {
                                     this.editing = None;
                                 }
                                 this.selected = None;
-                                toast(
-                                    cx,
-                                    if release { "Deleted. Media not used elsewhere is released." } else { "Deleted." },
-                                    false,
-                                );
+                                toast(cx, if release { "Deleted with media." } else { "Deleted." }, false);
                                 this.load_drafts(cx);
                                 this.load(None, cx);
                             }
-                            Ok(Err(ApiError::Precondition { .. })) => toast(
-                                cx,
-                                "Not deleted: it changed on the server since you opened it. ⌘R to see the change.",
-                                true,
-                            ),
+                            Ok(Err(ApiError::Precondition { .. })) => {
+                                toast(cx, "Not deleted — changed on the server.", true)
+                            }
                             Ok(Err(ApiError::NotFound)) => {
-                                toast(cx, "Already gone from the server.", false);
+                                toast(cx, "Already deleted.", false);
                                 this.posts.retain(|p| p.slug != slug);
                                 this.selected = None;
                             }
@@ -677,7 +667,7 @@ impl FeedWs {
                         e.update(cx, |this, cx| this.pick_attach(w, cx))
                     }))
                     .child(div().flex_1().text_xs().text_color(t.ink_3).truncate().child(if tags.is_empty() {
-                        "Drop photos on the text to attach them.".to_string()
+                        String::new()
                     } else {
                         format!("tags: {}", tags.iter().map(|t| format!("#{t}")).collect::<Vec<_>>().join(" "))
                     }))
@@ -821,10 +811,7 @@ impl FeedWs {
             (Some(e), _) => Some(ui::notice(e.clone(), t.bad, cx).into_any_element()),
             (None, Some(Freshness::Stale { age_ms, .. })) => Some(
                 ui::notice(
-                    format!(
-                        "Offline — showing the timeline as it was {} ago. Posting waits until feed is back.",
-                        crate::ws::blobs::ago(*age_ms)
-                    ),
+                    format!("Offline — showing what was loaded {} ago.", crate::ws::blobs::ago(*age_ms)),
                     t.warn,
                     cx,
                 )
@@ -875,15 +862,7 @@ impl FeedWs {
                     .flex()
                     .flex_col()
                     .gap(px(4.))
-                    .child(ui::notice(
-                        format!(
-                            "{n} edited post{} on this Mac {} not on the server yet.",
-                            if n == 1 { "" } else { "s" },
-                            if n == 1 { "is" } else { "are" }
-                        ),
-                        t.warn,
-                        cx,
-                    ))
+                    .child(ui::notice(format!("{n} unsaved post{}.", if n == 1 { "" } else { "s" }), t.warn, cx))
                     .children(self.drafts.iter().map(|d| {
                         let k = d.key.clone();
                         let e = cx.entity();
@@ -915,13 +894,13 @@ impl FeedWs {
         let mut rows: Vec<AnyElement> = Vec::new();
         if posts.is_empty() {
             let msg = if self.loading {
-                "Loading the timeline…"
+                "Loading…"
             } else if !self.posts.is_empty() {
-                "No loaded post matches the filter."
+                "No matches."
             } else if self.error.is_some() {
-                "The timeline couldn't be loaded. ⌘R tries again."
+                "Couldn't load."
             } else {
-                "Nothing posted yet. Write the first one above — ⌘↵ posts it."
+                "No posts yet."
             };
             rows.push(div().py(S5).text_sm().text_color(t.ink_2).child(msg).into_any_element());
         }
@@ -1020,17 +999,7 @@ impl Workspace for FeedWs {
                     .flex_col()
                     .gap(S2)
                     .child(ui::eyebrow("Post", cx))
-                    .child(
-                        div().text_sm().text_color(t.ink_2).child(
-                            "Choose a post to see its details. Double-click (or Enter from the filter) edits it.",
-                        ),
-                    )
-                    .child(
-                        div()
-                            .text_xs()
-                            .text_color(t.ink_3)
-                            .child("⌘N writes a new one · ⌘↵ or ⌘S posts it · ⌘R refreshes."),
-                    )
+                    .child(div().text_sm().text_color(t.ink_2).child("No post selected."))
                     .into_any_element(),
             );
         };
@@ -1084,40 +1053,32 @@ impl Workspace for FeedWs {
             }
         }
         let e = cx.entity();
-        col = col
-            .child(ui::rule(cx))
-            .child(self.render_release_toggle(cx))
-            .child(
-                div()
-                    .text_xs()
-                    .text_color(t.ink_3)
-                    .child("Released media is deleted from blobs unless another post or entry still embeds it."),
-            )
-            .child(ui::button("delete", "Delete post…", BtnKind::Danger, cx, move |_, _, cx| {
-                e.update(cx, |this, cx| this.delete(cx))
-            }));
+        col = col.child(ui::rule(cx)).child(self.render_release_toggle(cx)).child(ui::button(
+            "delete",
+            "Delete post…",
+            BtnKind::Danger,
+            cx,
+            move |_, _, cx| e.update(cx, |this, cx| this.delete(cx)),
+        ));
         Some(col.into_any_element())
     }
 
     fn commands(&self, _cx: &App) -> Vec<(&'static str, String, &'static str)> {
-        let mut v = vec![
-            ("new", "Feed: write a new post".to_string(), "⌘N"),
-            ("attach", "Feed: attach files to the new post…".into(), ""),
-        ];
+        let mut v = vec![("new", "Feed: new post".to_string(), "⌘N"), ("attach", "Feed: attach files…".into(), "")];
         if self.editing.is_some() {
-            v.push(("save", "Feed: save this post to the server".into(), "⌘S"));
-            v.push(("timeline", "Feed: back to the timeline".into(), ""));
+            v.push(("save", "Feed: save post".into(), "⌘S"));
+            v.push(("timeline", "Feed: timeline".into(), ""));
         } else {
             v.push(("publish", "Feed: post it".into(), "⌘↵"));
         }
         if self.selected.is_some() {
-            v.push(("edit", "Feed: edit this post".into(), "↵"));
+            v.push(("edit", "Feed: edit post".into(), "↵"));
             v.push((
                 "toggle-release",
-                format!("Feed: {} release of media on delete", if self.release_media { "turn off" } else { "turn on" }),
+                format!("Feed: {} media release on delete", if self.release_media { "turn off" } else { "turn on" }),
                 "",
             ));
-            v.push(("delete", "Feed: delete this post…".into(), ""));
+            v.push(("delete", "Feed: delete post…".into(), ""));
         }
         v
     }
@@ -1186,26 +1147,11 @@ impl Render for FeedWs {
                     .size_full()
                     .flex()
                     .flex_col()
-                    .child(
-                        div()
-                            .flex()
-                            .items_center()
-                            .gap(S2)
-                            .px(S4)
-                            .py(S2)
-                            .border_b_1()
-                            .border_color(t.rule)
-                            .child(ui::button("back", "← Timeline", BtnKind::Quiet, cx, move |_, _, cx| {
-                                e.update(cx, |this, cx| this.close_editor(cx))
-                            }))
-                            .child(div().flex_1())
-                            .child(
-                                div()
-                                    .text_xs()
-                                    .text_color(t.ink_3)
-                                    .child("Saved on this Mac as you type · ⌘S saves to the server"),
-                            ),
-                    )
+                    .child(div().flex().items_center().gap(S2).px(S4).py(S2).border_b_1().border_color(t.rule).child(
+                        ui::button("back", "← Timeline", BtnKind::Quiet, cx, move |_, _, cx| {
+                            e.update(cx, |this, cx| this.close_editor(cx))
+                        }),
+                    ))
                     .child(div().flex_1().min_h_0().child(doc))
                     .into_any_element()
             }

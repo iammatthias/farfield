@@ -3,6 +3,7 @@ module github.com/iammatthias/farfield/apps/pulse
 go 1.27.0
 
 require (
+	github.com/iammatthias/farfield/lib/keys v0.0.0
 	github.com/iammatthias/farfield/lib/fleet v0.0.0
 	github.com/iammatthias/farfield/lib/store v0.0.0
 	github.com/iammatthias/farfield/lib/theme v0.0.0
@@ -33,3 +34,4 @@ replace (
 	github.com/iammatthias/farfield/lib/theme => ../../lib/theme
 	github.com/iammatthias/farfield/lib/web => ../../lib/web
 )
+replace github.com/iammatthias/farfield/lib/keys => ../../lib/keys

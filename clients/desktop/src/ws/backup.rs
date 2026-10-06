@@ -35,7 +35,7 @@ pub struct BackupWs {
 
 impl BackupWs {
     pub fn new(w: &mut Window, cx: &mut Context<Self>) -> Self {
-        let search = cx.new(|cx| TextField::new(w, cx, "", "Filter by app or CID  ⌘F"));
+        let search = cx.new(|cx| TextField::new(w, cx, "", "Filter  ⌘F"));
         cx.subscribe_in(&search, w, |this: &mut Self, _, e: &FieldEvent, _w, cx| match e {
             FieldEvent::Changed => cx.notify(),
             FieldEvent::Down => this.step(1, cx),
@@ -133,18 +133,13 @@ impl BackupWs {
     fn blocked(&self, e: &ApiError, cx: &mut Context<Self>) -> AnyElement {
         let t = theme(cx).clone();
         let (head, body) = match e {
-            ApiError::Unauthorized(_) => (
-                "Backup needs its key.",
-                "The snapshot registry answers BACKUP_API_KEY only — minted keys don't open it. Add the key in Settings → Keys.".to_string(),
-            ),
-            ApiError::Unavailable(_) => (
-                "Backup's read API is switched off.",
-                "The server has no BACKUP_API_KEY configured, so it answers nothing here. Set one on the homelab to see snapshots in this app; the console works either way.".to_string(),
-            ),
-            ApiError::Offline(_) | ApiError::NotFound => (
-                "Backup can't be reached.",
-                "It has no public address — connect to your tailnet and ⌘R. Nothing else in the app depends on it.".to_string(),
-            ),
+            ApiError::Unauthorized(_) => {
+                ("Backup needs its key.", "BACKUP_API_KEY only — minted keys don't open it.".to_string())
+            }
+            ApiError::Unavailable(_) => {
+                ("Backup's read API is switched off.", "No BACKUP_API_KEY set on the server.".to_string())
+            }
+            ApiError::Offline(_) | ApiError::NotFound => ("Backup can't be reached.", "Tailnet only.".to_string()),
             other => ("Backup didn't answer as expected.", describe(other)),
         };
         div()
@@ -163,7 +158,7 @@ impl BackupWs {
                             goto(cx, "connections")
                         }))
                     })
-                    .child(ui::button("console", "Open the backup console", BtnKind::Quiet, cx, |_, _, cx| {
+                    .child(ui::button("console", "Open console", BtnKind::Quiet, cx, |_, _, cx| {
                         crate::ws::connections::open_console(cx, "backup")
                     })),
             )
@@ -192,9 +187,9 @@ impl Workspace for BackupWs {
                 .child(ui::field_row(
                     "Place",
                     div().text_sm().text_color(t.ink).child(if newer == 0 {
-                        format!("the newest of {}'s {} snapshots", s.app, same.len())
+                        format!("newest of {}", same.len())
                     } else {
-                        format!("{newer} newer of {} for {}", same.len(), s.app)
+                        format!("{newer} newer of {}", same.len())
                     }),
                     cx,
                 ))
@@ -202,13 +197,6 @@ impl Workspace for BackupWs {
                     cx.write_to_clipboard(gpui::ClipboardItem::new_string(cid.clone()));
                     toast(cx, "CID copied.", false);
                 })))
-                .child(
-                    div()
-                        .pt(S3)
-                        .text_xs()
-                        .text_color(t.ink_3)
-                        .child("Restoring happens in the backup console, never from here."),
-                )
                 .into_any_element(),
         )
     }
@@ -224,7 +212,7 @@ impl Workspace for BackupWs {
     fn commands(&self, _cx: &App) -> Vec<(&'static str, String, &'static str)> {
         vec![
             ("refresh", "Backup: refresh snapshots".into(), "⌘R"),
-            ("console", "Backup: open the console (browser)".into(), ""),
+            ("console", "Backup: open console (browser)".into(), ""),
         ]
     }
 
@@ -241,26 +229,17 @@ impl Render for BackupWs {
     fn render(&mut self, _w: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let t = theme(cx).clone();
         let mut col = div().flex().flex_col().gap(S4).px(px(40.)).py(S5).max_w(px(980.));
-        col = col.child(
-            div()
-                .flex()
-                .flex_col()
-                .gap(S2)
-                .child(div().text_xl().text_color(t.ink).child("Backup"))
-                .child(div().text_sm().text_color(t.ink_2).max_w(px(640.)).child(
-                    "Backup can restore or destroy every database in the fleet, so it has no public address: this view reads its snapshot registry over your tailnet and does nothing else. Taking, pruning and restoring snapshots stay in the backup console.",
-                )),
-        );
+        col = col.child(div().flex().flex_col().gap(S2).child(div().text_xl().text_color(t.ink).child("Backup")));
         if !self.loaded {
             col = col.child(match &self.error {
                 Some(e) => self.blocked(&e.clone(), cx),
-                None => ui::quiet_state("Reading the snapshot registry…", cx).into_any_element(),
+                None => ui::quiet_state("Loading…", cx).into_any_element(),
             });
             return div().id("backup").size_full().overflow_y_scroll().track_scroll(&self.scroll).child(col);
         }
         if let Some(Freshness::Stale { age_ms, .. }) = &self.freshness {
             col = col.child(ui::notice(
-                format!("Offline — showing the registry as it was {} ago.", crate::ws::content::ago(*age_ms)),
+                format!("Offline — showing what was loaded {} ago.", crate::ws::content::ago(*age_ms)),
                 t.warn,
                 cx,
             ));
@@ -293,11 +272,7 @@ impl Render for BackupWs {
         let groups = self.groups(cx);
         if groups.is_empty() {
             col = col.child(ui::quiet_state(
-                if self.snapshots.is_empty() {
-                    "No snapshots yet — the scheduler takes the first within its interval, or take one in the console."
-                } else {
-                    "Nothing matches the filter."
-                },
+                if self.snapshots.is_empty() { "No snapshots yet." } else { "No matches." },
                 cx,
             ));
         }

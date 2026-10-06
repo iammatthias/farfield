@@ -220,7 +220,7 @@ impl<K: Kind + 'static> DraftDoc<K> {
         }
         self.flush(cx);
         if self.draft.state == SaveState::Saved {
-            toast(cx, "Already saved to the server.", false);
+            toast(cx, "Already saved.", false);
             return;
         }
         self.saving = true;
@@ -267,7 +267,7 @@ impl<K: Kind + 'static> DraftDoc<K> {
                 }
                 log("saved", &[("service", K::DRAFTS), ("key", &d.key)]);
                 crate::perf::end("save");
-                toast(cx, "Saved to the server.", false);
+                toast(cx, "Saved.", false);
                 cx.emit(DraftEvent::Saved);
             }
             Ok(SaveOutcome::Conflict) => {
@@ -275,7 +275,7 @@ impl<K: Kind + 'static> DraftDoc<K> {
                 if typed_meanwhile {
                     d.local = now;
                 }
-                toast(cx, "Changed on the server since you opened it — choose how to resolve.", true);
+                toast(cx, "Conflict — changed on the server.", true);
             }
             Ok(SaveOutcome::NotSaved(e)) => {
                 log("save-failed", &[("service", K::DRAFTS), ("key", &d.key), ("error", &e.to_string())]);
@@ -358,9 +358,9 @@ impl<K: Kind + 'static> DraftDoc<K> {
                 this.reload_all(cx);
                 match r {
                     Ok(SaveOutcome::Saved) => toast(cx, "Resolved and saved.", false),
-                    Ok(SaveOutcome::Conflict) => toast(cx, "Still conflicting — the server changed again.", true),
+                    Ok(SaveOutcome::Conflict) => toast(cx, "Still conflicting.", true),
                     Ok(SaveOutcome::NotSaved(farfield_core::ApiError::Cancelled)) => {
-                        toast(cx, "Loaded for review — save when it reads right.", false)
+                        toast(cx, "Merged — review, then save.", false)
                     }
                     Ok(SaveOutcome::NotSaved(e)) | Err(e) => this.error = Some(describe(&e)),
                 }
@@ -488,10 +488,10 @@ impl<K: Kind + 'static> DraftDoc<K> {
         let t = theme(cx).clone();
         let mut out: Vec<AnyElement> = Vec::new();
         let (label, color) = match (self.saving, self.draft.state) {
-            (true, _) => ("Saving to the server…", t.accent),
-            (_, SaveState::Saved) => ("Saved to the server", t.good),
-            (_, SaveState::Local) => ("Saved on this Mac · not on the server", t.warn),
-            (_, SaveState::Pending) => ("Pending · the last save's outcome is unknown", t.warn),
+            (true, _) => ("Saving…", t.accent),
+            (_, SaveState::Saved) => ("Saved", t.good),
+            (_, SaveState::Local) => ("Unsaved · on this Mac only", t.warn),
+            (_, SaveState::Pending) => ("Pending · outcome unknown", t.warn),
             (_, SaveState::Conflict) => ("Conflict · changed on the server", t.bad),
         };
         out.push(ui::chip(label, color, cx).into_any_element());
@@ -511,14 +511,9 @@ impl<K: Kind + 'static> DraftDoc<K> {
             let e = ent.clone();
             row = row.child(ui::button("revert", "Discard local changes", BtnKind::Quiet, cx, move |_, _, cx| {
                 let e = e.clone();
-                confirm(
-                    cx,
-                    "Discard local changes?",
-                    "Your edits on this Mac are dropped and the server's version comes back.",
-                    "Discard",
-                    true,
-                    move |_, cx| e.update(cx, |d, cx| d.revert(cx)),
-                )
+                confirm(cx, "Discard local changes?", "", "Discard", true, move |_, cx| {
+                    e.update(cx, |d, cx| d.revert(cx))
+                })
             }));
         }
         out.push(row.into_any_element());
@@ -539,9 +534,9 @@ impl<K: Kind + 'static> DraftDoc<K> {
                     .text_sm()
                     .text_color(t.ink_2)
                     .child(if deleted {
-                        "This was deleted on the server. Keep yours to recreate it, or close it.".to_string()
+                        "Deleted on the server.".to_string()
                     } else {
-                        format!("Both changed: {}. Nothing is lost whichever you choose — uploads you added stay in the body.", differing.join(", "))
+                        format!("Both changed: {}.", differing.join(", "))
                     })
                     .into_any_element(),
             );
@@ -557,14 +552,9 @@ impl<K: Kind + 'static> DraftDoc<K> {
                     }))
                     .child(ui::button("keep", "Keep mine (overwrite server)", BtnKind::Quiet, cx, move |_, _, cx| {
                         let b = b.clone();
-                        confirm(
-                            cx,
-                            "Overwrite the server's version?",
-                            "The server's changes are replaced by yours.",
-                            "Overwrite",
-                            true,
-                            move |_, cx| b.update(cx, |d, cx| d.resolve(Resolution::KeepMine, cx)),
-                        )
+                        confirm(cx, "Overwrite the server's version?", "", "Overwrite", true, move |_, cx| {
+                            b.update(cx, |d, cx| d.resolve(Resolution::KeepMine, cx))
+                        })
                     }))
                     .when(!deleted, |d| {
                         d.child(ui::button("theirs", "Take theirs", BtnKind::Quiet, cx, move |_, _, cx| {
@@ -606,13 +596,7 @@ impl<K: Kind + 'static> DraftDoc<K> {
                 }))
                 .into_any_element(),
         );
-        out.push(
-            div()
-                .text_xs()
-                .text_color(t.ink_3)
-                .child("Or drop files on the document. Images go to blobs and are referenced as blob://.")
-                .into_any_element(),
-        );
+
         for (i, u) in self.uploads.iter().enumerate() {
             let p = u.progress.clone();
             let frac = p.fraction();

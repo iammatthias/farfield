@@ -91,7 +91,7 @@ fn vis_index(v: &str) -> usize {
 
 impl ScrapWs {
     pub fn new(w: &mut Window, cx: &mut Context<Self>) -> Self {
-        let search = cx.new(|cx| TextField::new(w, cx, "", "Filter loaded pastes  ⌘F"));
+        let search = cx.new(|cx| TextField::new(w, cx, "", "Filter  ⌘F"));
         cx.subscribe_in(&search, w, |this: &mut Self, _, e: &FieldEvent, _w, cx| match e {
             FieldEvent::Changed => cx.notify(),
             FieldEvent::Down => this.step(1, cx),
@@ -263,21 +263,14 @@ impl ScrapWs {
         }
         if self.compose_dirty(cx) {
             let me = self.me.clone();
-            confirm(
-                cx,
-                "Discard this new paste?",
-                "It hasn't been created yet; what you've written is dropped.",
-                "Discard",
-                true,
-                move |_, cx| {
-                    let _ = me.update(cx, |this, cx| {
-                        if let Some(c) = &this.compose {
-                            c.editor.update(cx, |e, cx| e.set_text("", cx));
-                        }
-                        this.open_now(id, cx)
-                    });
-                },
-            );
+            confirm(cx, "Discard this new paste?", "", "Discard", true, move |_, cx| {
+                let _ = me.update(cx, |this, cx| {
+                    if let Some(c) = &this.compose {
+                        c.editor.update(cx, |e, cx| e.set_text("", cx));
+                    }
+                    this.open_now(id, cx)
+                });
+            });
             return;
         }
         self.open_now(id, cx);
@@ -319,11 +312,7 @@ impl ScrapWs {
                     }
                     Ok(Err(ApiError::NotFound)) => {
                         this.pastes.retain(|p| p.id != id);
-                        this.sel = Sel::Paste {
-                            id,
-                            full: None,
-                            error: Some("This paste no longer exists — it was deleted or swept after expiring.".into()),
-                        };
+                        this.sel = Sel::Paste { id, full: None, error: Some("Paste is gone.".into()) };
                     }
                     Ok(Err(e)) => {
                         if e.is_auth() {
@@ -377,7 +366,7 @@ impl ScrapWs {
         let Some(id) = self.selected_id().map(|s| s.to_string()) else { return };
         let ch = self.meta_changes(cx);
         if ch.is_empty() {
-            toast(cx, "Nothing to save — no changes.", false);
+            toast(cx, "No changes.", false);
             return;
         }
         if self.meta.saving {
@@ -398,11 +387,7 @@ impl ScrapWs {
                         let forced = this.meta.vis == 0 && p.visibility != "public";
                         toast(
                             cx,
-                            if forced {
-                                "Saved. It stays unlisted: a paste with a magic link is never public."
-                            } else {
-                                "Saved."
-                            },
+                            if forced { "Saved as unlisted — magic-link pastes can't be public." } else { "Saved." },
                             forced,
                         );
                         this.fill_meta(&p, cx);
@@ -427,7 +412,7 @@ impl ScrapWs {
     fn new_paste(&mut self, w: &mut Window, cx: &mut Context<Self>) {
         if self.compose.is_none() {
             let editor = cx.new(|cx| {
-                let mut e = DocEditor::new(w, cx, "", "Paste or type. The body can't change after it's created.", None);
+                let mut e = DocEditor::new(w, cx, "", "Paste or type — fixed once created.", None);
                 e.set_plain(true, cx);
                 e
             });
@@ -460,7 +445,7 @@ impl ScrapWs {
                 f
             };
             let title = mk("Title", "optional", false, w, cx);
-            let lang = mk("Language", "plain text — or go, rust, ts, sh…", true, w, cx);
+            let lang = mk("Language", "plain text", true, w, cx);
             self.compose = Some(Compose {
                 editor,
                 title,
@@ -489,7 +474,7 @@ impl ScrapWs {
         }
         let body = c.editor.update(cx, |e, _| e.text());
         if body.trim().is_empty() {
-            c.error = Some("Write or paste something first.".into());
+            c.error = Some("Nothing to paste.".into());
             cx.notify();
             return;
         }
@@ -526,11 +511,7 @@ impl ScrapWs {
                         }
                         toast(
                             cx,
-                            if existed {
-                                "That body was already a paste — its settings were updated."
-                            } else {
-                                "Paste created."
-                            },
+                            if existed { "Already a paste — settings updated." } else { "Paste created." },
                             false,
                         );
                         let id = made.id.clone();
@@ -558,43 +539,29 @@ impl ScrapWs {
     fn rotate(&mut self, cx: &mut Context<Self>) {
         let Some(p) = self.current().cloned() else { return };
         if !p.has_token {
-            toast(cx, "This paste has no magic link to rotate.", true);
+            toast(cx, "No magic link.", true);
             return;
         }
         let me = self.me.clone();
-        confirm(
-            cx,
-            "Rotate the magic link?",
-            "The current link stops working at once — anyone holding it is locked out. The new token is shown once.",
-            "Rotate",
-            true,
-            move |_, cx| {
-                let _ = me.update(cx, |this, cx| this.token_op(p.id.clone(), true, cx));
-            },
-        );
+        confirm(cx, "Rotate the magic link?", "The current link stops working.", "Rotate", true, move |_, cx| {
+            let _ = me.update(cx, |this, cx| this.token_op(p.id.clone(), true, cx));
+        });
     }
 
     fn revoke(&mut self, cx: &mut Context<Self>) {
         let Some(p) = self.current().cloned() else { return };
         if !p.has_token {
-            toast(cx, "This paste has no magic link to revoke.", true);
+            toast(cx, "No magic link.", true);
             return;
         }
         let after = match p.visibility.as_str() {
-            "private" => "It's private, so after this only you can open it.",
-            _ => "It's unlisted, so after this anyone with the plain link can read it — no token needed.",
+            "private" => "Only you can open it after.",
+            _ => "Anyone with the plain link can read it after.",
         };
         let me = self.me.clone();
-        confirm(
-            cx,
-            "Revoke the magic link?",
-            format!("The token stops working. {after}"),
-            "Revoke",
-            true,
-            move |_, cx| {
-                let _ = me.update(cx, |this, cx| this.token_op(p.id.clone(), false, cx));
-            },
-        );
+        confirm(cx, "Revoke the magic link?", after, "Revoke", true, move |_, cx| {
+            let _ = me.update(cx, |this, cx| this.token_op(p.id.clone(), false, cx));
+        });
     }
 
     fn token_op(&mut self, id: String, rotate: bool, cx: &mut Context<Self>) {
@@ -616,23 +583,11 @@ impl ScrapWs {
                 match r {
                     Ok(Ok(tok)) => {
                         log(if rotate { "scrap-rotate" } else { "scrap-revoke" }, &[("id", &id)]);
-                        toast(
-                            cx,
-                            if rotate {
-                                "New magic link made. Copy it now — it's shown once."
-                            } else {
-                                "Magic link revoked."
-                            },
-                            false,
-                        );
+                        toast(cx, if rotate { "New magic link — copy it now." } else { "Magic link revoked." }, false);
                         this.fresh = tok.map(|t| (id.clone(), t));
                         this.fetch(id, cx);
                     }
-                    Ok(Err(ApiError::NotFound)) => toast(
-                        cx,
-                        "Not found — the paste or its link is already gone (an expired paste is swept).",
-                        true,
-                    ),
+                    Ok(Err(ApiError::NotFound)) => toast(cx, "Already gone.", true),
                     Ok(Err(e)) => toast(cx, describe(&e), true),
                     Err(e) => toast(cx, e.to_string(), true),
                 }
@@ -645,61 +600,47 @@ impl ScrapWs {
     fn delete(&mut self, cx: &mut Context<Self>) {
         if matches!(self.sel, Sel::New) {
             let me = self.me.clone();
-            confirm(
-                cx,
-                "Discard this new paste?",
-                "It hasn't been created yet; what you've written is dropped.",
-                "Discard",
-                true,
-                move |_, cx| {
-                    let _ = me.update(cx, |this, cx| {
-                        if let Some(c) = &this.compose {
-                            c.editor.update(cx, |e, cx| e.set_text("", cx));
-                        }
-                        if let Some(c) = this.compose.as_mut() {
-                            c.lines = 0;
-                        }
-                        this.sel = Sel::None;
-                        cx.notify();
-                    });
-                },
-            );
+            confirm(cx, "Discard this new paste?", "", "Discard", true, move |_, cx| {
+                let _ = me.update(cx, |this, cx| {
+                    if let Some(c) = &this.compose {
+                        c.editor.update(cx, |e, cx| e.set_text("", cx));
+                    }
+                    if let Some(c) = this.compose.as_mut() {
+                        c.lines = 0;
+                    }
+                    this.sel = Sel::None;
+                    cx.notify();
+                });
+            });
             return;
         }
         let Some(p) = self.current().cloned() else { return };
         let name = if p.title.is_empty() { p.id.clone() } else { p.title.clone() };
         let me = self.me.clone();
-        confirm(
-            cx,
-            "Delete this paste?",
-            format!("“{name}” is removed for good, and every link to it stops working."),
-            "Delete",
-            true,
-            move |_, cx| {
-                let s = app::session(cx);
-                let id = p.id.clone();
-                let task = farfield_core::spawn(async move { scrap::delete(&s, &id).await });
-                let _ = me.update(cx, |_, cx| {
-                    cx.spawn(async move |this, cx| {
-                        let r = task.await;
-                        let _ = this.update(cx, |this, cx| match r {
-                            Ok(Ok(())) | Ok(Err(ApiError::NotFound)) => {
-                                log("scrap-delete", &[("id", &p.id)]);
-                                this.pastes.retain(|x| x.id != p.id);
-                                this.total = (this.total - 1).max(0);
-                                this.sel = Sel::None;
-                                this.fresh = None;
-                                toast(cx, "Deleted.", false);
-                                this.reload(cx);
-                            }
-                            Ok(Err(e)) => toast(cx, describe(&e), true),
-                            Err(e) => toast(cx, e.to_string(), true),
-                        });
-                    })
-                    .detach();
-                });
-            },
-        );
+        confirm(cx, "Delete this paste?", format!("“{name}”"), "Delete", true, move |_, cx| {
+            let s = app::session(cx);
+            let id = p.id.clone();
+            let task = farfield_core::spawn(async move { scrap::delete(&s, &id).await });
+            let _ = me.update(cx, |_, cx| {
+                cx.spawn(async move |this, cx| {
+                    let r = task.await;
+                    let _ = this.update(cx, |this, cx| match r {
+                        Ok(Ok(())) | Ok(Err(ApiError::NotFound)) => {
+                            log("scrap-delete", &[("id", &p.id)]);
+                            this.pastes.retain(|x| x.id != p.id);
+                            this.total = (this.total - 1).max(0);
+                            this.sel = Sel::None;
+                            this.fresh = None;
+                            toast(cx, "Deleted.", false);
+                            this.reload(cx);
+                        }
+                        Ok(Err(e)) => toast(cx, describe(&e), true),
+                        Err(e) => toast(cx, e.to_string(), true),
+                    });
+                })
+                .detach();
+            });
+        });
     }
 
     /// The share link — with the token only while it's freshly shown.
@@ -715,7 +656,7 @@ impl ScrapWs {
                 let with = self.fresh.as_ref().is_some_and(|(f, _)| Some(f.as_str()) == self.selected_id());
                 kit::copy(cx, &u, if with { "the link, with its token" } else { "the link" })
             }
-            None => toast(cx, "This profile has no public address for scrap, so there's no link to share.", true),
+            None => toast(cx, "No public address for scrap.", true),
         }
     }
 
@@ -772,13 +713,13 @@ impl ScrapWs {
         let loading = self.loading;
         let body: AnyElement = if rows.is_empty() {
             let msg = if self.loading && !self.loaded {
-                "Loading pastes…"
+                "Loading…"
             } else if self.error.is_some() && !self.loaded {
-                "Pastes can't be shown until the service answers. ⌘R tries again."
+                "Couldn't load."
             } else if self.pastes.is_empty() {
-                "No pastes yet. ⌘N starts one — code, logs, a note to hand someone."
+                "No pastes yet."
             } else {
-                "Nothing loaded matches this filter."
+                "No matches."
             };
             ui::quiet_state(msg, cx).into_any_element()
         } else {
@@ -917,12 +858,9 @@ impl ScrapWs {
                             });
                         }
                     }))
-                    .child(div().text_xs().text_color(t.ink_2).child(match c.vis {
-                        0 if c.magic => "With a magic link it's made unlisted — a locked paste is never listed.",
-                        0 => "Listed on the public index.",
-                        1 => "Anyone with the link can read it; not listed.",
-                        _ => "Only you, signed in, can read it.",
-                    })),
+                    .when(c.vis == 0 && c.magic, |d| {
+                        d.child(div().text_xs().text_color(t.warn).child("With a magic link it stays unlisted."))
+                    }),
             )
             .child(div().flex().flex_col().gap(S1).child(div().text_xs().text_color(t.ink_2).child("Expires")).child(
                 kit::seg("sc-exp", &EXPIRY_LABELS, c.exp, cx, {
@@ -937,24 +875,17 @@ impl ScrapWs {
                     }
                 }),
             ))
-            .child(kit::switch(
-                "sc-magic",
-                "Magic link",
-                "Readers need a secret token in the link. You see it once, after creating.",
-                c.magic,
-                cx,
-                {
-                    let me = me.clone();
-                    move |_, cx| {
-                        let _ = me.update(cx, |this, cx| {
-                            if let Some(c) = this.compose.as_mut() {
-                                c.magic = !c.magic;
-                            }
-                            cx.notify();
-                        });
-                    }
-                },
-            ))
+            .child(kit::switch("sc-magic", "Magic link", "Shown once, after creating.", c.magic, cx, {
+                let me = me.clone();
+                move |_, cx| {
+                    let _ = me.update(cx, |this, cx| {
+                        if let Some(c) = this.compose.as_mut() {
+                            c.magic = !c.magic;
+                        }
+                        cx.notify();
+                    });
+                }
+            }))
             .when_some(c.error.clone(), |d, e| d.child(ui::notice(e, t.bad, cx)))
             .child(
                 div()
@@ -1039,7 +970,7 @@ impl ScrapWs {
                     .child(ui::mono(if p.lang.is_empty() { "plain text".to_string() } else { p.lang.clone() }, cx))
                     .child(ui::chip(p.visibility.clone(), if p.visibility == "public" { t.good } else { t.ink_3 }, cx))
                     .child(if expired {
-                        ui::chip("expired — swept on next read", t.bad, cx)
+                        ui::chip("expired", t.bad, cx)
                     } else if exp.is_empty() {
                         ui::chip("never expires", t.ink_3, cx)
                     } else {
@@ -1050,7 +981,7 @@ impl ScrapWs {
         }
         let body: AnyElement = match (full, error) {
             (_, Some(e)) => div().p(S6).child(ui::notice(e.clone(), t.bad, cx)).into_any_element(),
-            (None, None) => ui::quiet_state("Loading the paste…", cx).into_any_element(),
+            (None, None) => ui::quiet_state("Loading…", cx).into_any_element(),
             (Some(p), None) => {
                 let lines: Arc<Vec<String>> = Arc::new(p.body.lines().map(|l| l.replace('\t', "    ")).collect());
                 let n = lines.len();
@@ -1092,10 +1023,6 @@ impl Workspace for ScrapWs {
                     .gap(S2)
                     .child(ui::eyebrow("New paste", cx))
                     .child(self.compose_side(cx))
-                    .child(ui::rule(cx))
-                    .child(div().text_xs().text_color(t.ink_3).child(
-                        "A paste's address comes from its body, so the body is fixed once it's made. Title, language, visibility and expiry can change later.",
-                    ))
                     .into_any_element(),
             );
         }
@@ -1106,7 +1033,7 @@ impl Workspace for ScrapWs {
             let tok = tok.clone();
             col = col
                 .child(ui::eyebrow("Magic link · shown once", cx))
-                .child(ui::notice("Copy it now. The server keeps only a hash — this token can't be shown again; rotating makes a new one.", t.warn, cx))
+                .child(ui::notice("Copy it now — it can't be shown again.", t.warn, cx))
                 .child(div().font_family(FONT_MONO).text_xs().text_color(t.ink).child(tok.clone()))
                 .child(
                     div()
@@ -1118,9 +1045,11 @@ impl Workspace for ScrapWs {
                                 let _ = me.update(cx, |this, cx| this.copy_link(cx));
                             }
                         }))
-                        .child(ui::button("sc-copy-tok", "Copy token", BtnKind::Quiet, cx, move |_, _, cx| kit::copy(cx, &tok, "the token"))),
+                        .child(ui::button("sc-copy-tok", "Copy token", BtnKind::Quiet, cx, move |_, _, cx| {
+                            kit::copy(cx, &tok, "the token")
+                        })),
                 )
-                .child(ui::button("sc-dismiss", "I've saved it — hide", BtnKind::Quiet, cx, {
+                .child(ui::button("sc-dismiss", "Hide", BtnKind::Quiet, cx, {
                     let me = me.clone();
                     move |_, _, cx| {
                         let _ = me.update(cx, |this, cx| {
@@ -1200,11 +1129,7 @@ impl Workspace for ScrapWs {
             }))
             .child(ui::field_row(
                 "Magic link",
-                ui::chip(
-                    if p.has_token { "on — readers need the token" } else { "off" },
-                    if p.has_token { t.accent } else { t.ink_3 },
-                    cx,
-                ),
+                ui::chip(if p.has_token { "on" } else { "off" }, if p.has_token { t.accent } else { t.ink_3 }, cx),
                 cx,
             ));
         if p.has_token {
@@ -1228,15 +1153,11 @@ impl Workspace for ScrapWs {
                     }))
                     .into_any_element()
             }));
-        } else {
-            col = col.child(
-                div().text_xs().text_color(t.ink_3).child("A magic link can only be added when the paste is made."),
-            );
         }
         col = col
             .child(ui::rule(cx))
             .child(ui::eyebrow("Record", cx))
-            .child(ui::field_row("CID · of the body", ui::mono(p.cid.clone(), cx), cx))
+            .child(ui::field_row("CID", ui::mono(p.cid.clone(), cx), cx))
             .child(ui::field_row("Created", ui::mono(ui::when(&p.created_at), cx), cx))
             .when(!p.alias.is_empty(), |d| d.child(ui::field_row("Alias", ui::mono(p.alias.clone(), cx), cx)))
             .child(ui::rule(cx))
@@ -1328,8 +1249,7 @@ impl Render for ScrapWs {
                 .justify_center()
                 .items_center()
                 .gap(S2)
-                .child(div().font_family(FONT_DOC).text_size(px(22.)).text_color(t.ink).child("Text to hand someone."))
-                .child(div().text_sm().text_color(t.ink_2).child("Choose a paste to read it, or press ⌘N to make one."))
+                .child(div().text_sm().text_color(t.ink_2).child("No paste selected."))
                 .into_any_element(),
         };
         div()

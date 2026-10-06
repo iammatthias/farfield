@@ -109,7 +109,7 @@ fn build_label(b: &Build) -> String {
 
 impl SideloadWs {
     pub fn new(w: &mut Window, cx: &mut Context<Self>) -> Self {
-        let search = cx.new(|cx| TextField::new(w, cx, "", "Filter apps  ⌘F"));
+        let search = cx.new(|cx| TextField::new(w, cx, "", "Filter  ⌘F"));
         cx.subscribe_in(&search, w, |this: &mut Self, _, e: &FieldEvent, _w, cx| match e {
             FieldEvent::Changed => cx.notify(),
             FieldEvent::Down => this.step(1, cx),
@@ -117,8 +117,8 @@ impl SideloadWs {
             _ => {}
         })
         .detach();
-        let notes = cx.new(|cx| TextField::new(w, cx, "Notes for the next upload", "optional — what changed"));
-        let label = cx.new(|cx| TextField::new(w, cx, "Label", "who it's for (optional)"));
+        let notes = cx.new(|cx| TextField::new(w, cx, "Notes for the next upload", "optional"));
+        let label = cx.new(|cx| TextField::new(w, cx, "Label", "optional"));
         cx.subscribe_in(&label, w, |this: &mut Self, _, e: &FieldEvent, _w, cx| {
             if let FieldEvent::Submit = e {
                 this.mint(cx);
@@ -320,7 +320,7 @@ impl SideloadWs {
         for p in paths {
             let name = p.file_name().map(|n| n.to_string_lossy().to_string()).unwrap_or_default();
             if !p.extension().and_then(|e| e.to_str()).is_some_and(|e| e.eq_ignore_ascii_case("ipa")) {
-                toast(cx, format!("{name} isn't an .ipa — sideload takes iOS app archives."), true);
+                toast(cx, format!("{name} isn't an .ipa."), true);
                 continue;
             }
             if self.uploads.iter().any(|u| u.name == name) {
@@ -359,7 +359,7 @@ impl SideloadWs {
                         Ok(Err(ApiError::Cancelled)) => toast(cx, format!("Upload of {name} cancelled."), false),
                         Ok(Err(ApiError::Uncertain(_))) => {
                             // idempotent by content: a reload shows whether it landed
-                            toast(cx, format!("{name}: the connection dropped as it finished. Uploading it again is safe — the same IPA is the same build."), true);
+                            toast(cx, format!("{name}: connection dropped as it finished."), true);
                             this.reload(cx);
                         }
                         Ok(Err(e)) => toast(cx, format!("{name}: {}", describe(&e)), true),
@@ -387,7 +387,7 @@ impl SideloadWs {
                 log("sideload-copy-install", &[("id", &b.id)]);
                 self.copy(u, "Install link", cx)
             }
-            None => toast(cx, "This profile has no public address for sideload, so there's no link to share.", true),
+            None => toast(cx, "No public address for sideload.", true),
         }
     }
 
@@ -410,7 +410,7 @@ impl SideloadWs {
                         log("sideload-share", &[("build", &b.id), ("ttl", ttl), ("max", max)]);
                         let url = sl::share_url(&app::session(cx), &sh.value);
                         cx.write_to_clipboard(gpui::ClipboardItem::new_string(url));
-                        toast(cx, "Share link minted and copied.", false);
+                        toast(cx, "Share link copied.", false);
                         this.label.update(cx, |f, cx| f.set_text("", cx));
                         this.minted = Some(sh.value);
                         this.reload(cx);
@@ -431,7 +431,7 @@ impl SideloadWs {
         confirm(
             cx,
             "Revoke this share link?",
-            format!("The link for {} {}{who} stops working now — nobody can start a new install from it. Installs already on devices stay.", sh.app_name, sh.version),
+            format!("{} {}{who}", sh.app_name, sh.version),
             "Revoke",
             true,
             move |_, cx| {
@@ -466,11 +466,7 @@ impl SideloadWs {
         confirm(
             cx,
             "Delete this build?",
-            format!(
-                "{} {} and its IPA are removed. Its install page and every share link for it stop working.",
-                b.app_name,
-                build_label(&b)
-            ),
+            format!("{} {} — its share links stop working.", b.app_name, build_label(&b)),
             "Delete build",
             true,
             move |_, cx| {
@@ -507,11 +503,8 @@ impl SideloadWs {
         confirm(
             cx,
             format!("Delete {name} entirely?"),
-            format!(
-                "Every build of {name} ({bundle}) — {n} {} — is permanently deleted, with its IPAs, screenshots, registered devices and every share link. Testers can no longer install it. There is no undo.",
-                if n == 1 { "build" } else { "builds" }
-            ),
-            format!("Delete {name} and all {n} builds"),
+            format!("{bundle} — {n} {}, devices and share links. No undo.", if n == 1 { "build" } else { "builds" }),
+            format!("Delete {name}"),
             true,
             move |_, cx| {
                 let s = app::session(cx);
@@ -648,10 +641,7 @@ impl SideloadWs {
             View::Shares => {
                 let shares = self.filtered_shares(cx);
                 if shares.is_empty() && self.loaded {
-                    col = col.child(ui::quiet_state(
-                        "No share links yet. Pick a build and mint one from the inspector.",
-                        cx,
-                    ));
+                    col = col.child(ui::quiet_state("No share links yet.", cx));
                 }
                 let mut list = div().id("shares").flex().flex_col().flex_1().overflow_y_scroll();
                 for s in shares {
@@ -710,16 +700,12 @@ impl SideloadWs {
                     cx.listener(|this, _, w, cx| this.pick(w, cx)),
                 ),
             ));
-            d =
-                d.child(div().text_xs().text_color(t.ink_3).child(
-                    "Or drop .ipa files here. The same IPA twice is the same build — re-uploading is always safe.",
-                ));
         }
         for (i, u) in self.uploads.iter().enumerate() {
             let p = u.progress.clone();
             let frac = p.fraction();
             let status = if p.total() > 0 && p.sent() >= p.total() {
-                "Reading the archive…".to_string()
+                "Reading…".to_string()
             } else {
                 format!("{} of {}", ui::bytes(p.sent() as i64), ui::bytes(p.total() as i64))
             };
@@ -772,11 +758,11 @@ impl SideloadWs {
         let t = theme(cx).clone();
         let Some(bundle) = self.selected_app.clone() else {
             let msg = if self.loading && !self.loaded {
-                "Loading builds…"
+                "Loading…"
             } else if self.error.is_some() {
                 ""
             } else {
-                "No builds yet. Drop an .ipa here, or press ⌘N to choose one — it's parsed for its bundle, version and provisioning profile."
+                "No builds yet."
             };
             return div().max_w(px(560.)).child(ui::quiet_state(msg, cx)).into_any_element();
         };
@@ -831,7 +817,7 @@ impl SideloadWs {
                 .child(div().w(px(48.)).flex_none().flex().justify_end().child(dd))
                 .child(div().w(px(60.)).flex_none().flex().justify_end().child(e))
         };
-        d = d.child(div().pt(S4).pb(S1).child(ui::eyebrow("Builds — newest first", cx)));
+        d = d.child(div().pt(S4).pb(S1).child(ui::eyebrow("Builds", cx)));
         d = d.child(div().py(px(4.)).border_b_1().border_color(t.rule).child(cols(
             head("Version").into_any_element(),
             head("Uploaded").into_any_element(),
@@ -886,15 +872,9 @@ impl SideloadWs {
         // share links for this app
         let ids: Vec<&str> = builds.iter().map(|b| b.id.as_str()).collect();
         let shares: Vec<&Share> = self.shares.iter().filter(|s| ids.contains(&s.build_id.as_str())).collect();
-        d = d.child(div().pt(S5).pb(S1).child(ui::eyebrow("Share links for this app", cx)));
+        d = d.child(div().pt(S5).pb(S1).child(ui::eyebrow("Share links", cx)));
         if shares.is_empty() {
-            d = d.child(
-                div()
-                    .text_sm()
-                    .text_color(t.ink_3)
-                    .py(S2)
-                    .child("None yet. Mint one for a build from the inspector — it expires on its own."),
-            );
+            d = d.child(div().text_sm().text_color(t.ink_3).py(S2).child("None yet."));
         }
         for s in shares {
             let tok = s.token.clone();
@@ -978,20 +958,11 @@ impl SideloadWs {
                     cx,
                     cx.listener(|this, _, _, cx| this.copy_install(cx)),
                 )));
-                col = col.child(
-                    div()
-                        .text_xs()
-                        .text_color(t.ink_3)
-                        .child("The canonical page — it asks you to sign in. Testers get a share link instead."),
-                );
             }
-            None => {
-                col = col
-                    .child(div().text_xs().text_color(t.ink_3).child("No public address for sideload in this profile."))
-            }
+            None => col = col.child(div().text_xs().text_color(t.ink_3).child("No public address.")),
         }
         // mint
-        col = col.child(ui::rule(cx)).child(ui::eyebrow("Share with a tester", cx));
+        col = col.child(ui::rule(cx)).child(ui::eyebrow("Share", cx));
         let seg = |prefix: &'static str,
                    opts: &[(&'static str, &'static str)],
                    cur: usize,
@@ -1212,17 +1183,17 @@ impl Workspace for SideloadWs {
                         "",
                     ));
                     v.push(("copy-install", "Sideload: copy install link".into(), ""));
-                    v.push(("delete-build", "Sideload: delete this build…".into(), ""));
+                    v.push(("delete-build", "Sideload: delete build…".into(), ""));
                 }
                 if self.selected_app.is_some() {
-                    v.push(("delete-app", "Sideload: delete this app and all its builds…".into(), ""));
+                    v.push(("delete-app", "Sideload: delete app…".into(), ""));
                 }
             }
             View::Shares => {
                 if let Some(s) = self.share() {
                     v.push(("copy-share", "Sideload: copy share link".into(), ""));
                     if s.state == "active" {
-                        v.push(("revoke", "Sideload: revoke this share link…".into(), ""));
+                        v.push(("revoke", "Sideload: revoke share link…".into(), ""));
                     }
                 }
             }
@@ -1274,7 +1245,7 @@ impl Render for SideloadWs {
         let status_line = match (&self.error, &self.freshness) {
             (Some(e), _) => Some(ui::notice(e.clone(), t.bad, cx)),
             (None, Some(Freshness::Stale { age_ms, .. })) => Some(ui::notice(
-                format!("Offline — showing builds as loaded {} ago.", crate::ws::content::ago(*age_ms)),
+                format!("Offline — showing what was loaded {} ago.", crate::ws::content::ago(*age_ms)),
                 t.warn,
                 cx,
             )),
@@ -1297,11 +1268,20 @@ impl Render for SideloadWs {
                     .flex()
                     .flex_col()
                     .gap(S2)
-                    .child(div().text_size(px(22.)).font_weight(gpui::FontWeight::MEDIUM).text_color(t.ink).child("Share links"))
-                    .child(div().font_family(FONT_MONO).text_xs().text_color(t.ink_3).child(format!("{n} minted · {active} active")))
-                    .child(div().max_w(px(560.)).text_sm().text_color(t.ink_2).pt(S2).child(
-                        "Each link installs one build for a limited time and number of installs. Pick one on the left to copy or revoke it; mint new ones from a build's inspector.",
-                    ))
+                    .child(
+                        div()
+                            .text_size(px(22.))
+                            .font_weight(gpui::FontWeight::MEDIUM)
+                            .text_color(t.ink)
+                            .child("Share links"),
+                    )
+                    .child(
+                        div()
+                            .font_family(FONT_MONO)
+                            .text_xs()
+                            .text_color(t.ink_3)
+                            .child(format!("{n} minted · {active} active")),
+                    )
                     .into_any_element()
             }
         };

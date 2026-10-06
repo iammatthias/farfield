@@ -6,6 +6,9 @@
 # Binaries come from ./bin (make build). Data lives in ./tmp/dev — never the
 # production /data layout. Every admin app uses password "demo" and the API
 # keys below, so the apps can talk to each other locally.
+# Every app also honours keys minted by the local keys app (one shared
+# KEYS_DB_PATH), so a single ffk_ key minted for app "*" opens the whole
+# dev fleet: bin/keys mint <name> "*" write
 #
 #   PREVIEW_HOST=<name> scripts/devfleet.sh start
 #
@@ -46,6 +49,7 @@ start() {
       "${envname}_PORT=$port" \
       "${envname}_DB_PATH=$DATA/$app.sqlite" \
       "${envname}_API_KEY=dev-$app-key" \
+      KEYS_DB_PATH="$DATA/keys.sqlite" \
       BLOBS_BACKEND=local BLOBS_DIR="$DATA/blobs-data" \
       SIDELOAD_DIR="$DATA/sideload-blobs" LIBRARY_TUS_DIR="$DATA/tus-staging" \
       BLOBS_SPOOL_DIR="$DATA/blob-spool" \

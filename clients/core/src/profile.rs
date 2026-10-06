@@ -111,8 +111,8 @@ impl Profile {
     }
 }
 
-/// A Tailscale peer that looks like the homelab, read from
-/// `tailscale status --json` (OS Tailscale; the client never runs its own).
+/// A device on the tailnet, read from `tailscale status --json` (OS
+/// Tailscale; the client never runs its own) — only when the person asks.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct TailnetPeer {
     pub host_name: String,
@@ -120,8 +120,8 @@ pub struct TailnetPeer {
     pub online: bool,
 }
 
-/// Parse `tailscale status --json` into the peers worth offering, the
-/// homelab first.
+/// Parse `tailscale status --json` into the devices to offer: online first,
+/// then by name. No device is assumed to be the fleet.
 pub fn parse_tailscale_status(json: &str) -> Result<(bool, Vec<TailnetPeer>), String> {
     let v: serde_json::Value = serde_json::from_str(json).map_err(|e| e.to_string())?;
     let running = v["BackendState"].as_str() == Some("Running");
@@ -139,7 +139,7 @@ pub fn parse_tailscale_status(json: &str) -> Result<(bool, Vec<TailnetPeer>), St
                 .collect()
         })
         .unwrap_or_default();
-    peers.sort_by_key(|p| (p.host_name != "homelab", !p.online, p.host_name.clone()));
+    peers.sort_by_key(|p| (!p.online, p.host_name.to_lowercase()));
     Ok((running, peers))
 }
 
@@ -183,13 +183,15 @@ mod tests {
     }
 
     #[test]
-    fn tailscale_status_puts_homelab_first() {
+    fn tailscale_status_orders_online_then_name() {
         let j = r#"{"BackendState":"Running","Peer":{
-            "a":{"HostName":"intern","DNSName":"intern.t.ts.net.","Online":true},
-            "b":{"HostName":"homelab","DNSName":"homelab.t.ts.net.","Online":true}}}"#;
+            "a":{"HostName":"zeta","DNSName":"zeta.t.ts.net.","Online":true},
+            "b":{"HostName":"Alpha","DNSName":"alpha.t.ts.net.","Online":false},
+            "c":{"HostName":"beta","DNSName":"beta.t.ts.net.","Online":true}}}"#;
         let (running, peers) = parse_tailscale_status(j).unwrap();
         assert!(running);
-        assert_eq!(peers[0].dns_name, "homelab.t.ts.net");
+        let names: Vec<_> = peers.iter().map(|p| p.host_name.as_str()).collect();
+        assert_eq!(names, ["beta", "zeta", "Alpha"]);
     }
 }
 

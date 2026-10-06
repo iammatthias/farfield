@@ -311,7 +311,7 @@ pub struct BlobsWs {
 
 impl BlobsWs {
     pub fn new(w: &mut Window, cx: &mut Context<Self>) -> Self {
-        let search = cx.new(|cx| TextField::new(w, cx, "", "Filter by CID or type  ⌘F").mono());
+        let search = cx.new(|cx| TextField::new(w, cx, "", "Filter  ⌘F").mono());
         cx.subscribe_in(&search, w, |this: &mut Self, _, e: &FieldEvent, _w, cx| match e {
             FieldEvent::Changed => cx.notify(),
             FieldEvent::Down => this.step(1, cx),
@@ -526,9 +526,7 @@ impl BlobsWs {
         let Some(m) = self.selected_meta() else { return };
         match blobs::public_url(&app::session(cx), &m.cid) {
             Some(u) => self.copy(u, "the public link", cx),
-            None => {
-                toast(cx, "This profile has no public address for blobs — add one in Settings → Fleet address.", true)
-            }
+            None => toast(cx, "No public address for blobs.", true),
         }
     }
 
@@ -562,7 +560,7 @@ impl BlobsWs {
     fn upload(&mut self, paths: Vec<PathBuf>, cx: &mut Context<Self>) {
         for p in paths {
             if p.is_dir() {
-                toast(cx, format!("{} is a folder — drop the files inside it.", p.display()), true);
+                toast(cx, format!("{} is a folder.", p.display()), true);
                 continue;
             }
             let name = p.file_name().map(|n| n.to_string_lossy().to_string()).unwrap_or_default();
@@ -591,7 +589,11 @@ impl BlobsWs {
                         Ok(Ok(m)) => {
                             let known = this.blobs.iter().any(|b| b.cid == m.value.cid);
                             log("blob-upload-done", &[("file", &name), ("cid", &m.value.cid)]);
-                            toast(cx, if known { format!("{name} was already stored — same bytes, same CID.") } else { format!("Uploaded {name}.") }, false);
+                            toast(
+                                cx,
+                                if known { format!("{name} already stored.") } else { format!("Uploaded {name}.") },
+                                false,
+                            );
                             this.selected = None;
                             this.select(m.value.cid.clone(), cx);
                             if !known {
@@ -608,7 +610,7 @@ impl BlobsWs {
                             toast(cx, format!("Upload of {name} cancelled."), false)
                         }
                         Ok(Err(e @ ApiError::Uncertain(_))) => {
-                            toast(cx, format!("{name}: the connection dropped mid-upload. Uploading again is safe — the same bytes keep the same CID."), true);
+                            toast(cx, format!("{name}: connection dropped mid-upload."), true);
                             log("blob-upload-failed", &[("file", &name), ("error", &e.to_string())]);
                         }
                         Ok(Err(e)) => {
@@ -631,11 +633,7 @@ impl BlobsWs {
     fn delete(&mut self, cx: &mut Context<Self>) {
         let Some(m) = self.selected_meta().cloned() else { return };
         let ent = cx.entity();
-        let body = format!(
-            "{} · {} is removed for good — blobs have no backup. If any entry, series or post still embeds it, the server keeps it and says how many do.",
-            short_cid(&m.cid),
-            ui::bytes(m.size)
-        );
+        let body = format!("{} · {} — no backup.", short_cid(&m.cid), ui::bytes(m.size));
         confirm(cx, "Delete this blob?", body, "Delete", true, move |_, cx| {
             let s = app::session(cx);
             let cid = m.cid.clone();
@@ -653,16 +651,16 @@ impl BlobsWs {
                                 if let Some((_, old)) = this.preview.take() {
                                     this.retired.push(old);
                                 }
-                                toast(cx, "Deleted. Edge caches may serve it for a while; check with ?cb= before relying on it.", false);
+                                toast(cx, "Deleted.", false);
                             }
                             Ok(Ok(Release::Kept { references, message })) => {
                                 log("blob-delete-kept", &[("cid", &m.cid), ("references", &format!("{references:?}"))]);
                                 let why = match references {
-                                    Some(1) => "One document still embeds it".to_string(),
-                                    Some(n) => format!("{n} documents still embed it"),
-                                    None => format!("The server said: {message}"),
+                                    Some(1) => "1 document embeds it".to_string(),
+                                    Some(n) => format!("{n} documents embed it"),
+                                    None => message.to_string(),
                                 };
-                                toast(cx, format!("Kept. {why} — remove those references first."), true);
+                                toast(cx, format!("Not deleted — {why}."), true);
                             }
                             Ok(Err(e)) => toast(cx, describe(&e), true),
                             Err(e) => toast(cx, e.to_string(), true),
@@ -873,18 +871,12 @@ impl BlobsWs {
 
     fn render_empty(&self, cx: &mut Context<Self>) -> AnyElement {
         let t = theme(cx).clone();
-        let (head, sub) = if self.loading {
-            ("Loading blobs…", "")
+        let head = if self.loading {
+            "Loading…"
         } else if self.blobs.is_empty() {
-            (
-                "Nothing stored yet.",
-                "Drop files anywhere here, or press ⌘N to choose some. Images get thumbnails; everything gets a CID.",
-            )
+            "No blobs yet."
         } else {
-            (
-                "Nothing matches.",
-                "Clear the filter, or pick another kind. Only loaded pages are filtered — scroll to load more.",
-            )
+            "No matches."
         };
         div()
             .flex_1()
@@ -895,7 +887,6 @@ impl BlobsWs {
             .gap(S2)
             .p(S5)
             .child(div().text_size(px(17.)).text_color(t.ink).child(head))
-            .child(div().max_w(px(420.)).text_sm().text_color(t.ink_2).text_center().child(sub))
             .into_any_element()
     }
 }
@@ -967,15 +958,7 @@ impl Workspace for BlobsWs {
                     .flex_col()
                     .gap(S2)
                     .child(ui::eyebrow("Blob", cx))
-                    .child(
-                        div()
-                            .text_sm()
-                            .text_color(t.ink_2)
-                            .child("Choose a tile to see it large, copy its reference, or put it in a document."),
-                    )
-                    .child(div().text_xs().text_color(t.ink_3).child(
-                        "↑ ↓ from the filter move through the grid; Enter copies the selected blob for pasting.",
-                    ))
+                    .child(div().text_sm().text_color(t.ink_2).child("No blob selected."))
                     .into_any_element(),
             );
         };
@@ -1083,12 +1066,9 @@ impl Workspace for BlobsWs {
         if !m.thumb_cid.is_empty() {
             col = col.child(ui::field_row("Thumbnail", ui::mono(m.thumb_cid.clone(), cx), cx));
         }
-        col = col
-            .child(ui::rule(cx))
-            .child(ui::button("delete", "Delete…", BtnKind::Danger, cx, move |_, _, cx| {
-                e4.update(cx, |this, cx| this.delete(cx))
-            }))
-            .child(div().text_xs().text_color(t.ink_3).child("Refused while any document embeds it."));
+        col = col.child(ui::rule(cx)).child(ui::button("delete", "Delete…", BtnKind::Danger, cx, move |_, _, cx| {
+            e4.update(cx, |this, cx| this.delete(cx))
+        }));
         Some(col.into_any_element())
     }
 
@@ -1106,7 +1086,7 @@ impl Workspace for BlobsWs {
                 ("insert", "Blobs: insert into open document".to_string(), "↵"),
                 ("copy-ref", "Blobs: copy blob:// reference".into(), ""),
                 ("copy-link", "Blobs: copy public link".into(), ""),
-                ("delete", "Blobs: delete this blob…".into(), ""),
+                ("delete", "Blobs: delete…".into(), ""),
             ]);
         }
         v
@@ -1149,17 +1129,10 @@ impl Render for BlobsWs {
             let _ = w.drop_image(old);
         }
         let status: Option<AnyElement> = match (&self.error, &self.freshness) {
-            (Some(e), _) => Some(ui::notice(format!("{e}  ⌘R tries again."), t.bad, cx).into_any_element()),
+            (Some(e), _) => Some(ui::notice(e.to_string(), t.bad, cx).into_any_element()),
             (None, Some(Freshness::Stale { age_ms, .. })) => Some(
-                ui::notice(
-                    format!(
-                        "Offline — showing what was loaded {} ago. Uploads and deletes wait for the service.",
-                        ago(*age_ms)
-                    ),
-                    t.warn,
-                    cx,
-                )
-                .into_any_element(),
+                ui::notice(format!("Offline — showing what was loaded {} ago.", ago(*age_ms)), t.warn, cx)
+                    .into_any_element(),
             ),
             _ => None,
         };

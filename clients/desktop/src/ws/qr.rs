@@ -20,12 +20,7 @@ use std::sync::Arc;
 
 const SVC: &str = "qr";
 const EC: [&str; 4] = ["L", "M", "Q", "H"];
-const EC_HINT: [&str; 4] = [
-    "Low — recovers ~7% damage; the sparsest code.",
-    "Medium — recovers ~15%; the usual choice.",
-    "Quartile — recovers ~25%; for print that may scuff.",
-    "High — recovers ~30%; the densest code.",
-];
+const EC_HINT: [&str; 4] = ["Low · ~7%", "Medium · ~15%", "Quartile · ~25%", "High · ~30%"];
 /// The preview is requested at twice its on-screen size, for Retina.
 const PREVIEW_PX: u32 = 560;
 
@@ -78,7 +73,7 @@ fn preview_key(c: &Code) -> String {
 
 impl QrWs {
     pub fn new(w: &mut Window, cx: &mut Context<Self>) -> Self {
-        let search = cx.new(|cx| TextField::new(w, cx, "", "Filter codes  ⌘F"));
+        let search = cx.new(|cx| TextField::new(w, cx, "", "Filter  ⌘F"));
         cx.subscribe_in(&search, w, |this: &mut Self, _, e: &FieldEvent, w, cx| match e {
             FieldEvent::Changed => cx.notify(),
             FieldEvent::Down => this.step(1, cx),
@@ -105,9 +100,9 @@ impl QrWs {
             .detach();
             f
         };
-        let f_label = field("Label", "what it's for — e.g. “Menu, table cards”", false, w, cx);
-        let f_target = field("Target", "a URL or any text", true, w, cx);
-        let f_notes = field("Admin notes · private", "where it's printed, who has it", false, w, cx);
+        let f_label = field("Label", "", false, w, cx);
+        let f_target = field("Target", "URL or text", true, w, cx);
+        let f_notes = field("Admin notes · private", "", false, w, cx);
         let mut this = QrWs {
             me: cx.entity().downgrade(),
             items: Vec::new(),
@@ -235,19 +230,12 @@ impl QrWs {
             return;
         }
         let me = self.me.clone();
-        confirm(
-            cx,
-            "Discard your changes?",
-            "This code has edits that aren't saved to the server.",
-            "Discard",
-            true,
-            move |_, cx| {
-                let _ = me.update(cx, |this, cx| {
-                    then(this, cx);
-                    cx.notify();
-                });
-            },
-        );
+        confirm(cx, "Discard your changes?", "", "Discard", true, move |_, cx| {
+            let _ = me.update(cx, |this, cx| {
+                then(this, cx);
+                cx.notify();
+            });
+        });
     }
 
     fn set_form(&mut self, c: Code, cx: &mut Context<Self>) {
@@ -319,14 +307,8 @@ impl QrWs {
         }
         let fields = self.fields(cx);
         if fields["target"].as_str().unwrap_or("").is_empty() {
-            self.form.as_mut().unwrap().error = Some(
-                if form.mode == "proxy" {
-                    "A proxy code needs a destination."
-                } else {
-                    "A code needs something to encode."
-                }
-                .into(),
-            );
+            self.form.as_mut().unwrap().error =
+                Some(if form.mode == "proxy" { "Destination required." } else { "Target required." }.into());
             cx.notify();
             return;
         }
@@ -343,7 +325,7 @@ impl QrWs {
             Some(id) => {
                 let ch = self.changes(&form.base, cx);
                 if ch.is_empty() {
-                    toast(cx, "Nothing to save — no changes.", false);
+                    toast(cx, "No changes.", false);
                     return;
                 }
                 let id = id.clone();
@@ -388,7 +370,7 @@ impl QrWs {
                         let cur = ext_lists::qr::from_conflict(&current);
                         if let Some(f) = this.form.as_mut() {
                             f.conflict = cur;
-                            f.error = Some("Someone saved this code since you opened it. Compare below, then reapply yours or take theirs.".into());
+                            f.error = Some("Changed on the server.".into());
                         }
                     }
                     Ok(Err(e)) => {
@@ -439,19 +421,13 @@ impl QrWs {
         };
         let cid = f.base.cid.clone();
         let name = if f.base.label.is_empty() { id.clone() } else { f.base.label.clone() };
-        let printed = if f.base.mode == "proxy" { " Printed copies stop redirecting." } else { "" };
+        let printed = if f.base.mode == "proxy" { " — printed copies stop redirecting." } else { "" };
         let me = self.me.clone();
-        confirm(
-            cx,
-            "Delete this code?",
-            format!("“{name}” is removed for good.{printed}"),
-            "Delete",
-            true,
-            move |_, cx| {
-                let s = app::session(cx);
-                let k = id.clone();
-                let task = farfield_core::spawn(async move { qr::delete(&s, &k, Some(&cid)).await });
-                let _ = me.update(cx, |_, cx| {
+        confirm(cx, "Delete this code?", format!("“{name}”{printed}"), "Delete", true, move |_, cx| {
+            let s = app::session(cx);
+            let k = id.clone();
+            let task = farfield_core::spawn(async move { qr::delete(&s, &k, Some(&cid)).await });
+            let _ = me.update(cx, |_, cx| {
                 cx.spawn(async move |this, cx| {
                     let r = task.await;
                     let _ = this.update(cx, |this, cx| match r {
@@ -464,7 +440,7 @@ impl QrWs {
                         Ok(Err(ApiError::Precondition { current, .. })) => {
                             if let Some(f) = this.form.as_mut() {
                                 f.conflict = ext_lists::qr::from_conflict(&current);
-                                f.error = Some("Not deleted: it changed on the server since you opened it. Look at the change first.".into());
+                                f.error = Some("Not deleted — changed on the server.".into());
                             }
                             cx.notify();
                         }
@@ -474,8 +450,7 @@ impl QrWs {
                 })
                 .detach();
             });
-            },
-        );
+        });
     }
 
     /// Fetch the server's rendering of the selected code at its saved version.
@@ -513,7 +488,7 @@ impl QrWs {
     fn export(&mut self, svg: bool, cx: &mut Context<Self>) {
         let Some(f) = &self.form else { return };
         let Some(id) = f.id.clone() else {
-            toast(cx, "Save the code first — exports come from the server's rendering.", true);
+            toast(cx, "Save first.", true);
             return;
         };
         if self.exporting {
@@ -577,7 +552,7 @@ impl QrWs {
         }
         match qr::redirect_url(&app::session(cx), id) {
             Some(u) => kit::copy(cx, &u, "the scan link"),
-            None => toast(cx, "This profile has no public address for qr, so there's no link to share.", true),
+            None => toast(cx, "No public address for qr.", true),
         }
     }
 
@@ -640,13 +615,13 @@ impl QrWs {
         };
         let body: AnyElement = if rows.is_empty() {
             let msg = if self.loading && !self.loaded {
-                "Loading codes…"
+                "Loading…"
             } else if self.error.is_some() && !self.loaded {
-                "Codes can't be shown until the service answers. ⌘R tries again."
+                "Couldn't load."
             } else if self.items.is_empty() {
-                "No codes yet. ⌘N makes one."
+                "No codes yet."
             } else {
-                "Nothing matches this filter."
+                "No matches."
             };
             ui::quiet_state(msg, cx).into_any_element()
         } else {
@@ -717,24 +692,16 @@ impl QrWs {
         let frame =
             div().w(side).h(side).flex_none().flex().items_center().justify_center().rounded(px(6.)).bg(gpui::white());
         let inner: AnyElement = if f.id.is_none() {
-            div()
-                .p(S4)
-                .text_sm()
-                .text_color(gpui::black().opacity(0.55))
-                .child("The preview appears after the first save.")
-                .into_any_element()
+            div().p(S4).text_sm().text_color(gpui::black().opacity(0.55)).child("Not saved yet.").into_any_element()
         } else {
             match self.previews.get(&preview_key(&f.base)) {
                 Some(Slot::Ready(..)) => {
                     let (im, _, _) = self.previews.ready(&preview_key(&f.base)).unwrap();
                     img(im).size(side).object_fit(ObjectFit::Contain).into_any_element()
                 }
-                Some(Slot::Failed) => div()
-                    .p(S4)
-                    .text_sm()
-                    .text_color(t.bad)
-                    .child("The preview couldn't be rendered. ⌘R to retry.")
-                    .into_any_element(),
+                Some(Slot::Failed) => {
+                    div().p(S4).text_sm().text_color(t.bad).child("Preview failed.").into_any_element()
+                }
                 _ => div().text_sm().text_color(gpui::black().opacity(0.4)).child("Rendering…").into_any_element(),
             }
         };
@@ -745,13 +712,7 @@ impl QrWs {
             .items_center()
             .gap(S2)
             .child(frame.child(inner))
-            .child(div().text_xs().text_color(if dirty { t.warn } else { t.ink_3 }).child(if dirty {
-                "Showing the saved version — save to see your changes."
-            } else if f.mode == "proxy" {
-                "Encodes the scan link, not the destination."
-            } else {
-                "Encodes the target exactly."
-            }))
+            .when(dirty, |d| d.child(div().text_xs().text_color(t.warn).child("Saved version shown.")))
             .into_any_element()
     }
 
@@ -765,19 +726,7 @@ impl QrWs {
                 .justify_center()
                 .items_center()
                 .gap(S2)
-                .child(
-                    div()
-                        .font_family(FONT_DOC)
-                        .text_size(px(22.))
-                        .text_color(t.ink)
-                        .child("Codes for things in the world."),
-                )
-                .child(
-                    div()
-                        .text_sm()
-                        .text_color(t.ink_2)
-                        .child("Choose a code to see and edit it, or press ⌘N to make one."),
-                )
+                .child(div().text_sm().text_color(t.ink_2).child("No code selected."))
                 .into_any_element();
         };
         let me = self.me.clone();
@@ -814,31 +763,20 @@ impl QrWs {
             .when_some(f.error.clone(), |d, e| d.child(ui::notice(e, t.bad, cx)))
             .when_some(conflict, |d, c| d.child(c))
             .child(self.f_label.clone())
-            .child(
-                div()
-                    .flex()
-                    .flex_col()
-                    .gap(S1)
-                    .child(div().text_xs().text_color(t.ink_2).child("Mode"))
-                    .child(kit::seg("qr-mode", &["Direct", "Proxy"], usize::from(proxy), cx, {
-                        let me = me.clone();
-                        move |i, _, cx| {
-                            let _ = me.update(cx, |this, cx| {
-                                if let Some(f) = this.form.as_mut() {
-                                    f.mode = if i == 1 { "proxy" } else { "direct" }.into();
-                                }
-                                cx.notify();
-                            });
-                        }
-                    }))
-                    .child(div().text_xs().text_color(t.ink_2).child(if proxy {
-                        "Proxy: the code holds a short scan link (/r/…) that redirects to the destination — change the destination any time without reprinting."
-                    } else {
-                        "Direct: the code holds the target itself. Simple and offline-proof, but changing it means reprinting."
-                    })),
-            )
+            .child(div().flex().flex_col().gap(S1).child(div().text_xs().text_color(t.ink_2).child("Mode")).child(
+                kit::seg("qr-mode", &["Direct", "Proxy"], usize::from(proxy), cx, {
+                    let me = me.clone();
+                    move |i, _, cx| {
+                        let _ = me.update(cx, |this, cx| {
+                            if let Some(f) = this.form.as_mut() {
+                                f.mode = if i == 1 { "proxy" } else { "direct" }.into();
+                            }
+                            cx.notify();
+                        });
+                    }
+                }),
+            ))
             .child(self.f_target.clone())
-            .child(div().mt(px(-6.)).text_xs().text_color(t.ink_3).child(if proxy { "Destination — where a scan lands." } else { "Exactly what a scan reads." }))
             .child(
                 div()
                     .flex()
@@ -858,7 +796,7 @@ impl QrWs {
                     }))
                     .child(div().text_xs().text_color(t.ink_2).child(EC_HINT[ec_i])),
             )
-            .child(kit::switch("qr-public", "Public", "Listed in the public API; required for scans to work.", f.public, cx, {
+            .child(kit::switch("qr-public", "Public", "Required for scans.", f.public, cx, {
                 let me = me.clone();
                 move |_, cx| {
                     let _ = me.update(cx, |this, cx| {
@@ -869,7 +807,7 @@ impl QrWs {
                     });
                 }
             }))
-            .child(kit::switch("qr-enabled", "Enabled", "Off stops scans and the redirect without deleting anything.", f.enabled, cx, {
+            .child(kit::switch("qr-enabled", "Enabled", "", f.enabled, cx, {
                 let me = me.clone();
                 move |_, cx| {
                     let _ = me.update(cx, |this, cx| {
@@ -1011,7 +949,7 @@ impl QrWs {
                             confirm(
                                 cx,
                                 "Use the server's version?",
-                                "Your unsaved edits to this code are dropped.",
+                                "Your edits are dropped.",
                                 "Use theirs",
                                 true,
                                 move |_, cx| {
@@ -1032,13 +970,7 @@ impl Workspace for QrWs {
         let me = self.me.clone();
         let col = div().flex().flex_col().gap(S2);
         if f.id.is_none() {
-            return Some(
-                col.child(ui::eyebrow("New code", cx))
-                    .child(div().text_sm().text_color(t.ink_2).child(
-                        "Pick direct for text that will never change (Wi-Fi details, a phone number). Pick proxy for anything printed that points at the web — you can repoint it later.",
-                    ))
-                    .into_any_element(),
-            );
+            return Some(col.child(ui::eyebrow("New code", cx)).into_any_element());
         }
         let c = &f.base;
         let s = app::session(cx);
@@ -1049,7 +981,7 @@ impl Workspace for QrWs {
         let size_refs: Vec<&str> = size_labels.iter().map(|s| s.as_str()).collect();
         let mut col = col
             .child(ui::eyebrow("Export", cx))
-            .child(div().text_xs().text_color(t.ink_2).child("PNG size, in pixels"))
+            .child(div().text_xs().text_color(t.ink_2).child("PNG px"))
             .child(kit::seg("qr-size", &size_refs, self.export_size, cx, {
                 let me = me.clone();
                 move |i, _, cx| {
@@ -1081,7 +1013,6 @@ impl Workspace for QrWs {
                         }
                     })),
             )
-            .child(div().text_xs().text_color(t.ink_3).child("SVG scales to any print size."))
             .child(ui::rule(cx))
             .child(ui::eyebrow("Scanning", cx));
         if c.mode == "proxy" {
@@ -1098,9 +1029,9 @@ impl Workspace for QrWs {
             col = col.child(ui::field_row("Encodes", ui::mono(c.target.clone(), cx), cx));
         }
         col = col.child(div().text_sm().text_color(t.ink_2).child(match (c.public, c.enabled) {
-            (true, true) => "Live: scans work and the public image is served.",
-            (_, false) => "Disabled: scans and the public image return not-found. Nothing is deleted.",
-            (false, true) => "Private: scans and the public image return not-found until it's public.",
+            (true, true) => "Live.",
+            (_, false) => "Disabled — scans return not-found.",
+            (false, true) => "Private — scans return not-found.",
         }));
         if live(c) {
             if let Some(u) = public_png {
@@ -1111,7 +1042,7 @@ impl Workspace for QrWs {
             .child(ui::rule(cx))
             .child(ui::eyebrow("Record", cx))
             .child(ui::field_row("ID", ui::mono(c.id.clone(), cx), cx))
-            .child(ui::field_row("CID · the version", ui::mono(c.cid.clone(), cx), cx))
+            .child(ui::field_row("CID", ui::mono(c.cid.clone(), cx), cx))
             .child(ui::field_row(
                 "Saved",
                 ui::mono(format!("{} · created {}", ui::when(&c.updated_at), ui::when(&c.created_at)), cx),
@@ -1149,7 +1080,7 @@ impl Workspace for QrWs {
                 v.push(("delete", "QR: delete code…".into(), ""));
             }
             if f.conflict.is_some() {
-                v.push(("reapply", "QR: reapply my changes on the server's version".into(), ""));
+                v.push(("reapply", "QR: reapply my changes".into(), ""));
                 v.push(("theirs", "QR: use the server's version".into(), ""));
             }
         }

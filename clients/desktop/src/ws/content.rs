@@ -72,18 +72,13 @@ fn entry_specs() -> Vec<FieldSpec> {
         FieldSpec { key: "collection", label: "Collection", placeholder: "collection slug", kind: FieldKind::Mono },
         FieldSpec { key: "slug", label: "Slug", placeholder: "from the title", kind: FieldKind::Mono },
         FieldSpec { key: "tags", label: "Tags", placeholder: "comma, separated", kind: FieldKind::Tags },
-        FieldSpec {
-            key: "excerpt",
-            label: "Excerpt",
-            placeholder: "a line for lists and feeds",
-            kind: FieldKind::Text,
-        },
+        FieldSpec { key: "excerpt", label: "Excerpt", placeholder: "", kind: FieldKind::Text },
     ]
 }
 
 impl ContentWs {
     pub fn new(w: &mut Window, cx: &mut Context<Self>) -> Self {
-        let search = cx.new(|cx| TextField::new(w, cx, "", "Filter this list  ⌘F"));
+        let search = cx.new(|cx| TextField::new(w, cx, "", "Filter  ⌘F"));
         cx.subscribe_in(&search, w, |this: &mut Self, _, e: &FieldEvent, w, cx| match e {
             FieldEvent::Changed => cx.notify(),
             FieldEvent::Down => this.step(1, w, cx),
@@ -402,9 +397,8 @@ impl ContentWs {
     fn open_draft(&mut self, d: Draft, w: &mut Window, cx: &mut Context<Self>) {
         let key = d.key.clone();
         let open = if d.service == "content-series" {
-            let doc = cx.new(|cx| {
-                DraftDoc::<ContentSeries>::new(d, Some("title"), vec![], "Images, one per line: ![](blob://…)", w, cx)
-            });
+            let doc =
+                cx.new(|cx| DraftDoc::<ContentSeries>::new(d, Some("title"), vec![], "![](blob://…) per line", w, cx));
             self.watch(&doc, cx);
             Open::Series(doc)
         } else {
@@ -451,7 +445,7 @@ impl ContentWs {
                     .or_else(|| self.collections.first().map(|c| c.slug.clone()))
                     .unwrap_or_default();
                 if col.is_empty() {
-                    toast(cx, "Create a collection in the content console first — there's none to write into.", true);
+                    toast(cx, "No collections.", true);
                     return;
                 }
                 serde_json::to_value(Entry { collection: col, ..Default::default() }).unwrap()
@@ -530,19 +524,9 @@ impl ContentWs {
         let doc = doc.clone();
         let title = doc.update(cx, |d, cx| d.current(cx)["title"].as_str().unwrap_or("").to_string());
         let (head, body, act) = if on {
-            (
-                "Publish this entry?",
-                format!(
-                    "“{title}” goes live on the site's next rebuild. Its slug, CID and first-published date are kept."
-                ),
-                "Publish",
-            )
+            ("Publish this entry?", format!("“{title}” goes live on the next rebuild."), "Publish")
         } else {
-            (
-                "Unpublish this entry?",
-                format!("“{title}” returns to drafts. Its publishedAt is kept for when it returns."),
-                "Unpublish",
-            )
+            ("Unpublish this entry?", format!("“{title}” returns to drafts."), "Unpublish")
         };
         confirm(cx, head, body, act, !on, move |_, cx| {
             log(if on { "publish" } else { "unpublish" }, &[("title", &title)]);
@@ -576,32 +560,21 @@ impl ContentWs {
         let ent = cx.entity();
         let area = if is_series { "content-series" } else { "content" };
         if !has_base {
-            confirm(
-                cx,
-                "Discard this draft?",
-                "It was never saved to the server; this removes it from this Mac.",
-                "Discard",
-                true,
-                move |_, cx| {
-                    let s = app::session(cx);
-                    if let Ok(d) = s.drafts(area) {
-                        let _ = d.discard(area, &key);
-                    }
-                    ent.update(cx, |this, cx| {
-                        this.open.remove(&key);
-                        this.selected = None;
-                        this.load_drafts(cx);
-                        cx.notify();
-                    });
-                },
-            );
+            confirm(cx, "Discard this draft?", "It was never saved to the server.", "Discard", true, move |_, cx| {
+                let s = app::session(cx);
+                if let Ok(d) = s.drafts(area) {
+                    let _ = d.discard(area, &key);
+                }
+                ent.update(cx, |this, cx| {
+                    this.open.remove(&key);
+                    this.selected = None;
+                    this.load_drafts(cx);
+                    cx.notify();
+                });
+            });
             return;
         }
-        let body = if is_series {
-            "The series is deleted. The server refuses while an entry still embeds it.".to_string()
-        } else {
-            format!("“{title}” moves to the server's trash (kept 30 days, restorable from the content console).")
-        };
+        let body = if is_series { String::new() } else { format!("“{title}” goes to the trash for 30 days.") };
         confirm(
             cx,
             if is_series { "Delete this series?" } else { "Delete this entry?" },
@@ -619,30 +592,32 @@ impl ContentWs {
                     }
                 });
                 ent.update(cx, |_, cx| {
-                cx.spawn(async move |this, cx| {
-                    let r = task.await;
-                    let _ = this.update(cx, |this, cx| match r {
-                        Ok(Ok(())) => {
-                            log("delete", &[("area", area), ("key", &key)]);
-                            let s = app::session(cx);
-                            if let Ok(d) = s.drafts(area) {
-                                let _ = d.discard(area, &key);
+                    cx.spawn(async move |this, cx| {
+                        let r = task.await;
+                        let _ = this.update(cx, |this, cx| match r {
+                            Ok(Ok(())) => {
+                                log("delete", &[("area", area), ("key", &key)]);
+                                let s = app::session(cx);
+                                if let Ok(d) = s.drafts(area) {
+                                    let _ = d.discard(area, &key);
+                                }
+                                this.open.remove(&key);
+                                this.selected = None;
+                                toast(cx, "Deleted.", false);
+                                this.reload(cx);
                             }
-                            this.open.remove(&key);
-                            this.selected = None;
-                            toast(cx, "Deleted.", false);
-                            this.reload(cx);
-                        }
-                        Ok(Err(farfield_core::ApiError::Precondition { .. })) => {
-                            toast(cx, "Not deleted: it changed on the server since you opened it. Reopen it to see the change.", true)
-                        }
-                        Ok(Err(farfield_core::ApiError::Conflict { message, .. })) => toast(cx, format!("Not deleted: {message}"), true),
-                        Ok(Err(e)) => toast(cx, describe(&e), true),
-                        Err(e) => toast(cx, e.to_string(), true),
-                    });
-                })
-                .detach();
-            });
+                            Ok(Err(farfield_core::ApiError::Precondition { .. })) => {
+                                toast(cx, "Not deleted — changed on the server.", true)
+                            }
+                            Ok(Err(farfield_core::ApiError::Conflict { message, .. })) => {
+                                toast(cx, format!("Not deleted: {message}"), true)
+                            }
+                            Ok(Err(e)) => toast(cx, describe(&e), true),
+                            Err(e) => toast(cx, e.to_string(), true),
+                        });
+                    })
+                    .detach();
+                });
             },
         );
     }
@@ -855,11 +830,8 @@ impl ContentWs {
             .child(self.render_filters(cx))
             .when_some(status_line, |d, s| d.child(div().px(S4).py(S2).child(s)))
             .child(if n == 0 && !self.loading && self.error.is_none() {
-                ui::quiet_state(
-                    if self.mode == Mode::Entries { "No entries here yet. ⌘N starts one." } else { "No series yet." },
-                    cx,
-                )
-                .into_any_element()
+                ui::quiet_state(if self.mode == Mode::Entries { "No entries yet." } else { "No series yet." }, cx)
+                    .into_any_element()
             } else {
                 list.into_any_element()
             })
@@ -897,7 +869,7 @@ impl Workspace for ContentWs {
                 };
                 col = col.child(ui::eyebrow("Entry", cx)).children(doc.update(cx, |d, cx| d.render_inspector(cx)));
                 col = col.child(ui::rule(cx)).child(ui::eyebrow("Publishing", cx)).child(ui::chip(
-                    if published { "published" } else { "draft — not on the site" },
+                    if published { "published" } else { "draft" },
                     if published { t.good } else { t.ink_3 },
                     cx,
                 ));
@@ -937,7 +909,7 @@ impl Workspace for ContentWs {
                 let doc = doc.clone();
                 col = col.child(ui::eyebrow("Series", cx)).children(doc.update(cx, |d, cx| d.render_inspector(cx)));
                 let slug = doc.read(cx).draft.key.clone();
-                col = col.child(ui::field_row("Embed in an entry", ui::mono(format!("![](series://{slug})"), cx), cx));
+                col = col.child(ui::field_row("Embed", ui::mono(format!("![](series://{slug})"), cx), cx));
                 let e = cx.entity();
                 col =
                     col.child(ui::button("delete-series", "Delete series…", BtnKind::Danger, cx, move |_, _, cx| {
@@ -1001,14 +973,9 @@ impl Workspace for ContentWs {
                 if let Some(Open::Entry(d)) = self.selected.as_ref().and_then(|k| self.open.get(k)) {
                     let d = d.clone();
                     if how == Resolution::KeepMine {
-                        confirm(
-                            cx,
-                            "Overwrite the server's version?",
-                            "The server's changes are replaced by yours.",
-                            "Overwrite",
-                            true,
-                            move |_, cx| d.update(cx, |d, cx| d.resolve(how, cx)),
-                        );
+                        confirm(cx, "Overwrite the server's version?", "", "Overwrite", true, move |_, cx| {
+                            d.update(cx, |d, cx| d.resolve(how, cx))
+                        });
                     } else {
                         d.update(cx, |d, cx| d.resolve(how, cx));
                     }
@@ -1078,11 +1045,9 @@ impl Render for ContentWs {
                     ed.update(cx, |e, cx| e.insert(&format!("\n{md}\n"), cx));
                     ed.read(cx).focus_editor(w);
                     log("blob-inserted", &[("md", &md)]);
-                    toast(cx, "Inserted at the caret.", false);
+                    toast(cx, "Inserted.", false);
                 }
-                None => {
-                    toast(cx, format!("No document is open — {md} is on the clipboard; open one and paste."), false)
-                }
+                None => toast(cx, format!("No document open — copied {md}."), false),
             }
         }
         let t = theme(cx).clone();
@@ -1096,7 +1061,7 @@ impl Render for ContentWs {
             .child(div().w(px(320.)).flex_none().h_full().border_r_1().border_color(t.rule).child(self.render_list(cx)))
             .child(div().flex_1().min_w_0().h_full().child(match doc {
                 Some(d) => d,
-                None => ui::quiet_state("Choose an entry, or press ⌘N to start one.", cx).into_any_element(),
+                None => ui::quiet_state("No entry open.", cx).into_any_element(),
             }))
     }
 }

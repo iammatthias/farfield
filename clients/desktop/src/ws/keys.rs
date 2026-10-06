@@ -1,6 +1,6 @@
 //! Keys: no API by design. Keys are minted in the private keys console — a
 //! browser page on the tailnet, behind the administrator password, which is
-//! typed there and never here. This workspace explains them, shows which
+//! typed there and never here. This workspace shows which
 //! services this profile holds a key for (a hint only, never the key), and
 //! hands off: to the console to mint or revoke, to Connections to paste.
 
@@ -36,8 +36,8 @@ impl KeysWs {
 impl Workspace for KeysWs {
     fn commands(&self, _cx: &App) -> Vec<(&'static str, String, &'static str)> {
         vec![
-            ("console", "Keys: open the keys console (browser)".into(), ""),
-            ("paste", "Keys: paste a new key in Settings".into(), "⌘,"),
+            ("console", "Keys: open console (browser)".into(), ""),
+            ("paste", "Keys: paste a key in Settings".into(), "⌘,"),
         ]
     }
 
@@ -55,17 +55,6 @@ impl Render for KeysWs {
         let t = theme(cx).clone();
         let session = app::session(cx);
         let health = state(cx).health.clone();
-        let para = |s: &'static str| div().text_sm().line_height(px(21.)).text_color(t.ink_2).max_w(px(640.)).child(s);
-        let scope = |name: &'static str, what: &'static str| {
-            div()
-                .flex()
-                .gap(S3)
-                .py(px(6.))
-                .border_b_1()
-                .border_color(t.rule)
-                .child(div().w(px(70.)).flex_none().font_family(FONT_MONO).text_xs().text_color(t.ink).child(name))
-                .child(div().text_sm().text_color(t.ink_2).child(what))
-        };
 
         let mut rows = div().flex().flex_col();
         rows = rows.child(
@@ -112,7 +101,7 @@ impl Render for KeysWs {
                             .text_color(if hint.is_some() { t.ink } else { t.ink_3 })
                             .truncate()
                             .child(match (&hint, needs) {
-                                (Some(h), _) if h == "…" => "stored · too short to hint".to_string(),
+                                (Some(h), _) if h == "…" => "stored".to_string(),
                                 (Some(h), _) => h.clone(),
                                 (None, true) => "no key".to_string(),
                                 (None, false) => "—".to_string(),
@@ -131,23 +120,19 @@ impl Render for KeysWs {
                 .py(S5)
                 .max_w(px(920.))
                 .child(div().text_xl().text_color(t.ink).child("Keys"))
-                .child(para(
-                    "Each service checks the key you send with every request. Minted keys are ffk_ tokens made in the keys console: one per app, one scope each, revocable at any moment — revoking takes effect on the next request, everywhere. They are deliberately not JWTs: the server looks every key up, so nothing outlives a revocation.",
-                ))
-                .child(div().flex().flex_col().child(scope("read", "see private things: drafts, admin lists, logs")).child(scope("upload", "add media and files, nothing else")).child(scope("write", "create, change and delete — what this app uses for editing")))
-                .child(para(
-                    "A minted token is shown once, in the console. Copy it there, then paste it into Settings → Keys for that service; it is stored in your Keychain for this profile and this address only. The administrator password is typed in the browser — this app never asks for it and never stores it.",
-                ))
                 .child(
                     div()
                         .flex()
                         .gap(S2)
-                        .child(ui::button("console", "Open the keys console", BtnKind::Primary, cx, |_, _, cx| crate::ws::connections::open_console(cx, "keys")))
-                        .child(ui::button("paste", "Paste a key in Settings", BtnKind::Quiet, cx, |_, _, cx| goto(cx, "connections"))),
+                        .child(ui::button("console", "Open console", BtnKind::Primary, cx, |_, _, cx| {
+                            crate::ws::connections::open_console(cx, "keys")
+                        }))
+                        .child(ui::button("paste", "Paste a key…", BtnKind::Quiet, cx, |_, _, cx| {
+                            goto(cx, "connections")
+                        })),
                 )
                 .child(div().pt(S3).child(ui::eyebrow(format!("Keys in “{}”", session.profile.name), cx)))
-                .child(rows)
-                .child(div().text_xs().text_color(t.ink_3).child("Hints show a key's last four characters, never the key. Status comes from the last health check; a refused key shows as “needs key”.")),
+                .child(rows),
         )
     }
 }

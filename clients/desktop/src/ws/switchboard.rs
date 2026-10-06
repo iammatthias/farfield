@@ -89,7 +89,7 @@ fn duration(j: &Job) -> String {
 
 impl SwitchboardWs {
     pub fn new(w: &mut Window, cx: &mut Context<Self>) -> Self {
-        let search = cx.new(|cx| TextField::new(w, cx, "", "Filter by sender, text, route  ⌘F"));
+        let search = cx.new(|cx| TextField::new(w, cx, "", "Filter  ⌘F"));
         cx.subscribe_in(&search, w, |this: &mut Self, _, e: &FieldEvent, _w, cx| match e {
             FieldEvent::Changed => cx.notify(),
             FieldEvent::Down => this.step(1, cx),
@@ -346,16 +346,28 @@ impl SwitchboardWs {
                         .flex_col()
                         .gap(S3)
                         .max_w(px(560.))
-                        .child(div().text_lg().text_color(t.ink).child(if auth { "Switchboard needs its write key." } else { "Switchboard can't be read right now." }))
+                        .child(div().text_lg().text_color(t.ink).child(if auth {
+                            "Switchboard needs its write key."
+                        } else {
+                            "Switchboard can't be read."
+                        }))
                         .child(div().text_sm().text_color(t.ink_2).child(if auth {
-                            "The message log is private: it answers the write key only, and only over your tailnet. Add the key in Settings → Keys.".to_string()
+                            "Write key only, over the tailnet.".to_string()
                         } else {
                             describe(e)
                         }))
-                        .when(auth, |d| d.child(div().child(ui::button("conn", "Open Settings", BtnKind::Primary, cx, |_, _, cx| goto(cx, "connections")))))
+                        .when(auth, |d| {
+                            d.child(div().child(ui::button(
+                                "conn",
+                                "Open Settings",
+                                BtnKind::Primary,
+                                cx,
+                                |_, _, cx| goto(cx, "connections"),
+                            )))
+                        })
                         .into_any_element()
                 }
-                None => ui::quiet_state("Reading the line…", cx).into_any_element(),
+                None => ui::quiet_state("Loading…", cx).into_any_element(),
             };
         }
         let rows = Arc::new(self.rows(cx));
@@ -363,11 +375,9 @@ impl SwitchboardWs {
             let q = !self.search.read(cx).text().is_empty();
             return ui::quiet_state(
                 match (q, self.tab) {
-                    (true, _) => "Nothing matches the filter.",
-                    (false, Tab::Messages) => {
-                        "No messages yet. Text the line and they'll appear here within 30 seconds."
-                    }
-                    (false, Tab::Jobs) => "The agent hasn't run yet — prose texts (not /commands) start a job.",
+                    (true, _) => "No matches.",
+                    (false, Tab::Messages) => "No messages yet.",
+                    (false, Tab::Jobs) => "No jobs yet.",
                 },
                 cx,
             )
@@ -459,11 +469,7 @@ impl SwitchboardWs {
             )
         };
         let Some(k) = &self.selected else {
-            return ui::quiet_state(
-                "Choose a message or a job to read it in full. ↑/↓ from the filter moves through the list.",
-                cx,
-            )
-            .into_any_element();
+            return ui::quiet_state("Nothing selected.", cx).into_any_element();
         };
         let mut col = div().flex().flex_col().gap(S5).px(px(40.)).py(S5).max_w(px(760.));
         if let Some(m) = self.messages.iter().find(|m| &m.id == k).filter(|_| self.tab == Tab::Messages) {
@@ -521,7 +527,7 @@ impl SwitchboardWs {
                 col = col.child(block("Result", j.result.clone(), t.ink));
             }
         } else {
-            return ui::quiet_state("That item is no longer in the recent log.", cx).into_any_element();
+            return ui::quiet_state("No longer in the recent log.", cx).into_any_element();
         }
         col.into_any_element()
     }
@@ -560,9 +566,6 @@ impl Workspace for SwitchboardWs {
                 .child(ui::field_row("Message", ui::mono(j.message_id, cx), cx))
                 .child(ui::field_row("ID", ui::mono(j.id, cx), cx));
         }
-        col = col.child(
-            div().pt(S3).text_xs().text_color(theme(cx).ink_3).child("Read-only: nothing here replays or cancels."),
-        );
         Some(col.into_any_element())
     }
 
@@ -579,7 +582,7 @@ impl Workspace for SwitchboardWs {
             ("messages", "Switchboard: messages".into(), ""),
             ("jobs", "Switchboard: agent jobs".into(), ""),
             ("refresh", "Switchboard: refresh now".into(), "⌘R"),
-            ("console", "Switchboard: open the console (browser)".into(), ""),
+            ("console", "Switchboard: open console (browser)".into(), ""),
         ]
     }
 
@@ -600,7 +603,7 @@ impl Render for SwitchboardWs {
         let notice = match (&self.error, &self.freshness) {
             (Some(e), _) if self.loaded => Some(ui::notice(describe(e), t.bad, cx)),
             (None, Some(Freshness::Stale { age_ms, .. })) => Some(ui::notice(
-                format!("Offline — showing the log as it was {} ago.", crate::ws::content::ago(*age_ms)),
+                format!("Offline — showing what was loaded {} ago.", crate::ws::content::ago(*age_ms)),
                 t.warn,
                 cx,
             )),

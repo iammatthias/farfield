@@ -189,13 +189,10 @@ pub fn session(cx: &App) -> Arc<Session> {
 /// states, not exceptions.
 pub fn describe(e: &ApiError) -> String {
     match e {
-        ApiError::Offline(_) => "Offline — the service can't be reached. Your work is kept on this Mac.".into(),
-        ApiError::Uncertain(_) => {
-            "The connection dropped mid-save. It's kept as pending and will be checked before anything is resent."
-                .into()
-        }
-        ApiError::Unauthorized(s) => format!("Not signed in to {s}: add or replace its key in Settings → Keys."),
-        ApiError::Precondition { .. } => "Changed on the server since you opened it.".into(),
+        ApiError::Offline(_) => "Offline.".into(),
+        ApiError::Uncertain(_) => "Connection dropped mid-save — pending.".into(),
+        ApiError::Unauthorized(s) => format!("{s} needs a key."),
+        ApiError::Precondition { .. } => "Changed on the server.".into(),
         ApiError::Unavailable(m) => format!("Unavailable: {m}"),
         other => other.to_string(),
     }

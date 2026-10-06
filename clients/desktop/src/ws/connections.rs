@@ -10,7 +10,7 @@ use crate::theme::{theme, Mode, Theme, FONT_DOC, S2, S3, S4, S5};
 use crate::ui::input::{FieldEvent, TextField};
 use crate::ui::{self, Kind};
 use crate::workspace::{PaletteItem, Workspace};
-use farfield_core::profile::{parse_tailscale_status, tailscale_status, Profile, TailnetPeer};
+use farfield_core::profile::{parse_tailscale_status, tailscale_status, TailnetPeer};
 use farfield_core::registry;
 use farfield_core::secret::Credential;
 use gpui::{div, prelude::*, px, AnyElement, App, Context, Entity, SharedString, Window};
@@ -53,7 +53,7 @@ fn keyed(service: &str) -> bool {
 
 impl Connections {
     pub fn new(w: &mut Window, cx: &mut Context<Self>) -> Self {
-        let address = cx.new(|cx| TextField::new(w, cx, "Tailnet address", "homelab.tail1234.ts.net").mono());
+        let address = cx.new(|cx| TextField::new(w, cx, "Address", "name.tailnet.ts.net").mono());
         if let Some(h) = state(cx).session.profile.common_host() {
             address.update(cx, |f, cx| f.set_text(h, cx));
         }
@@ -66,8 +66,7 @@ impl Connections {
             _ => {}
         })
         .detach();
-        let fleet_key =
-            cx.new(|cx| TextField::new(w, cx, "One key for every service", "ffk_… minted for app “*”").secret());
+        let fleet_key = cx.new(|cx| TextField::new(w, cx, "Key for all", "ffk_…").secret());
         cx.subscribe_in(&fleet_key, w, |this, f, e: &FieldEvent, _, cx| {
             if *e == FieldEvent::Submit {
                 let v = f.read(cx).text();
@@ -112,15 +111,13 @@ impl Connections {
     fn apply_address(&mut self, cx: &mut Context<Self>) {
         let typed = self.address.read(cx).text();
         let cur = state(cx).session.profile.clone();
-        let (id, name) = if cur.id == "local" {
-            ("homelab".to_string(), "Homelab (tailnet)".to_string())
-        } else {
-            (cur.id.clone(), cur.name.clone())
-        };
-        let p = match farfield_core::profile::parse_fleet_address(&typed) {
-            Ok((_, h)) if farfield_core::profile::is_loopback(&h) => Ok(Profile::local()),
-            _ => Profile::from_address(&id, &name, &typed),
-        };
+        // a tailnet profile keeps its id, so its drafts and cache stay with it
+        let p = crate::ws::onboarding::profile_for(&typed).map(|mut p| {
+            if cur.id != "local" && p.id != "local" {
+                p.id = cur.id.clone();
+            }
+            p
+        });
         match p {
             Ok(p) => {
                 let pid = p.id.clone();
@@ -376,84 +373,79 @@ impl Connections {
                 }))
                 .into_any_element(),
         };
-        let rows = registry::services().iter().map(|s| {
-            let name = s.name.clone();
-            let ep = active.endpoint(&s.name).cloned();
-            let h = health.get(&s.name).cloned().unwrap_or(Health::Unknown);
-            let color = match h {
-                Health::Up => t.good,
-                Health::NoAuth => t.warn,
-                Health::Down(_) => t.bad,
-                _ => t.ink_3,
-            };
-            let editing = self.endpoint_field.as_ref().filter(|(k, _)| *k == name).map(|(_, f)| f.clone());
-            let result = self.results.get(&name).cloned();
-            let (n1, n2) = (name.clone(), name.clone());
-            let testing = self.testing.contains(&name);
-            let _ = &session;
-            div()
-                .flex()
-                .flex_col()
-                .gap(px(4.))
-                .py(S3)
-                .border_b_1()
-                .border_color(t.rule)
-                .child(
-                    div()
-                        .flex()
-                        .items_center()
-                        .gap(S4)
-                        .child(
-                            div()
-                                .w(px(104.))
-                                .flex_none()
-                                .text_sm()
-                                .font_weight(gpui::FontWeight::MEDIUM)
-                                .child(name.clone()),
-                        )
-                        .child(div().w(px(96.)).flex_none().child(ui::chip(h.word(), color, cx)))
-                        .child(
-                            div()
-                                .flex_1()
-                                .min_w_0()
-                                .child(ui::mono(ep.as_ref().map(|e| e.api.clone()).unwrap_or_default(), cx).truncate()),
-                        )
-                        .child(ui::button(SharedString::from(format!("ep-{n1}")), "Change", Kind::Quiet, cx, {
-                            let e = cx.entity();
-                            move |_, w, cx| e.update(cx, |this, cx| this.edit_endpoint(&n1, w, cx))
-                        }))
-                        .child(ui::button(
-                            SharedString::from(format!("test-{n2}")),
-                            if testing { "Testing…" } else { "Test" },
-                            Kind::Quiet,
-                            cx,
-                            {
+        let rows =
+            registry::services().iter().map(|s| {
+                let name = s.name.clone();
+                let ep = active.endpoint(&s.name).cloned();
+                let h = health.get(&s.name).cloned().unwrap_or(Health::Unknown);
+                let color = match h {
+                    Health::Up => t.good,
+                    Health::NoAuth => t.warn,
+                    Health::Down(_) => t.bad,
+                    _ => t.ink_3,
+                };
+                let editing = self.endpoint_field.as_ref().filter(|(k, _)| *k == name).map(|(_, f)| f.clone());
+                let result = self.results.get(&name).cloned();
+                let (n1, n2) = (name.clone(), name.clone());
+                let testing = self.testing.contains(&name);
+                let _ = &session;
+                div()
+                    .flex()
+                    .flex_col()
+                    .gap(px(4.))
+                    .py(S3)
+                    .border_b_1()
+                    .border_color(t.rule)
+                    .child(
+                        div()
+                            .flex()
+                            .items_center()
+                            .gap(S4)
+                            .child(
+                                div()
+                                    .w(px(104.))
+                                    .flex_none()
+                                    .text_sm()
+                                    .font_weight(gpui::FontWeight::MEDIUM)
+                                    .child(name.clone()),
+                            )
+                            .child(div().w(px(96.)).flex_none().child(ui::chip(h.word(), color, cx)))
+                            .child(
+                                div().flex_1().min_w_0().child(
+                                    ui::mono(ep.as_ref().map(|e| e.api.clone()).unwrap_or_default(), cx).truncate(),
+                                ),
+                            )
+                            .child(ui::button(SharedString::from(format!("ep-{n1}")), "Change", Kind::Quiet, cx, {
                                 let e = cx.entity();
-                                move |_, _, cx| e.update(cx, |this, cx| this.test(&n2, cx))
-                            },
-                        )),
-                )
-                .when_some(ep.and_then(|e| e.public), |d, p| {
-                    d.child(div().pl(px(120.)).text_xs().text_color(t.ink_3).child(format!("share links: {p}")))
-                })
-                .when_some(result, |d, r| d.child(div().pl(px(120.)).text_xs().text_color(t.ink_2).child(r)))
-                .when_some(editing, |d, f| {
-                    d.child(
-                        div().pl(px(120.)).pr(S5).pt(S2).child(f).child(
-                            div()
-                                .text_xs()
-                                .text_color(t.ink_3)
-                                .pt(px(4.))
-                                .child("Enter saves (https, or http only to this Mac) · Esc cancels"),
-                        ),
+                                move |_, w, cx| e.update(cx, |this, cx| this.edit_endpoint(&n1, w, cx))
+                            }))
+                            .child(ui::button(
+                                SharedString::from(format!("test-{n2}")),
+                                if testing { "Testing…" } else { "Test" },
+                                Kind::Quiet,
+                                cx,
+                                {
+                                    let e = cx.entity();
+                                    move |_, _, cx| e.update(cx, |this, cx| this.test(&n2, cx))
+                                },
+                            )),
                     )
-                })
-        });
+                    .when_some(ep.and_then(|e| e.public), |d, p| {
+                        d.child(div().pl(px(120.)).text_xs().text_color(t.ink_3).child(format!("share links: {p}")))
+                    })
+                    .when_some(result, |d, r| d.child(div().pl(px(120.)).text_xs().text_color(t.ink_2).child(r)))
+                    .when_some(editing, |d, f| {
+                        d.child(
+                            div().pl(px(120.)).pr(S5).pt(S2).child(f).child(
+                                div().text_xs().text_color(t.ink_3).pt(px(4.)).child("Enter saves · Esc cancels"),
+                            ),
+                        )
+                    })
+            });
         div()
             .flex()
             .flex_col()
             .gap(S4)
-            .child(para("The services are reached at their private addresses on your tailnet. Type the homelab's tailnet name and every service follows at its own port; change any one of them below if it lives elsewhere.", t))
             .child(
                 div()
                     .flex()
@@ -464,13 +456,15 @@ impl Connections {
                         let e = cx.entity();
                         move |_, _, cx| e.update(cx, |this, cx| this.apply_address(cx))
                     }))
-                    .child(ui::button("detect", "Detect with Tailscale", Kind::Quiet, cx, {
+                    .child(ui::button("detect", "Use Tailscale", Kind::Quiet, cx, {
                         let e = cx.entity();
                         move |_, _, cx| e.update(cx, |this, cx| this.detect(cx))
                     })),
             )
             .when_some(self.address_error.clone(), |d, e| d.child(ui::notice(e, t.bad, cx)))
-            .when(active.common_host().is_none(), |d| d.child(ui::notice("Services in this profile point at different hosts.", t.warn, cx)))
+            .when(active.common_host().is_none(), |d| {
+                d.child(ui::notice("Some services have their own address.", t.warn, cx))
+            })
             .child(peers)
             .child(
                 div()
@@ -548,14 +542,9 @@ impl Connections {
                                     move |_, _, cx| {
                                         let e = e.clone();
                                         let n = n2.clone();
-                                        confirm(
-                                            cx,
-                                            format!("Forget the {n} key?"),
-                                            "It's removed from the Keychain. You can paste it again later.",
-                                            "Forget",
-                                            true,
-                                            move |_, cx| e.update(cx, |this, cx| this.forget_key(&n, cx)),
-                                        )
+                                        confirm(cx, format!("Forget the {n} key?"), "", "Forget", true, move |_, cx| {
+                                            e.update(cx, |this, cx| this.forget_key(&n, cx))
+                                        })
                                     }
                                 },
                             ))
@@ -563,13 +552,12 @@ impl Connections {
                 )
                 .when_some(editing, |d, f| {
                     d.child(
-                        div().pl(px(120.)).pr(S5).pt(S2).child(f).child(
-                            div()
-                                .text_xs()
-                                .text_color(t.ink_3)
-                                .pt(px(4.))
-                                .child("Enter stores it in the Keychain for this address only · Esc cancels"),
-                        ),
+                        div()
+                            .pl(px(120.))
+                            .pr(S5)
+                            .pt(S2)
+                            .child(f)
+                            .child(div().text_xs().text_color(t.ink_3).pt(px(4.)).child("Enter saves · Esc cancels")),
                     )
                 })
         });
@@ -577,14 +565,13 @@ impl Connections {
             .flex()
             .flex_col()
             .gap(S4)
-            .child(para("Mint scoped keys in the keys console — app “*” with write scope covers everything; read keys see only what's public. The administrator password is typed there, in your browser, never here.", t))
             .child(
                 div()
                     .flex()
                     .items_end()
                     .gap(S3)
                     .child(div().w(px(420.)).child(self.fleet_key.clone()))
-                    .child(ui::button("key-all", "Use for every service", Kind::Primary, cx, {
+                    .child(ui::button("key-all", "Use for all", Kind::Primary, cx, {
                         let e = cx.entity();
                         move |_, _, cx| {
                             e.update(cx, |this, cx| {
@@ -594,7 +581,9 @@ impl Connections {
                             })
                         }
                     }))
-                    .child(ui::button("console-keys", "Keys console ↗", Kind::Quiet, cx, |_, _, cx| open_console(cx, "keys"))),
+                    .child(ui::button("console-keys", "Keys console ↗", Kind::Quiet, cx, |_, _, cx| {
+                        open_console(cx, "keys")
+                    })),
             )
             .child(div().flex().flex_col().border_t_1().border_color(t.rule).children(rows))
             .into_any_element()
@@ -608,7 +597,6 @@ impl Connections {
             .flex()
             .flex_col()
             .gap(S4)
-            .child(para("A profile is one set of addresses. Each keeps its own keys, cache and drafts — switching never shows one profile's data in another.", t))
             .child(div().flex().flex_col().border_t_1().border_color(t.rule).children(profiles.into_iter().map(|p| {
                 let on = p.id == active;
                 let (id, id2) = (p.id.clone(), p.id.clone());
@@ -617,21 +605,39 @@ impl Connections {
                     .flex()
                     .items_center()
                     .gap(S4)
-                    .child(div().flex_1().flex().flex_col().child(div().text_sm().child(p.name.clone())).child(ui::mono(host, cx)))
-                    .child(if on { ui::chip("in use", t.good, cx).into_any_element() } else {
-                        ui::button(SharedString::from(format!("use-{id}")), "Use", Kind::Quiet, cx, move |_, _, cx| activate(cx, &id)).into_any_element()
+                    .child(
+                        div()
+                            .flex_1()
+                            .flex()
+                            .flex_col()
+                            .child(div().text_sm().child(p.name.clone()))
+                            .child(ui::mono(host, cx)),
+                    )
+                    .child(if on {
+                        ui::chip("in use", t.good, cx).into_any_element()
+                    } else {
+                        ui::button(SharedString::from(format!("use-{id}")), "Use", Kind::Quiet, cx, move |_, _, cx| {
+                            activate(cx, &id)
+                        })
+                        .into_any_element()
                     })
                     .when(!on && p.id != "local", |d| {
-                        d.child(ui::button(SharedString::from(format!("rm-{id2}")), "Remove", Kind::Danger, cx, move |_, _, cx| {
-                            let id = id2.clone();
-                            confirm(cx, "Remove this profile?", "Its addresses are forgotten. Keys stay in the Keychain and drafts on disk until you clear them.", "Remove", true, move |_, cx| {
-                                let st = cx.global_mut::<AppState>();
-                                st.profiles.retain(|p| p.id != id);
-                                st.save_profiles();
-                                log("profile-removed", &[("id", &id)]);
-                                cx.refresh_windows();
-                            })
-                        }))
+                        d.child(ui::button(
+                            SharedString::from(format!("rm-{id2}")),
+                            "Remove",
+                            Kind::Danger,
+                            cx,
+                            move |_, _, cx| {
+                                let id = id2.clone();
+                                confirm(cx, "Remove this profile?", "", "Remove", true, move |_, cx| {
+                                    let st = cx.global_mut::<AppState>();
+                                    st.profiles.retain(|p| p.id != id);
+                                    st.save_profiles();
+                                    log("profile-removed", &[("id", &id)]);
+                                    cx.refresh_windows();
+                                })
+                            },
+                        ))
                     })
             })))
             .into_any_element()
@@ -687,37 +693,43 @@ impl Connections {
                         shell::apply_theme(w, cx);
                     })),
             )
-            .child(para("⌥⌘T cycles System, Light and Dark from anywhere.", t))
             .into_any_element()
     }
 
-    fn sec_data(&mut self, t: &Theme, cx: &mut Context<Self>) -> AnyElement {
+    fn sec_data(&mut self, _t: &Theme, cx: &mut Context<Self>) -> AnyElement {
         let dir = state(cx).data_dir.clone();
         let (bytes, drafts) = self.data_summary.unwrap_or((0, 0));
         div()
             .flex()
             .flex_col()
             .gap(S4)
-            .child(para("Drafts, cached responses and preferences live here, readable only by you. Keys are not here — they're in the Keychain.", t))
             .child(ui::field_row("Folder", ui::mono(dir.display().to_string(), cx), cx))
-            .child(ui::field_row("Size", ui::mono(format!("{} · {drafts} draft file(s)", ui::bytes(bytes as i64)), cx), cx))
+            .child(ui::field_row(
+                "Size",
+                ui::mono(format!("{} · {drafts} draft file(s)", ui::bytes(bytes as i64)), cx),
+                cx,
+            ))
             .child(
                 div()
                     .flex()
                     .gap(S2)
-                    .child(ui::button("reveal", "Show in Finder", Kind::Quiet, cx, move |_, _, cx| cx.reveal_path(&dir)))
+                    .child(ui::button("reveal", "Show in Finder", Kind::Quiet, cx, move |_, _, cx| {
+                        cx.reveal_path(&dir)
+                    }))
                     .child(ui::button("clear-cache", "Clear cached responses…", Kind::Danger, cx, {
                         let e = cx.entity();
                         move |_, _, cx| {
                             let e = e.clone();
-                            confirm(cx, "Clear cached responses?", "Lists reload from the services. Drafts and unsaved work are kept.", "Clear", true, move |_, cx| e.update(cx, |this, cx| this.clear_cache(cx)))
+                            confirm(cx, "Clear cached responses?", "Drafts are kept.", "Clear", true, move |_, cx| {
+                                e.update(cx, |this, cx| this.clear_cache(cx))
+                            })
                         }
                     })),
             )
             .into_any_element()
     }
 
-    fn sec_about(&mut self, t: &Theme, cx: &mut Context<Self>) -> AnyElement {
+    fn sec_about(&mut self, _t: &Theme, cx: &mut Context<Self>) -> AnyElement {
         let editor: serde_json::Value = serde_json::from_str(farfield_editor::assets::MANIFEST).unwrap_or_default();
         div()
             .flex()
@@ -754,13 +766,8 @@ impl Connections {
                         open_console(cx, "backup")
                     })),
             )
-            .child(para("Consoles open in your browser at their private address; sign in there.", t))
             .into_any_element()
     }
-}
-
-fn para(s: &'static str, t: &Theme) -> impl IntoElement {
-    div().max_w(px(620.)).text_sm().line_height(px(21.)).text_color(t.ink_2).child(s)
 }
 
 pub fn activate(cx: &mut App, id: &str) {
@@ -780,7 +787,7 @@ impl Workspace for Connections {
             ("sec-data", "Settings: data on this Mac".into(), ""),
             ("sec-about", "Settings: about".into(), ""),
             ("test-all", "Settings: test every connection".into(), "⌘R"),
-            ("detect", "Settings: detect the homelab with Tailscale".into(), ""),
+            ("detect", "Settings: use Tailscale".into(), ""),
             ("setup", "Settings: run setup again".into(), ""),
             ("keys", "Open the keys console (browser)".into(), ""),
             ("pulse", "Open the pulse console (browser)".into(), ""),

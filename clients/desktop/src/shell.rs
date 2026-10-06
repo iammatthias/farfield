@@ -590,8 +590,7 @@ impl Shell {
                         .flex_col()
                         .gap(S3)
                         .child(div().text_base().font_weight(gpui::FontWeight::SEMIBOLD).text_color(t.ink).child(title))
-                        .child(div().text_sm().text_color(t.ink_2).child(body))
-                        .child(div().text_xs().text_color(t.ink_3).child("Enter to confirm · Esc to cancel"))
+                        .when(!body.is_empty(), |d| d.child(div().text_sm().text_color(t.ink_2).child(body)))
                         .child(
                             div()
                                 .flex()

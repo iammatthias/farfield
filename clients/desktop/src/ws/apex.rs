@@ -129,18 +129,12 @@ impl ApexWs {
         let t = theme(cx).clone();
         let Some(p) = &self.profile else {
             return match &self.error {
-                Some(e) => {
-                    ui::quiet_state(format!("The profile document didn't load: {}", describe(e)), cx).into_any_element()
-                }
-                None => ui::quiet_state("Loading the profile document…", cx).into_any_element(),
+                Some(e) => ui::quiet_state(format!("Didn't load: {}", describe(e)), cx).into_any_element(),
+                None => ui::quiet_state("Loading…", cx).into_any_element(),
             };
         };
         if p.sections.is_empty() {
-            return ui::quiet_state(
-                "No sections right now. Apex leaves out any section whose source (feed, content, daily) didn't answer, so a README keeps its last good copy.",
-                cx,
-            )
-            .into_any_element();
+            return ui::quiet_state("No sections.", cx).into_any_element();
         }
         let mut col = div().flex().flex_col().gap(S5).max_w(MEASURE);
         for key in ["feed", "writing", "daily"]
@@ -304,7 +298,7 @@ impl Render for ApexWs {
             .iter()
             .map(|s| {
                 let ep = profile.endpoint(&s.name);
-                let api = ep.map(|e| e.api.clone()).unwrap_or_else(|| "no endpoint in this profile".into());
+                let api = ep.map(|e| e.api.clone()).unwrap_or_else(|| "no endpoint".into());
                 let public = ep.and_then(|e| e.public.clone()).or_else(|| s.public_url());
                 cell(&s.name, health.get(&s.name), api, public, s.host, cx).into_any_element()
             })
@@ -335,12 +329,23 @@ impl Render for ApexWs {
                                 .gap(S1)
                                 .child(div().text_xl().text_color(t.ink).child(headline))
                                 .child(ui::mono(
-                                    format!("{} · {}{}", profile.name, if nokey > 0 { format!("{nokey} need a key") } else { "every key accepted".into() }, if self.checking { " · checking…" } else { "" }),
+                                    format!(
+                                        "{} · {}{}",
+                                        profile.name,
+                                        if nokey > 0 {
+                                            format!("{nokey} need a key")
+                                        } else {
+                                            "every key accepted".into()
+                                        },
+                                        if self.checking { " · checking…" } else { "" }
+                                    ),
                                     cx,
                                 )),
                         )
                         .child(div().flex_1())
-                        .child(ui::button("check", "Check now  ⌘R", BtnKind::Quiet, cx, move |_, _, cx| e.update(cx, |this, cx| this.check_all(cx)))),
+                        .child(ui::button("check", "Check now  ⌘R", BtnKind::Quiet, cx, move |_, _, cx| {
+                            e.update(cx, |this, cx| this.check_all(cx))
+                        })),
                 )
                 .child(div().flex().flex_wrap().gap_x(S4).children(cells))
                 .child(div().pt(S4).child(ui::rule(cx)))
@@ -350,12 +355,14 @@ impl Render for ApexWs {
                         .items_baseline()
                         .gap(S3)
                         .child(div().text_lg().text_color(t.ink).child("Public profile"))
-                        .when_some(self.profile.as_ref().map(|p| p.updated_at.clone()).filter(|u| !u.is_empty()), |d, u| d.child(ui::mono(format!("updated {}", ui::when(&u)), cx))),
+                        .when_some(
+                            self.profile.as_ref().map(|p| p.updated_at.clone()).filter(|u| !u.is_empty()),
+                            |d, u| d.child(ui::mono(format!("updated {}", ui::when(&u)), cx)),
+                        ),
                 )
-                .child(div().text_sm().text_color(t.ink_2).max_w(px(640.)).child(
-                    "What apex publishes at /api/profile for the self-updating GitHub README: the latest feed post, the newest writing, today's art. Public material only.",
-                ))
-                .when(matches!(self.freshness, Some(Freshness::Stale { .. })), |d| d.child(ui::notice("Offline — this is the last copy fetched.", t.warn, cx)))
+                .when(matches!(self.freshness, Some(Freshness::Stale { .. })), |d| {
+                    d.child(ui::notice("Offline — showing the last copy.", t.warn, cx))
+                })
                 .child(div().pt(S2).pb(px(48.)).child(self.render_profile(cx))),
         )
     }

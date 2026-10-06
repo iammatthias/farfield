@@ -35,7 +35,7 @@ var tmplFuncs = template.FuncMap{
 // keys.Attach in its run().
 var knownApps = []string{
 	keys.AppAny, "blobs", "bookmarks", "content", "feed",
-	"library", "qr", "scrap", "sideload",
+	"library", "pulse", "qr", "scrap", "sideload", "switchboard",
 }
 
 // scopes describes each scope on the issue form, narrowest first.

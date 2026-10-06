@@ -238,8 +238,8 @@ impl DailyWs {
                     }
                     Ok(Err(ApiError::NotFound)) => {
                         this.error = Some(match &this.want {
-                            Some(d) => format!("The index has no photograph for {d}."),
-                            None => "The index has no photograph yet — NASA may not have posted today's.".into(),
+                            Some(d) => format!("No photograph for {d}."),
+                            None => "No photograph yet today.".into(),
                         });
                     }
                     Ok(Err(e)) => {
@@ -365,11 +365,7 @@ impl DailyWs {
                 let Some(d) = &self.day else { return };
                 let to = if forward { d.next.clone() } else { d.prev.clone() };
                 if to.is_empty() {
-                    toast(
-                        cx,
-                        if forward { "That's the newest day." } else { "That's the first day in the index." },
-                        false,
-                    );
+                    toast(cx, if forward { "Newest day." } else { "First day." }, false);
                     return;
                 }
                 self.load_day(Some(to), cx);
@@ -503,7 +499,7 @@ impl DailyWs {
             (Some(e), _) if self.day.is_some() => Some(ui::notice(e.clone(), t.bad, cx).into_any_element()),
             (None, Some(Freshness::Stale { age_ms, .. })) => Some(
                 ui::notice(
-                    format!("Offline — showing the copy loaded {} ago.", crate::ws::content::ago(*age_ms)),
+                    format!("Offline — showing what was loaded {} ago.", crate::ws::content::ago(*age_ms)),
                     t.warn,
                     cx,
                 )
@@ -539,11 +535,7 @@ impl DailyWs {
                 .into_any_element()
         };
         if src.is_empty() {
-            let msg = if video {
-                "Today's APOD is a video — open the source to watch it."
-            } else {
-                "No image for this day."
-            };
+            let msg = if video { "Video — open the source." } else { "No image for this day." };
             return placeholder(msg.into(), &t);
         }
         match self.remote(&src, HERO_EDGE, cx) {
@@ -558,15 +550,12 @@ impl DailyWs {
             }
             // a compact note, not a big empty frame: the words and the plate still stand
             Some(Err(e)) => ui::notice(
-                format!(
-                    "The photograph didn't load — {}. \"Open source\" in the inspector shows it on NASA's site.",
-                    e.trim_start_matches("unexpected response: ")
-                ),
+                format!("Photograph didn't load — {}.", e.trim_start_matches("unexpected response: ")),
                 t.warn,
                 cx,
             )
             .into_any_element(),
-            None => placeholder("Loading the photograph…".into(), &t),
+            None => placeholder("Loading…".into(), &t),
         }
     }
 
@@ -576,21 +565,9 @@ impl DailyWs {
             return match &self.error {
                 Some(e) => div()
                     .p(S6)
-                    .flex()
-                    .flex_col()
-                    .gap(S3)
-                    .child(
-                        div().font_family(FONT_DOC).text_size(px(22.)).text_color(t.ink).child("Nothing to show yet."),
-                    )
                     .child(div().text_sm().text_color(t.ink_2).max_w(px(520.)).child(e.clone()))
-                    .child(
-                        div()
-                            .text_sm()
-                            .text_color(t.ink_3)
-                            .child("⌘R tries again; the archive (A) may still have earlier days."),
-                    )
                     .into_any_element(),
-                None => ui::quiet_state("Fetching today's photograph…", cx).into_any_element(),
+                None => ui::quiet_state("Loading…", cx).into_any_element(),
             };
         };
         let p = day.photo.clone();
@@ -641,11 +618,11 @@ impl DailyWs {
                 .h(px(560. * pic.h as f32 / pic.w.max(1) as f32))
                 .object_fit(ObjectFit::Contain)
                 .into_any_element(),
-            Some(Err(e)) => ui::quiet_state(format!("The plate didn't render: {e}"), cx).into_any_element(),
+            Some(Err(e)) => ui::quiet_state(format!("Plate didn't render: {e}"), cx).into_any_element(),
             None => div().w(px(560.)).h(px(347.)).bg(t.wash).into_any_element(),
         };
         let mut facts = div().flex().flex_col().gap(S2).w(px(240.)).flex_none();
-        facts = facts.child(ui::eyebrow("The day's plate", cx));
+        facts = facts.child(ui::eyebrow("Plate", cx));
         if let Some(a) = &art {
             facts = facts
                 .child(div().font_family(FONT_DOC).text_size(px(20.)).text_color(t.ink).child(a.biome.clone()))
@@ -665,10 +642,6 @@ impl DailyWs {
                     ui::mono(a.coord.iter().map(|n| n.to_string()).collect::<Vec<_>>().join(" · "), cx),
                     cx,
                 ));
-        } else {
-            facts = facts.child(
-                div().text_sm().text_color(t.ink_2).child("A terrain drawn from the date alone — every day has one."),
-            );
         }
         col = col.child(
             div().flex().flex_wrap().gap(S5).items_start().child(div().flex_none().child(plate_el)).child(facts),
@@ -681,12 +654,11 @@ impl DailyWs {
         let Some(a) = self.archive.clone() else {
             return match &self.archive_error {
                 Some(e) => ui::quiet_state(e.clone(), cx).into_any_element(),
-                None => ui::quiet_state("Loading the archive…", cx).into_any_element(),
+                None => ui::quiet_state("Loading…", cx).into_any_element(),
             };
         };
         if a.photos.is_empty() {
-            return ui::quiet_state("The archive is empty — the index fills as days are fetched.", cx)
-                .into_any_element();
+            return ui::quiet_state("No days yet.", cx).into_any_element();
         }
         let current = self.day.as_ref().map(|d| d.photo.date.clone());
         let cells: Vec<AnyElement> = a
@@ -767,7 +739,6 @@ impl DailyWs {
             .when(self.archive_loading, |d| d.child(div().text_xs().text_color(t.ink_3).child("Loading…")))
             .when_some(self.archive_error.clone(), |d, e| d.child(ui::notice(e, t.bad, cx)))
             .child(div().flex().flex_wrap().gap(S3).children(cells))
-            .child(div().text_xs().text_color(t.ink_3).child("← newer · older →   Click a day to read it."))
             .into_any_element()
     }
 }
@@ -835,16 +806,11 @@ impl Workspace for DailyWs {
             ));
             col = col.child(ui::field_row("Plate CID", ui::mono(a.cid.clone(), cx), cx));
             if let Some(u) = self.public(cx, &format!("/art/{}", a.date)) {
-                col = col.child(ui::button(
-                    "pub-art",
-                    "Open the plate on the web",
-                    BtnKind::Quiet,
-                    cx,
-                    move |_, _, cx| cx.open_url(&u),
-                ));
+                col = col.child(ui::button("pub-art", "Open plate on the web", BtnKind::Quiet, cx, move |_, _, cx| {
+                    cx.open_url(&u)
+                }));
             }
         }
-        col = col.child(div().pt(S3).text_xs().text_color(t.ink_3).child("←/→ move a day · T today · A archive"));
         Some(col.into_any_element())
     }
 
@@ -874,7 +840,7 @@ impl Workspace for DailyWs {
         ];
         if self.day.is_some() {
             v.push(("web", "Daily: open this day on the web".into(), ""));
-            v.push(("source", "Daily: open the source (NASA)".into(), ""));
+            v.push(("source", "Daily: open source".into(), ""));
         }
         v
     }

@@ -4,6 +4,7 @@ import (
 	"database/sql"
 	"embed"
 	"fmt"
+	"github.com/iammatthias/farfield/lib/keys"
 	"html/template"
 	"log/slog"
 	"net/http"
@@ -66,6 +67,10 @@ func run(host, port string) error {
 			},
 		},
 	}
+
+	// minted read keys work here like everywhere else (when KEYS_DB_PATH is set);
+	// a write-scoped key reads too, so one fleet key opens pulse
+	defer keys.Attach(s.auth, "pulse")()
 
 	seedTargets(db)
 	startChecker(db)

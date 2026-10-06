@@ -218,9 +218,7 @@ pub(crate) mod kit {
     pub fn diff_rows(diffs: Vec<(&str, String, String, bool)>, server_at: &str, cx: &App) -> Div {
         let t = theme(cx).clone();
         if diffs.is_empty() {
-            return div().text_sm().text_color(t.ink_2).child(
-                "The server's version moved, but none of the fields you see here differ from yours. Reapplying saves your edits on top of it.",
-            );
+            return div().text_sm().text_color(t.ink_2).child("No visible fields differ.");
         }
         let line = |who: &str, v: String, strong: bool| {
             div()
@@ -246,7 +244,7 @@ pub(crate) mod kit {
                     .text_xs()
                     .text_color(t.ink_2)
                     .pb(px(4.))
-                    .child(format!("Server copy saved {}", crate::ui::when(server_at))),
+                    .child(format!("Server saved {}", crate::ui::when(server_at))),
             )
             .children(diffs.into_iter().map(|(label, mine, theirs, edited)| {
                 div()
@@ -260,13 +258,7 @@ pub(crate) mod kit {
                     .when(edited, |d| d.child(line("yours", mine, true)))
                     .child(line("server", theirs, !edited))
                     .when(!edited, |d| {
-                        d.child(
-                            div()
-                                .pl(px(60.))
-                                .text_xs()
-                                .text_color(t.ink_3)
-                                .child("Changed on the server only — it stays as the server has it."),
-                        )
+                        d.child(div().pl(px(60.)).text_xs().text_color(t.ink_3).child("unchanged by you"))
                     })
             }))
     }
@@ -332,7 +324,7 @@ const SVC: &str = "bookmarks";
 
 impl BookmarksWs {
     pub fn new(w: &mut Window, cx: &mut Context<Self>) -> Self {
-        let search = cx.new(|cx| TextField::new(w, cx, "", "Filter bookmarks  ⌘F"));
+        let search = cx.new(|cx| TextField::new(w, cx, "", "Filter  ⌘F"));
         cx.subscribe_in(&search, w, |this: &mut Self, _, e: &FieldEvent, w, cx| match e {
             FieldEvent::Changed => cx.notify(),
             FieldEvent::Down => this.step(1, w, cx),
@@ -360,10 +352,10 @@ impl BookmarksWs {
             f
         };
         let f_url = field("URL", "https://…", true, w, cx);
-        let f_title = field("Title", "what to call it — the page title if left empty", false, w, cx);
-        let f_desc = field("Description", "a line about it", false, w, cx);
-        let f_cat = field("Category", "pick one below or type a new one", false, w, cx);
-        let f_notes = field("Admin notes · private", "only ever shown here — never on the site", false, w, cx);
+        let f_title = field("Title", "from the page", false, w, cx);
+        let f_desc = field("Description", "", false, w, cx);
+        let f_cat = field("Category", "", false, w, cx);
+        let f_notes = field("Admin notes · private", "", false, w, cx);
         let mut this = BookmarksWs {
             me: cx.entity().downgrade(),
             items: Vec::new(),
@@ -537,19 +529,12 @@ impl BookmarksWs {
             return;
         }
         let me = self.me.clone();
-        confirm(
-            cx,
-            "Discard your changes?",
-            "This bookmark has edits that aren't saved to the server.",
-            "Discard",
-            true,
-            move |_, cx| {
-                let _ = me.update(cx, |this, cx| {
-                    then(this, cx);
-                    cx.notify();
-                });
-            },
-        );
+        confirm(cx, "Discard your changes?", "", "Discard", true, move |_, cx| {
+            let _ = me.update(cx, |this, cx| {
+                then(this, cx);
+                cx.notify();
+            });
+        });
     }
 
     fn set_form(&mut self, b: Bookmark, cx: &mut Context<Self>) {
@@ -628,7 +613,7 @@ impl BookmarksWs {
             Some(id) => {
                 let ch = self.changes(&form.base, cx);
                 if ch.is_empty() {
-                    toast(cx, "Nothing to save — no changes.", false);
+                    toast(cx, "No changes.", false);
                     return;
                 }
                 let id = id.clone();
@@ -661,7 +646,7 @@ impl BookmarksWs {
                     Ok(Ok(v)) => {
                         let b = v.value;
                         log(if created { "bookmark-create" } else { "bookmark-save" }, &[("id", &b.id)]);
-                        toast(cx, if created { "Bookmark saved. Fetching the page's details…" } else { "Saved." }, false);
+                        toast(cx, if created { "Saved. Fetching page details…" } else { "Saved." }, false);
                         let id = b.id.clone();
                         this.set_form(b, cx);
                         this.reload(cx);
@@ -676,7 +661,7 @@ impl BookmarksWs {
                         let cur = ext_lists::bookmarks::from_conflict(&current);
                         if let Some(f) = this.form.as_mut() {
                             f.conflict = cur;
-                            f.error = Some("Someone saved this bookmark since you opened it. Compare below, then reapply yours or take theirs.".into());
+                            f.error = Some("Changed on the server.".into());
                         }
                     }
                     Ok(Err(e)) => {
@@ -749,17 +734,11 @@ impl BookmarksWs {
         let cid = f.base.cid.clone();
         let name = if f.base.title.is_empty() { f.base.url.clone() } else { f.base.title.clone() };
         let me = self.me.clone();
-        confirm(
-            cx,
-            "Delete this bookmark?",
-            format!("“{name}” is removed for good — from the site too, if it is public."),
-            "Delete",
-            true,
-            move |_, cx| {
-                let s = app::session(cx);
-                let k = id.clone();
-                let task = farfield_core::spawn(async move { bookmarks::delete(&s, &k, Some(&cid)).await });
-                let _ = me.update(cx, |_, cx| {
+        confirm(cx, "Delete this bookmark?", format!("“{name}”"), "Delete", true, move |_, cx| {
+            let s = app::session(cx);
+            let k = id.clone();
+            let task = farfield_core::spawn(async move { bookmarks::delete(&s, &k, Some(&cid)).await });
+            let _ = me.update(cx, |_, cx| {
                 cx.spawn(async move |this, cx| {
                     let r = task.await;
                     let _ = this.update(cx, |this, cx| match r {
@@ -772,7 +751,7 @@ impl BookmarksWs {
                         Ok(Err(ApiError::Precondition { current, .. })) => {
                             if let Some(f) = this.form.as_mut() {
                                 f.conflict = ext_lists::bookmarks::from_conflict(&current);
-                                f.error = Some("Not deleted: it changed on the server since you opened it. Look at the change first.".into());
+                                f.error = Some("Not deleted — changed on the server.".into());
                             }
                             cx.notify();
                         }
@@ -782,8 +761,7 @@ impl BookmarksWs {
                 })
                 .detach();
             });
-            },
-        );
+        });
     }
 
     fn refresh_meta(&mut self, cx: &mut Context<Self>) {
@@ -824,7 +802,7 @@ impl BookmarksWs {
                         this.reload(cx);
                     }
                     Ok(Err(e @ ApiError::Server { status: 502, .. })) => {
-                        toast(cx, format!("The page couldn't be fetched, so nothing changed. {}", describe(&e)), true)
+                        toast(cx, format!("Couldn't fetch the page. {}", describe(&e)), true)
                     }
                     Ok(Err(e)) => toast(cx, describe(&e), true),
                     Err(e) => toast(cx, e.to_string(), true),
@@ -983,13 +961,13 @@ impl BookmarksWs {
         };
         let body: AnyElement = if rows.is_empty() {
             let msg = if self.loading && !self.loaded {
-                "Loading bookmarks…"
+                "Loading…"
             } else if self.error.is_some() && !self.loaded {
-                "Bookmarks can't be shown until the service answers. ⌘R tries again."
+                "Couldn't load."
             } else if self.items.is_empty() {
-                "No bookmarks yet. ⌘N saves the first one."
+                "No bookmarks yet."
             } else {
-                "Nothing matches this filter."
+                "No matches."
             };
             ui::quiet_state(msg, cx).into_any_element()
         } else {
@@ -1077,19 +1055,7 @@ impl BookmarksWs {
                 .justify_center()
                 .items_center()
                 .gap(S2)
-                .child(
-                    div()
-                        .font_family(FONT_DOC)
-                        .text_size(px(22.))
-                        .text_color(t.ink)
-                        .child("A place for links worth keeping."),
-                )
-                .child(
-                    div()
-                        .text_sm()
-                        .text_color(t.ink_2)
-                        .child("Choose a bookmark to edit it, or press ⌘N to save a new one."),
-                )
+                .child(div().text_sm().text_color(t.ink_2).child("No bookmark selected."))
                 .into_any_element();
         };
         let me = self.me.clone();
@@ -1139,7 +1105,7 @@ impl BookmarksWs {
                             .child(heading),
                     )
                     .child(div().flex().gap(S4).child(ui::chip(state.0, state.1, cx)).child(ui::chip(
-                        if f.public { "public — listed on the site" } else { "private — only you see it" },
+                        if f.public { "public" } else { "private" },
                         if f.public { t.good } else { t.ink_3 },
                         cx,
                     ))),
@@ -1175,24 +1141,17 @@ impl BookmarksWs {
             ));
         }
         col = col
-            .child(kit::switch(
-                "bm-public",
-                "Public",
-                "Shown on the site's bookmarks page. Off keeps it here only.",
-                f.public,
-                cx,
-                {
-                    let me = me.clone();
-                    move |_, cx| {
-                        let _ = me.update(cx, |this, cx| {
-                            if let Some(f) = this.form.as_mut() {
-                                f.public = !f.public;
-                            }
-                            cx.notify();
-                        });
-                    }
-                },
-            ))
+            .child(kit::switch("bm-public", "Public", "", f.public, cx, {
+                let me = me.clone();
+                move |_, cx| {
+                    let _ = me.update(cx, |this, cx| {
+                        if let Some(f) = this.form.as_mut() {
+                            f.public = !f.public;
+                        }
+                        cx.notify();
+                    });
+                }
+            }))
             .child(self.f_notes.clone());
         // actions
         let mut actions = div().flex().gap(S2).pt(S2);
@@ -1242,7 +1201,6 @@ impl BookmarksWs {
 
     /// The server's version beside yours, field by field.
     fn render_conflict(&self, cur: &Bookmark, cx: &mut Context<Self>) -> AnyElement {
-        let t = theme(cx).clone();
         let me = self.me.clone();
         let mine = self.fields(cx);
         let theirs = serde_json::to_value(cur).unwrap_or(Value::Null);
@@ -1297,7 +1255,7 @@ impl BookmarksWs {
                             confirm(
                                 cx,
                                 "Use the server's version?",
-                                "Your unsaved edits to this bookmark are dropped.",
+                                "Your edits are dropped.",
                                 "Use theirs",
                                 true,
                                 move |_, cx| {
@@ -1306,12 +1264,6 @@ impl BookmarksWs {
                             );
                         }
                     })),
-            )
-            .child(
-                div()
-                    .text_xs()
-                    .text_color(t.ink_3)
-                    .child("Reapplying sends only the fields you changed, on top of the server's version."),
             )
             .into_any_element()
     }
@@ -1324,13 +1276,7 @@ impl Workspace for BookmarksWs {
         let me = self.me.clone();
         let mut col = div().flex().flex_col().gap(S2);
         if f.id.is_none() {
-            return Some(
-                col.child(ui::eyebrow("New bookmark", cx))
-                    .child(div().text_sm().text_color(t.ink_2).child(
-                        "After saving, the server visits the page for its title, description, image and icon. They appear here a moment later.",
-                    ))
-                    .into_any_element(),
-            );
+            return Some(col.child(ui::eyebrow("New bookmark", cx)).into_any_element());
         }
         let b = &f.base;
         // the page, as it describes itself
@@ -1344,7 +1290,7 @@ impl Workspace for BookmarksWs {
             }
             (false, Some(Slot::Loading)) => col = col.child(div().w(px(268.)).h(px(140.)).rounded(px(4.)).bg(t.wash)),
             (false, Some(Slot::Failed)) => {
-                col = col.child(div().text_xs().text_color(t.ink_3).child("The page's image couldn't be loaded."))
+                col = col.child(div().text_xs().text_color(t.ink_3).child("Image failed to load."))
             }
             _ => {}
         }
@@ -1366,8 +1312,7 @@ impl Workspace for BookmarksWs {
             col = col.child(div().text_sm().text_color(t.ink_2).child(b.og_description.clone()));
         }
         if b.og_title.is_empty() && b.og_image.is_empty() {
-            col = col
-                .child(div().text_xs().text_color(t.ink_3).child("No page details yet. Refresh asks the page again."));
+            col = col.child(div().text_xs().text_color(t.ink_3).child("No page details."));
         }
         let refreshing = f.refreshing;
         col = col
@@ -1409,14 +1354,11 @@ impl Workspace for BookmarksWs {
                 cx,
             ))
             .child(ui::field_row("ID", ui::mono(b.id.clone(), cx), cx))
-            .child(ui::field_row("CID · the version", ui::mono(b.cid.clone(), cx), cx))
+            .child(ui::field_row("CID", ui::mono(b.cid.clone(), cx), cx))
             .child(ui::field_row(
                 "Saved",
                 ui::mono(format!("{} · created {}", ui::when(&b.updated_at), ui::when(&b.created_at)), cx),
                 cx,
-            ))
-            .child(div().text_xs().text_color(t.ink_3).child(
-                "Admin notes aren't part of the version, so an edit to notes alone can't be checked for conflicts.",
             ))
             .child(ui::rule(cx))
             .child(ui::button("bm-delete", "Delete bookmark…", BtnKind::Danger, cx, move |_, _, cx| {
@@ -1434,10 +1376,8 @@ impl Workspace for BookmarksWs {
     }
 
     fn commands(&self, _cx: &App) -> Vec<(&'static str, String, &'static str)> {
-        let mut v = vec![
-            ("new", "Bookmarks: new bookmark".to_string(), "⌘N"),
-            ("reload", "Bookmarks: reload the list".into(), "⌘R"),
-        ];
+        let mut v =
+            vec![("new", "Bookmarks: new bookmark".to_string(), "⌘N"), ("reload", "Bookmarks: reload".into(), "⌘R")];
         if let Some(f) = &self.form {
             v.push(("save", "Bookmark: save".into(), "⌘S"));
             if f.id.is_some() {
@@ -1447,7 +1387,7 @@ impl Workspace for BookmarksWs {
                 v.push(("delete", "Bookmark: delete…".into(), ""));
             }
             if f.conflict.is_some() {
-                v.push(("reapply", "Bookmark: reapply my changes on the server's version".into(), ""));
+                v.push(("reapply", "Bookmark: reapply my changes".into(), ""));
                 v.push(("theirs", "Bookmark: use the server's version".into(), ""));
             }
         }
