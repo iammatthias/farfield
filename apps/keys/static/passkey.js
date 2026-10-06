@@ -79,6 +79,77 @@
     });
   }
 
+  // ── a native app's sign-in (device.html) ──
+  // Creating a passkey here only stores it; the page comes back asking for
+  // the passkey, and only that assertion approves the app.
+  const devRegister = document.querySelector("[data-device-register]");
+  if (devRegister) {
+    devRegister.addEventListener("click", async () => {
+      devRegister.disabled = true;
+      try {
+        const opts = await post("/passkey/register/begin", { name: devRegister.dataset.name || "" });
+        if (!opts) return;
+        const pk = opts.publicKey;
+        pk.challenge = dec(pk.challenge);
+        pk.user.id = dec(pk.user.id);
+        for (const c of pk.excludeCredentials || []) c.id = dec(c.id);
+        const cred = await navigator.credentials.create({ publicKey: pk });
+        const res = await post("/passkey/register/finish", {
+          id: cred.id,
+          rawId: enc(cred.rawId),
+          type: cred.type,
+          response: {
+            clientDataJSON: enc(cred.response.clientDataJSON),
+            attestationObject: enc(cred.response.attestationObject),
+            transports: cred.response.getTransports ? cred.response.getTransports() : [],
+          },
+          clientExtensionResults: cred.getClientExtensionResults(),
+        });
+        if (!res) return;
+        const u = new URL(location.href);
+        u.searchParams.set("created", "1");
+        location.replace(u.toString());
+      } catch (e) {
+        show(e.name === "InvalidStateError" ? "Already added." :
+             e.name === "NotAllowedError" ? "Cancelled." : e.message);
+      } finally {
+        devRegister.disabled = false;
+      }
+    });
+  }
+
+  const devApprove = document.querySelector("[data-device-approve]");
+  if (devApprove) {
+    devApprove.addEventListener("click", async () => {
+      devApprove.disabled = true;
+      try {
+        const opts = await post("/passkey/device/begin", { ...document.getElementById("device-approve").dataset });
+        if (!opts) return;
+        const pk = opts.publicKey;
+        pk.challenge = dec(pk.challenge);
+        for (const c of pk.allowCredentials || []) c.id = dec(c.id);
+        const cred = await navigator.credentials.get({ publicKey: pk });
+        const res = await post("/passkey/device/finish", {
+          id: cred.id,
+          rawId: enc(cred.rawId),
+          type: cred.type,
+          response: {
+            clientDataJSON: enc(cred.response.clientDataJSON),
+            authenticatorData: enc(cred.response.authenticatorData),
+            signature: enc(cred.response.signature),
+            userHandle: cred.response.userHandle ? enc(cred.response.userHandle) : null,
+          },
+          clientExtensionResults: cred.getClientExtensionResults(),
+        });
+        if (res) location.href = res.redirect;
+      } catch (e) {
+        show(e.name === "NotAllowedError" ? "Cancelled." : e.message);
+      } finally {
+        devApprove.disabled = false;
+      }
+    });
+  }
+
   // ── register ──
   const regForm = document.querySelector("[data-passkey-register]");
   if (regForm) {

@@ -562,13 +562,13 @@ impl Onboarding {
                     .flex()
                     .flex_col()
                     .gap(S4)
-                    .child(div().flex().child(ui::button("passkey", "Sign in with passkey", Kind::Primary, cx, {
+                    .child(crate::signin::view("passkey", cx, {
                         let e = cx.entity();
-                        move |_, _, cx| {
+                        move |cx| {
                             let e = e.clone();
                             crate::signin::run(cx, move |_, cx| e.update(cx, |this, cx| this.recheck_keys(cx)))
                         }
-                    })))
+                    }))
                     .child(div().flex().items_end().gap(S3).child(div().flex_1().child(self.key.clone())).child(
                         ui::button("apply", "Use for all", Kind::Quiet, cx, {
                             let e = cx.entity();

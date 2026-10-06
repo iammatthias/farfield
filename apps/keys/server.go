@@ -170,6 +170,9 @@ func (s *Server) routes() http.Handler {
 		mux.HandleFunc("POST /passkey/register/finish", s.requireFresh(s.handlePasskeyRegisterFinish))
 		mux.HandleFunc("POST /passkeys/{id}/delete", s.requireFresh(s.handlePasskeyDelete))
 		mux.HandleFunc("GET /static/passkey.js", s.handlePasskeyJS)
+		// approving a native app: the passkey is the proof, no session needed
+		mux.HandleFunc("POST /passkey/device/begin", s.handleDeviceApproveBegin)
+		mux.HandleFunc("POST /passkey/device/finish", s.handleDeviceApproveFinish)
 	}
 
 	// Native-app sign-in (device.go). /device/token is private ingress only.

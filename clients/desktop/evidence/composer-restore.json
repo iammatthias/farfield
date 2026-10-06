@@ -1,1 +1,1 @@
-[{"wait":1500},{"key":"cmd-2"},{"until":"feed-composer-restored","timeout":5000},{"wait":1500},{"snap":"02-restored-after-relaunch"},{"quit":true}]
+[{"wait":1500},{"key":"cmd-k"},{"wait":200},{"type":"Go to Feed"},{"key":"enter"},{"until":"feed-composer-restored","timeout":5000},{"wait":1500},{"snap":"02-restored-after-relaunch"},{"quit":true}]

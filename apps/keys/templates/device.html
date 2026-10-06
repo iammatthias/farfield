@@ -1,6 +1,9 @@
 {{define "title"}}Sign in · farfield keys{{end}}
-{{/* The native-app consent page (device.go). One question, two buttons —
-     or, for a request that could never succeed, why, and no way onward. */}}
+{{define "head"}}{{if .Step}}<script src="/static/passkey.js?v={{.AssetVer}}" defer></script>{{end}}{{end}}
+{{/* The native-app consent page (device.go). With passkeys on it is two
+     steps at most: create a passkey (first time only — that approves
+     nothing), then approve with it. Without them, the session's Allow form.
+     A request that could never succeed says why, with no way onward. */}}
 {{define "content"}}
   <section class="login">
     <div class="login-mark" aria-hidden="true">{{.Mark}}</div>
@@ -9,20 +12,36 @@
       <p class="error">{{.}}</p>
     {{else}}
       <h1>Sign in Farfield on {{.Req.Device}}?</h1>
-      <form method="post" action="/device/authorize">
-        <input type="hidden" name="client_id" value="{{.Client}}">
-        <input type="hidden" name="redirect_uri" value="{{.Req.RedirectURI}}">
-        <input type="hidden" name="code_challenge" value="{{.Req.Challenge}}">
-        <input type="hidden" name="code_challenge_method" value="S256">
-        <input type="hidden" name="state" value="{{.Req.State}}">
-        <input type="hidden" name="device" value="{{.Req.Device}}">
+      <div data-passkey-error></div>
+      {{if eq .Step "create"}}
+        <p class="notice">First, create a passkey. Then you'll use it to approve.</p>
         <div class="actions">
-          <button type="submit" name="action" value="allow">Allow</button>
+          <button class="primary" type="button" data-device-register data-name="{{.Req.Device}}">Create a passkey</button>
         </div>
-        <div class="actions">
-          <button class="quiet" type="submit" name="action" value="deny">Deny</button>
+      {{else if eq .Step "approve"}}
+        {{if .Created}}<p class="notice">Passkey created. Now use it to approve.</p>{{end}}
+        <div class="actions" id="device-approve"
+             data-client_id="{{.Client}}" data-redirect_uri="{{.Req.RedirectURI}}"
+             data-code_challenge="{{.Req.Challenge}}" data-code_challenge_method="S256"
+             data-state="{{.Req.State}}" data-device="{{.Req.Device}}">
+          <button class="primary" type="button" data-device-approve>Approve with passkey</button>
         </div>
-      </form>
+      {{else}}
+        <form method="post" action="/device/authorize">
+          <input type="hidden" name="client_id" value="{{.Client}}">
+          <input type="hidden" name="redirect_uri" value="{{.Req.RedirectURI}}">
+          <input type="hidden" name="code_challenge" value="{{.Req.Challenge}}">
+          <input type="hidden" name="code_challenge_method" value="S256">
+          <input type="hidden" name="state" value="{{.Req.State}}">
+          <input type="hidden" name="device" value="{{.Req.Device}}">
+          <div class="actions">
+            <button type="submit" name="action" value="allow">Allow</button>
+          </div>
+        </form>
+      {{end}}
+      <div class="actions">
+        <a class="btn quiet" href="{{.Deny}}">Deny</a>
+      </div>
     {{end}}
   </section>
 {{end}}

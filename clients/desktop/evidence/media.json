@@ -1,4 +1,4 @@
-[{"wait":1500},{"key":"cmd-1"},{"wait":1200},
+[{"wait":1500},{"key":"cmd-k"},{"wait":200},{"type":"Go to Content"},{"key":"enter"},{"wait":1200},
  {"note":"scenario: media publishing"},
  {"key":"cmd-n"},{"wait":600},{"type":"A field note with a photograph"},{"key":"enter"},
  {"type":"Written in the native client. The photo below was dropped onto the document; blobs converted it from HEIC and stripped its location before hashing.\n"},

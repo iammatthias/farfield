@@ -1,4 +1,4 @@
-[{"wait":1500},{"key":"cmd-1"},{"wait":1500},
+[{"wait":1500},{"key":"cmd-k"},{"wait":200},{"type":"Go to Content"},{"key":"enter"},{"wait":1500},
  {"note":"scenario: conflict"},
  {"key":"cmd-f"},{"type":"photograph"},{"wait":300},{"key":"down"},{"wait":1500},{"key":"enter"},{"key":"cmd-down"},
  {"type":"\nA closing line written on this Mac."},{"wait":800},

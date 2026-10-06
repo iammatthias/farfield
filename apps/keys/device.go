@@ -16,6 +16,7 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"errors"
+	"log/slog"
 	"net/http"
 	"net/url"
 	"strconv"
@@ -24,6 +25,8 @@ import (
 	"unicode"
 	"unicode/utf8"
 
+	"github.com/go-webauthn/webauthn/protocol"
+	"github.com/go-webauthn/webauthn/webauthn"
 	"github.com/iammatthias/farfield/lib/keys"
 	"github.com/iammatthias/farfield/lib/web"
 )
@@ -161,23 +164,59 @@ func (s *Server) deviceError(w http.ResponseWriter, msg string) {
 // handleDeviceAuthorize shows the confirm page. Parameters are checked before
 // the session, so a bad request is a 400 for everyone and the login page is
 // never asked to carry a request that could not succeed.
+//
+// With passkeys on, a browser session never approves a device by itself:
+// approval is a passkey assertion made on this page (handleDeviceApprove*).
+// A session is needed only to create the first passkey, and it must be fresh
+// — the same bar as adding one from /passkeys. Creating it approves nothing;
+// the page then asks for the passkey like any later sign-in.
 func (s *Server) handleDeviceAuthorize(w http.ResponseWriter, r *http.Request) {
 	req, err := parseDeviceRequest(r.URL.Query())
 	if err != nil {
 		s.deviceError(w, err.Error())
 		return
 	}
-	if !s.auth.SessionValid(r) {
-		http.Redirect(w, r, "/login?"+url.Values{"next": {r.URL.RequestURI()}}.Encode(),
-			http.StatusSeeOther)
+	denyQ := url.Values{"error": {"access_denied"}}
+	if req.State != "" {
+		denyQ.Set("state", req.State)
+	}
+	data := map[string]any{"Req": req, "Client": deviceClientID, "Deny": withQuery(req.RedirectURI, denyQ)}
+	if s.wa == nil {
+		if !s.auth.SessionValid(r) {
+			http.Redirect(w, r, "/login?"+url.Values{"next": {r.URL.RequestURI()}}.Encode(),
+				http.StatusSeeOther)
+			return
+		}
+		w.Header().Set("Cache-Control", "no-store")
+		s.rd.Render(w, "device.html", data)
 		return
 	}
+	var n int
+	if err := s.db.QueryRow(`SELECT COUNT(*) FROM passkeys`).Scan(&n); err != nil {
+		s.fail(w, "count passkeys", err)
+		return
+	}
+	if n == 0 {
+		if !s.auth.SessionFresh(r, freshWindow) {
+			q := url.Values{"next": {r.URL.RequestURI()}}
+			if s.auth.SessionValid(r) {
+				q.Set("reauth", "1")
+			}
+			http.Redirect(w, r, "/login?"+q.Encode(), http.StatusSeeOther)
+			return
+		}
+		data["Step"] = "create"
+	} else {
+		data["Step"] = "approve"
+		data["Created"] = r.URL.Query().Get("created") != ""
+	}
 	w.Header().Set("Cache-Control", "no-store")
-	s.rd.Render(w, "device.html", map[string]any{"Req": req, "Client": deviceClientID})
+	s.rd.Render(w, "device.html", data)
 }
 
 // handleDeviceDecide is the confirm form's POST, behind RequireSession (and
-// so its cross-origin check).
+// so its cross-origin check). It approves only when passkeys are off; with
+// them on, Allow is the passkey ceremony and this answers Deny alone.
 func (s *Server) handleDeviceDecide(w http.ResponseWriter, r *http.Request) {
 	if err := r.ParseForm(); err != nil {
 		s.deviceError(w, "bad form")
@@ -197,14 +236,99 @@ func (s *Server) handleDeviceDecide(w http.ResponseWriter, r *http.Request) {
 		http.Redirect(w, r, withQuery(req.RedirectURI, q), http.StatusSeeOther)
 		return
 	}
-	code := s.grants.put(grant{
+	if s.wa != nil {
+		s.deviceError(w, "approve with your passkey")
+		return
+	}
+	q.Set("code", s.grantFor(req))
+	w.Header().Set("Cache-Control", "no-store")
+	http.Redirect(w, r, withQuery(req.RedirectURI, q), http.StatusSeeOther)
+}
+
+func (s *Server) grantFor(req deviceRequest) string {
+	return s.grants.put(grant{
 		challenge:   req.Challenge,
 		redirectURI: req.RedirectURI,
 		device:      req.Device,
 	})
-	q.Set("code", code)
+}
+
+// handleDeviceApproveBegin starts the passkey assertion that approves a
+// device. The body is the authorize request's parameters, re-validated here.
+// No session is needed or opened: the passkey is the proof.
+func (s *Server) handleDeviceApproveBegin(w http.ResponseWriter, r *http.Request) {
+	if !s.beginRL.Allow(web.ClientIP(r)) || s.auth.LoginBlocked(r) {
+		web.WriteError(w, http.StatusTooManyRequests, "too many attempts")
+		return
+	}
+	var body map[string]string
+	_ = json.NewDecoder(http.MaxBytesReader(w, r.Body, 8<<10)).Decode(&body)
+	v := url.Values{}
+	for k, val := range body {
+		v.Set(k, val)
+	}
+	req, err := parseDeviceRequest(v)
+	if err != nil {
+		web.WriteError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	o, err := s.owner()
+	if err != nil {
+		s.fail(w, "load passkeys", err)
+		return
+	}
+	if len(o.creds) == 0 {
+		web.WriteError(w, http.StatusConflict, "no passkeys")
+		return
+	}
+	opts, data, err := s.wa.BeginLogin(o, webauthn.WithUserVerification(protocol.VerificationRequired))
+	if err != nil {
+		s.fail(w, "begin device approval", err)
+		return
+	}
+	s.startCeremony(w, ceremony{kind: "device", data: *data, device: req})
 	w.Header().Set("Cache-Control", "no-store")
-	http.Redirect(w, r, withQuery(req.RedirectURI, q), http.StatusSeeOther)
+	web.WriteJSON(w, http.StatusOK, opts)
+}
+
+// handleDeviceApproveFinish checks the assertion and, only then, issues the
+// one-time code — answering with the loopback URL to send the browser to.
+func (s *Server) handleDeviceApproveFinish(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Cache-Control", "no-store")
+	if s.auth.LoginBlocked(r) {
+		web.WriteError(w, http.StatusTooManyRequests, "too many attempts")
+		return
+	}
+	c, ok := s.endCeremony(w, r, "device")
+	if !ok {
+		s.auth.LoginFailed(r)
+		web.WriteError(w, http.StatusBadRequest, "expired — try again")
+		return
+	}
+	o, err := s.owner()
+	if err != nil {
+		s.fail(w, "load passkeys", err)
+		return
+	}
+	r.Body = http.MaxBytesReader(w, r.Body, 64<<10)
+	cred, err := s.wa.FinishLogin(o, c.data, r)
+	if err == nil && cred.Authenticator.CloneWarning {
+		err = errors.New("sign count regressed")
+	}
+	if err != nil {
+		s.auth.LoginFailed(r)
+		slog.Warn("device approval refused", "err", err)
+		web.WriteError(w, http.StatusUnauthorized, "passkey not accepted")
+		return
+	}
+	if err := s.touchPasskey(cred); err != nil {
+		slog.Warn("passkey: could not record use", "err", err)
+	}
+	q := url.Values{"code": {s.grantFor(c.device)}}
+	if c.device.State != "" {
+		q.Set("state", c.device.State)
+	}
+	web.WriteJSON(w, http.StatusOK, map[string]string{"redirect": withQuery(c.device.RedirectURI, q)})
 }
 
 // tokenRequest is the /device/token body, form-encoded or JSON.
@@ -247,10 +371,22 @@ func (s *Server) handleDeviceToken(w http.ResponseWriter, r *http.Request) {
 		web.WriteError(w, http.StatusBadRequest, "invalid_grant")
 		return
 	}
-	token, k, err := s.ks.Mint("Farfield on "+g.device, keys.AppAny, keys.ScopeWrite, time.Time{})
+	name := "Farfield on " + g.device
+	token, k, err := s.ks.Mint(name, keys.AppAny, keys.ScopeWrite, time.Time{})
 	if err != nil {
 		s.fail(w, "mint device key", err)
 		return
+	}
+	// One key per device: signing in again replaces the last one rather than
+	// leaving it live and forgotten.
+	if all, err := s.ks.List(); err == nil {
+		for _, old := range all {
+			if old.ID != k.ID && old.Name == name && old.Active() {
+				if _, err := s.ks.Revoke(old.ID); err != nil {
+					slog.Warn("device: could not revoke the previous key", "err", err)
+				}
+			}
+		}
 	}
 	w.Header().Set("Pragma", "no-cache")
 	web.WriteJSON(w, http.StatusOK, map[string]string{

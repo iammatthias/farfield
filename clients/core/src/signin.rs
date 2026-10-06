@@ -15,6 +15,7 @@ use reqwest::Method;
 use sha2::{Digest, Sha256};
 use std::io::{Read, Write};
 use std::net::TcpListener;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::{Duration, Instant};
 use url::Url;
 
@@ -100,6 +101,8 @@ pub enum SignInError {
     TimedOut,
     #[error("sign-in was declined")]
     Denied,
+    #[error("sign-in was cancelled")]
+    Cancelled,
     #[error("sign-in reply didn't match this request")]
     Mismatch,
     #[error("{0}")]
@@ -120,9 +123,17 @@ impl Pending {
     /// back with the code. Accepts connections until one carries the
     /// callback (a browser may probe for /favicon.ico first), then closes.
     pub fn wait_for_code(&self, timeout: Duration) -> Result<String, SignInError> {
+        self.wait_for_code_or(timeout, &AtomicBool::new(false))
+    }
+
+    /// `wait_for_code`, ending early with `Cancelled` once `cancel` is set.
+    pub fn wait_for_code_or(&self, timeout: Duration, cancel: &AtomicBool) -> Result<String, SignInError> {
         let deadline = Instant::now() + timeout;
         self.listener.set_nonblocking(true).map_err(|e| SignInError::Io(e.to_string()))?;
         loop {
+            if cancel.load(Ordering::Relaxed) {
+                return Err(SignInError::Cancelled);
+            }
             if Instant::now() >= deadline {
                 return Err(SignInError::TimedOut);
             }

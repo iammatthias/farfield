@@ -1,6 +1,6 @@
-[{"wait":1500},{"key":"cmd-1"},{"wait":1500},
+[{"wait":1500},{"key":"cmd-k"},{"wait":200},{"type":"Go to Content"},{"key":"enter"},{"wait":1500},
  {"note":"scenario: insert a blob into the open document"},
  {"key":"cmd-f"},{"type":"photograph"},{"wait":300},{"key":"down"},{"wait":1500},{"key":"enter"},{"key":"cmd-down"},
- {"key":"cmd-3"},{"wait":2500},{"key":"cmd-f"},{"key":"down"},{"wait":800},{"snap":"01-blob-selected"},
+ {"key":"cmd-k"},{"wait":200},{"type":"Go to Blobs"},{"key":"enter"},{"wait":2500},{"key":"cmd-f"},{"key":"down"},{"wait":800},{"snap":"01-blob-selected"},
  {"key":"cmd-shift-p"},{"type":"insert into open"},{"wait":300},{"key":"enter"},{"until":"blob-inserted","timeout":5000},{"wait":2500},{"snap":"02-inserted"},
  {"quit":true}]

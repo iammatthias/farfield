@@ -1,4 +1,4 @@
-[{"wait":1500},{"key":"cmd-1"},{"wait":2500},
+[{"wait":1500},{"key":"cmd-k"},{"wait":200},{"type":"Go to Content"},{"key":"enter"},{"wait":2500},
  {"note":"scenario: draft recovery after relaunch"},
  {"snap":"01-relaunch-drafts-listed"},
  {"key":"cmd-f"},{"type":"photograph"},{"wait":300},{"key":"down"},{"wait":1500},{"snap":"02-draft-restored"},

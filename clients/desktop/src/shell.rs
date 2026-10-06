@@ -29,15 +29,6 @@ actions!(
         PaletteDown,
         ConfirmAccept,
         ConfirmCancel,
-        Ws1,
-        Ws2,
-        Ws3,
-        Ws4,
-        Ws5,
-        Ws6,
-        Ws7,
-        Ws8,
-        Ws9,
         CycleTheme,
         NextWs,
         PrevWs
@@ -61,15 +52,6 @@ pub fn bind_keys(cx: &mut App) {
         KeyBinding::new("escape", ConfirmCancel, Some("Confirm")),
         KeyBinding::new("up", PaletteUp, Some("Palette")),
         KeyBinding::new("down", PaletteDown, Some("Palette")),
-        KeyBinding::new("cmd-1", Ws1, s),
-        KeyBinding::new("cmd-2", Ws2, s),
-        KeyBinding::new("cmd-3", Ws3, s),
-        KeyBinding::new("cmd-4", Ws4, s),
-        KeyBinding::new("cmd-5", Ws5, s),
-        KeyBinding::new("cmd-6", Ws6, s),
-        KeyBinding::new("cmd-7", Ws7, s),
-        KeyBinding::new("cmd-8", Ws8, s),
-        KeyBinding::new("cmd-9", Ws9, s),
         KeyBinding::new("ctrl-tab", NextWs, s),
         KeyBinding::new("ctrl-shift-tab", PrevWs, s),
         KeyBinding::new("cmd-alt-t", CycleTheme, s),
@@ -288,12 +270,6 @@ impl Shell {
         self.open.iter().find(|h| h.id == self.active)
     }
 
-    fn nth(&mut self, n: usize, w: &mut Window, cx: &mut Context<Self>) {
-        if let Some(id) = self.entries.get(n).map(|e| e.id) {
-            self.switch(id, w, cx);
-        }
-    }
-
     fn open_palette(&mut self, _: &OpenPalette, w: &mut Window, cx: &mut Context<Self>) {
         let f = cx.new(|cx| TextField::new(w, cx, "", "Go to, run, or search…"));
         cx.subscribe_in(&f, w, |this, _f, e: &FieldEvent, w, cx| match e {
@@ -326,15 +302,17 @@ impl Shell {
         cx.notify();
     }
 
+    fn nth(&mut self, n: usize, w: &mut Window, cx: &mut Context<Self>) {
+        if let Some(id) = self.entries.get(n).map(|e| e.id) {
+            self.switch(id, w, cx);
+        }
+    }
+
     fn palette_items(&self, cx: &mut Context<Self>) -> Vec<PaletteItem> {
         let mut items = Vec::new();
-        for (i, e) in self.entries.iter().enumerate() {
+        for e in &self.entries {
             let id = e.id;
-            items.push(PaletteItem::new(
-                format!("Go to {}", e.title),
-                if i < 9 { format!("⌘{}", i + 1) } else { String::new() },
-                move |_, cx| goto(cx, id),
-            ));
+            items.push(PaletteItem::new(format!("Go to {}", e.title), String::new(), move |_, cx| goto(cx, id)));
         }
         if let Some(h) = self.active_handle() {
             items.extend((h.palette)(cx));
@@ -387,6 +365,11 @@ impl Shell {
             self.close_palette(w, cx);
             log("palette", &[("run", &it.title)]);
             (it.run)(w, cx);
+            // a "Go to" is ours to act on now, not whenever the next frame is drawn
+            if let Some(id) = cx.global_mut::<Overlay>().goto.take() {
+                self.switch(&id, w, cx);
+            }
+            cx.notify();
             self.reclaim_focus_soon(w, cx);
         }
     }
@@ -421,7 +404,7 @@ impl Shell {
             .bg(t.paper_2)
             .overflow_y_scroll()
             .py(S2)
-            .children(self.entries.iter().enumerate().map(|(i, e)| {
+            .children(self.entries.iter().map(|e| {
                 let selected = e.id == self.active;
                 let h = health.get(e.service).cloned().unwrap_or(Health::Unknown);
                 let dot = match h {
@@ -451,9 +434,6 @@ impl Shell {
                     .child(div().w(px(6.)).h(px(6.)).rounded_full().bg(dot))
                     .child(div().flex_1().child(e.title))
                     .when(dirty, |d| d.child(div().text_xs().text_color(t.signal).child("●")))
-                    .when(i < 9, |d| {
-                        d.child(div().text_xs().font_family(FONT_MONO).text_color(t.ink_3).child(format!("⌘{}", i + 1)))
-                    })
                     .on_click(cx.listener(move |this, _, w, cx| this.switch(id, w, cx)))
             }))
     }
@@ -811,15 +791,6 @@ impl Render for Shell {
                 let i = this.entries.iter().position(|e| e.id == this.active).unwrap_or(0);
                 this.nth((i + this.entries.len() - 1) % this.entries.len(), w, cx)
             }))
-            .on_action(cx.listener(|this, _: &Ws1, w, cx| this.nth(0, w, cx)))
-            .on_action(cx.listener(|this, _: &Ws2, w, cx| this.nth(1, w, cx)))
-            .on_action(cx.listener(|this, _: &Ws3, w, cx| this.nth(2, w, cx)))
-            .on_action(cx.listener(|this, _: &Ws4, w, cx| this.nth(3, w, cx)))
-            .on_action(cx.listener(|this, _: &Ws5, w, cx| this.nth(4, w, cx)))
-            .on_action(cx.listener(|this, _: &Ws6, w, cx| this.nth(5, w, cx)))
-            .on_action(cx.listener(|this, _: &Ws7, w, cx| this.nth(6, w, cx)))
-            .on_action(cx.listener(|this, _: &Ws8, w, cx| this.nth(7, w, cx)))
-            .on_action(cx.listener(|this, _: &Ws9, w, cx| this.nth(8, w, cx)))
             .on_mouse_move(cx.listener(Self::on_drag_move))
             .on_mouse_up(MouseButton::Left, cx.listener(Self::on_drag_end))
             .when(dragging, |d| d.cursor_col_resize())

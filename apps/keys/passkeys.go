@@ -160,10 +160,12 @@ func (s *Server) owner() (owner, error) {
 
 // ceremony is the server half of a register or login in progress.
 type ceremony struct {
-	kind string // "login" | "register"
+	kind string // "login" | "register" | "device"
 	data webauthn.SessionData
 	name string // register: the passkey's label
 	next string // login: where to go after
+	// device: the authorize request a passkey approval answers
+	device deviceRequest
 }
 
 func (s *Server) startCeremony(w http.ResponseWriter, c ceremony) {

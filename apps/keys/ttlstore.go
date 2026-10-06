@@ -83,3 +83,10 @@ func (s *ttlStore[T]) take(id string) (T, bool) {
 	}
 	return e.v, true
 }
+
+// len is how many entries are held, expired or not — for tests.
+func (s *ttlStore[T]) len() int {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return len(s.m)
+}

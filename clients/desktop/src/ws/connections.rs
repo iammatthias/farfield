@@ -565,9 +565,9 @@ impl Connections {
             .flex()
             .flex_col()
             .gap(S4)
-            .child(div().flex().child(ui::button("passkey", "Sign in with passkey", Kind::Primary, cx, {
+            .child(crate::signin::view("passkey", cx, {
                 let e = cx.entity();
-                move |_, _, cx| {
+                move |cx| {
                     let e = e.clone();
                     crate::signin::run(cx, move |ok, cx| {
                         if ok {
@@ -575,7 +575,7 @@ impl Connections {
                         }
                     })
                 }
-            })))
+            }))
             .child(
                 div()
                     .flex()
