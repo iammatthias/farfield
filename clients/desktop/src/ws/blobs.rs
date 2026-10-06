@@ -525,7 +525,9 @@ impl BlobsWs {
         let Some(m) = self.selected_meta() else { return };
         match blobs::public_url(&app::session(cx), &m.cid) {
             Some(u) => self.copy(u, "the public link", cx),
-            None => toast(cx, "This profile has no public address for blobs — add one in Connections.", true),
+            None => {
+                toast(cx, "This profile has no public address for blobs — add one in Settings → Fleet address.", true)
+            }
         }
     }
 

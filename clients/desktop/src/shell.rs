@@ -161,6 +161,8 @@ pub struct Shell {
     palette_sel: usize,
     confirm_focus: FocusHandle,
     onboarding: Option<Entity<crate::ws::onboarding::Onboarding>>,
+    /// Frames in a row that focus has sat on something not drawn.
+    orphaned_focus: u8,
     _subs: Vec<Subscription>,
 }
 
@@ -178,6 +180,7 @@ impl Shell {
             palette_sel: 0,
             confirm_focus: cx.focus_handle(),
             onboarding: None,
+            orphaned_focus: 0,
             _subs: Vec::new(),
         };
         this.switch(&active, w, cx);
@@ -203,7 +206,7 @@ impl Shell {
                 let has_key = session.has_credential(&svc);
                 let probe = farfield_core::spawn(async move { farfield_core::api::status(&s, &name).await });
                 let h = match probe.await {
-                    Ok(Ok(_)) if has_key || matches!(svc.as_str(), "daily" | "apex") => Health::Up,
+                    Ok(Ok(_)) if has_key || farfield_core::api::probe_path(&svc).is_none() => Health::Up,
                     Ok(Ok(_)) => Health::NoAuth,
                     Ok(Err(e)) => Health::Down(e.to_string()),
                     Err(e) => Health::Down(e.to_string()),
@@ -240,6 +243,9 @@ impl Shell {
             self.open.push(h);
         }
         self.active = id.into();
+        // focus left in the workspace being hidden would leave keystrokes with
+        // no path to the shell's bindings; take it back
+        w.focus(&self.focus);
         cx.global_mut::<AppState>().prefs.workspace = id.into();
         state(cx).save_prefs();
         log("workspace", &[("id", id)]);
@@ -253,6 +259,24 @@ impl Shell {
         self.open.retain(|h| h.id == "connections");
         self.active.clear();
         self.switch(&keep, w, cx);
+    }
+
+    /// After handing a keystroke to a workspace, make sure focus landed on
+    /// something drawn; a workspace that focuses a field it isn't showing
+    /// (an empty state, a closed form) would otherwise strand the keyboard.
+    fn reclaim_focus_soon(&self, w: &mut Window, cx: &mut Context<Self>) {
+        cx.spawn_in(w, async move |this, cx| {
+            cx.background_executor().timer(Duration::from_millis(80)).await;
+            let _ = this.update_in(cx, |this, w, cx| {
+                if !this.focus.contains_focused(w, cx)
+                    && this.palette.is_none()
+                    && cx.global::<Overlay>().confirm.is_none()
+                {
+                    w.focus(&this.focus);
+                }
+            });
+        })
+        .detach();
     }
 
     fn active_handle(&self) -> Option<&Handle> {
@@ -358,6 +382,7 @@ impl Shell {
             self.close_palette(w, cx);
             log("palette", &[("run", &it.title)]);
             (it.run)(w, cx);
+            self.reclaim_focus_soon(w, cx);
         }
     }
 
@@ -680,6 +705,21 @@ impl Render for Shell {
                 .into_any_element();
         }
         self.onboarding = None;
+        // Focus on an element that is no longer drawn (a field in a hidden
+        // panel, a form that closed) strands the keyboard: no shortcut can
+        // reach the shell. If it stays stranded past a frame (a field created
+        // this frame is not in the tree until the next), take focus back.
+        if !self.focus.contains_focused(w, cx) && cx.global::<Overlay>().confirm.is_none() && self.palette.is_none() {
+            self.orphaned_focus = self.orphaned_focus.saturating_add(1);
+            if self.orphaned_focus > 2 {
+                w.focus(&self.focus);
+                self.orphaned_focus = 0;
+            } else {
+                cx.notify();
+            }
+        } else {
+            self.orphaned_focus = 0;
+        }
         // a confirmation takes the keyboard: Enter confirms, Esc cancels
         if cx.global::<Overlay>().confirm.is_some() && !self.confirm_focus.is_focused(w) {
             w.focus(&self.confirm_focus);
@@ -730,11 +770,13 @@ impl Render for Shell {
                 if let Some(h) = this.active_handle() {
                     (h.focus_search)(w, cx)
                 }
+                this.reclaim_focus_soon(w, cx);
             }))
             .on_action(cx.listener(|this, _: &NewItem, w, cx| {
                 if let Some(h) = this.active_handle() {
                     (h.new_item)(w, cx)
                 }
+                this.reclaim_focus_soon(w, cx);
             }))
             .on_action(cx.listener(|this, _: &Save, w, cx| {
                 if let Some(h) = this.active_handle() {
@@ -891,4 +933,17 @@ impl Focusable for Shell {
 #[allow(dead_code)]
 fn _px(p: Pixels) -> f32 {
     f32::from(p)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::fuzzy;
+
+    #[test]
+    fn palette_ranks_the_named_target_first() {
+        let q = "go to switchboard";
+        let sw = fuzzy(q, "go to switchboard").unwrap();
+        assert!(fuzzy(q, "go to pulse").is_none_or(|p| p < sw), "pulse outranks switchboard");
+        assert!(fuzzy("go to keys", "go to keys").unwrap() > fuzzy("go to keys", "settings: keys").unwrap_or(i32::MIN));
+    }
 }

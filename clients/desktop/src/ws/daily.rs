@@ -551,7 +551,8 @@ impl DailyWs {
                 let aspect = pic.w as f32 / pic.h.max(1) as f32;
                 // tall images are held to a reading height; wide ones take the width
                 // explicit sizes: a held height, the width following the aspect (contained)
-                let h = if aspect >= 1.6 { 520. } else { 600. };
+                // never enlarged past its own pixels (at 2x): a small image stays crisp
+                let h = (if aspect >= 1.6 { 520f32 } else { 600f32 }).min(pic.h as f32 / 2.0).max(120.);
                 let hero = img(pic.img.clone()).object_fit(ObjectFit::Contain).h(px(h)).w(px(h * aspect)).max_w_full();
                 frame(hero.into_any_element())
             }

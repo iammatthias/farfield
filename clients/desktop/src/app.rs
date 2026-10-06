@@ -194,7 +194,7 @@ pub fn describe(e: &ApiError) -> String {
             "The connection dropped mid-save. It's kept as pending and will be checked before anything is resent."
                 .into()
         }
-        ApiError::Unauthorized(s) => format!("Not signed in to {s}: add or replace its key in Connections."),
+        ApiError::Unauthorized(s) => format!("Not signed in to {s}: add or replace its key in Settings → Keys."),
         ApiError::Precondition { .. } => "Changed on the server since you opened it.".into(),
         ApiError::Unavailable(m) => format!("Unavailable: {m}"),
         other => other.to_string(),

@@ -135,7 +135,7 @@ impl BackupWs {
         let (head, body) = match e {
             ApiError::Unauthorized(_) => (
                 "Backup needs its key.",
-                "The snapshot registry answers BACKUP_API_KEY only — minted keys don't open it. Add the key in Connections.".to_string(),
+                "The snapshot registry answers BACKUP_API_KEY only — minted keys don't open it. Add the key in Settings → Keys.".to_string(),
             ),
             ApiError::Unavailable(_) => (
                 "Backup's read API is switched off.",
@@ -159,7 +159,7 @@ impl BackupWs {
                     .flex()
                     .gap(S2)
                     .when(e.is_auth(), |d| {
-                        d.child(ui::button("conn", "Open Connections", BtnKind::Primary, cx, |_, _, cx| {
+                        d.child(ui::button("conn", "Open Settings", BtnKind::Primary, cx, |_, _, cx| {
                             goto(cx, "connections")
                         }))
                     })

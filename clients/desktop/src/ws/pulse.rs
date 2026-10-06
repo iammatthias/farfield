@@ -276,7 +276,7 @@ impl PulseWs {
         let (head, body) = match e {
             ApiError::Unauthorized(_) => (
                 "Pulse needs its read key.",
-                "Pulse answers a scoped read key (PULSE_READ_KEY on the server) and nothing else — the fleet's write keys don't open it. Paste the key in Connections, or use the console in your browser.",
+                "Pulse answers a scoped read key (PULSE_READ_KEY on the server) and nothing else — the fleet's write keys don't open it. Paste the key in Settings → Keys, or use the console in your browser.",
             ),
             ApiError::Offline(_) => ("Pulse can't be reached.", "It's offline or your tailnet is down. The other workspaces keep working; ⌘R tries again."),
             _ => ("Pulse didn't answer as expected.", ""),
@@ -296,7 +296,7 @@ impl PulseWs {
                     .gap(S2)
                     .pt(S2)
                     .when(e.is_auth(), |d| {
-                        d.child(ui::button("to-conn", "Open Connections", BtnKind::Primary, cx, |_, _, cx| {
+                        d.child(ui::button("to-conn", "Open Settings", BtnKind::Primary, cx, |_, _, cx| {
                             goto(cx, "connections")
                         }))
                     })

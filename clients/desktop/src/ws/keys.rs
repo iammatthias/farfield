@@ -37,7 +37,7 @@ impl Workspace for KeysWs {
     fn commands(&self, _cx: &App) -> Vec<(&'static str, String, &'static str)> {
         vec![
             ("console", "Keys: open the keys console (browser)".into(), ""),
-            ("paste", "Keys: paste a new key in Connections".into(), "⌘,"),
+            ("paste", "Keys: paste a new key in Settings".into(), "⌘,"),
         ]
     }
 
@@ -136,14 +136,14 @@ impl Render for KeysWs {
                 ))
                 .child(div().flex().flex_col().child(scope("read", "see private things: drafts, admin lists, logs")).child(scope("upload", "add media and files, nothing else")).child(scope("write", "create, change and delete — what this app uses for editing")))
                 .child(para(
-                    "A minted token is shown once, in the console. Copy it there, then paste it into Connections for that service; it is stored in your Keychain for this profile and this address only. The administrator password is typed in the browser — this app never asks for it and never stores it.",
+                    "A minted token is shown once, in the console. Copy it there, then paste it into Settings → Keys for that service; it is stored in your Keychain for this profile and this address only. The administrator password is typed in the browser — this app never asks for it and never stores it.",
                 ))
                 .child(
                     div()
                         .flex()
                         .gap(S2)
                         .child(ui::button("console", "Open the keys console", BtnKind::Primary, cx, |_, _, cx| crate::ws::connections::open_console(cx, "keys")))
-                        .child(ui::button("paste", "Paste a key in Connections", BtnKind::Quiet, cx, |_, _, cx| goto(cx, "connections"))),
+                        .child(ui::button("paste", "Paste a key in Settings", BtnKind::Quiet, cx, |_, _, cx| goto(cx, "connections"))),
                 )
                 .child(div().pt(S3).child(ui::eyebrow(format!("Keys in “{}”", session.profile.name), cx)))
                 .child(rows)

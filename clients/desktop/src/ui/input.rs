@@ -549,8 +549,10 @@ impl Element for FieldElement {
         let cur_x = line.x_for_index(if input.content.is_empty() { 0 } else { map(input.cursor()) });
         // keep the caret in view: scroll by whole steps, never jitter
         let width = bounds.size.width;
-        let mut scroll = input.scroll_x;
-        if cur_x - scroll > width - px(2.) {
+        // an unfocused field shows the start of its text
+        let focused = input.focus.is_focused(w);
+        let mut scroll = if focused { input.scroll_x } else { px(0.) };
+        if focused && cur_x - scroll > width - px(2.) {
             scroll = cur_x - width + px(24.);
         } else if cur_x < scroll {
             scroll = (cur_x - px(24.)).max(px(0.));

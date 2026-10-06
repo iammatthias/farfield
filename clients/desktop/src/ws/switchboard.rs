@@ -348,11 +348,11 @@ impl SwitchboardWs {
                         .max_w(px(560.))
                         .child(div().text_lg().text_color(t.ink).child(if auth { "Switchboard needs its write key." } else { "Switchboard can't be read right now." }))
                         .child(div().text_sm().text_color(t.ink_2).child(if auth {
-                            "The message log is private: it answers the write key only, and only over your tailnet. Add the key in Connections.".to_string()
+                            "The message log is private: it answers the write key only, and only over your tailnet. Add the key in Settings → Keys.".to_string()
                         } else {
                             describe(e)
                         }))
-                        .when(auth, |d| d.child(div().child(ui::button("conn", "Open Connections", BtnKind::Primary, cx, |_, _, cx| goto(cx, "connections")))))
+                        .when(auth, |d| d.child(div().child(ui::button("conn", "Open Settings", BtnKind::Primary, cx, |_, _, cx| goto(cx, "connections")))))
                         .into_any_element()
                 }
                 None => ui::quiet_state("Reading the line…", cx).into_any_element(),
