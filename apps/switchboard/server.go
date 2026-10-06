@@ -282,6 +282,9 @@ func (s *Server) routes() http.Handler {
 	// else. It is the only unauthenticated-by-farfield route here.
 	mux.HandleFunc("POST /hooks/photon", s.handleWebhook)
 
+	// Private admin API — tailnet only, write key, read-only (see admin.go).
+	s.mountAdmin(mux)
+
 	mux.HandleFunc("GET /status", s.handleStatus)
 	mux.HandleFunc("GET /static/fonts.css", theme.FontsHandler())
 	mux.HandleFunc("GET /static/styles.css", theme.CSSHandler())

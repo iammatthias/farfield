@@ -711,3 +711,36 @@ mod tests {
         assert!(scrap::parse_created("oops").is_err());
     }
 }
+
+/// A cheap request that needs the key the desktop client relies on for each
+/// service — what "Test" in Connections runs. None for services the client
+/// only reads publicly.
+pub fn probe_path(service: &str) -> Option<&'static str> {
+    Some(match service {
+        "content" => "/api/entries?status=draft&limit=1&bodies=0",
+        "feed" => "/api/posts?limit=1",
+        "blobs" => "/blobs?page=1",
+        "bookmarks" => "/api/admin/bookmarks",
+        "qr" => "/api/admin/codes",
+        "scrap" => "/api/admin/pastes?limit=1",
+        "library" => "/api/admin/books",
+        "sideload" => "/api/builds",
+        "pulse" => "/api/overview",
+        "switchboard" => "/api/admin/messages?limit=1",
+        "backup" => "/api/admin/snapshots",
+        _ => return None,
+    })
+}
+
+/// Check reachability and, where one is needed, that the stored key works.
+pub async fn probe(s: &Session, service: &str) -> Result<(), ApiError> {
+    status(s, service).await?;
+    if let Some(p) = probe_path(service) {
+        let c = s.client(service)?;
+        if !c.has_credential() {
+            return Err(ApiError::Unauthorized(service.into()));
+        }
+        c.get::<Value>(p).await?;
+    }
+    Ok(())
+}

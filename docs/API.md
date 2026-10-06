@@ -42,7 +42,8 @@ backend, and in 2026-08 they moved to the pure-internet monorepo — now
 `bard.pure---internet.com` and `dead-presidents.pure---internet.com`. Their
 `farfield.systems` hostnames are retired and no longer resolve.
 
-The `backup` service is internal (tailnet-only) and has no public API. The
+The `backup` service is internal (tailnet-only); its only API is the read-only
+`GET /api/admin/snapshots` (see **Private admin API**). The
 `keys` service (`https://keys.farfield.systems`) is the admin credential
 minter — a password-gated UI, no public API beyond `/status`. The `pulse`
 service (`https://pulse.farfield.systems`) is uptime monitoring + traffic
@@ -81,6 +82,28 @@ analytics — session-gated console, no public API beyond `/status`; see
   changing). Echo the `ETag` you received in `If-None-Match` to get
   `304 Not Modified` when unchanged. Blob bytes are immutable and cached
   forever.
+- **Conditional writes (`If-Match`).** `PUT`/`DELETE` on an existing record
+  accept `If-Match: <ETag>` — the tag that record's single-record `GET` sent
+  (entries: the CID+`publishedAt` hash; series, posts, bookmarks, codes: the
+  CID). Routes: content `PUT|DELETE /api/entries/{slug}`, `PUT|DELETE
+  /api/series/{slug}`; feed `PUT|DELETE /api/posts/{slug}`; bookmarks
+  `PUT|DELETE /api/bookmarks/{id}`; qr `PUT|DELETE /api/codes/{id}`.
+  - Header absent, or `*`: the write behaves exactly as it always has.
+  - Tag matches (quoted, unquoted, `W/` weak, or anywhere in a comma list):
+    the write lands only if the record is *still* at that version when the
+    statement runs — the check and the write cannot be split by another save.
+  - Tag stale, or another save won the race: **`412`** with
+    `{"error":"precondition failed","current":<record>}` and `ETag` set to the
+    current tag, `Cache-Control: no-store`. `current` is the full record —
+    for bookmarks and codes that includes `adminNotes` and private/disabled
+    records the public `GET` would `404`. Retry against `current`.
+  - Record missing: `404`, as without the header.
+  - Every successful `POST`/`PUT` that returns a record sends `ETag` — the
+    value a `GET` of the new record returns — so the next conditional write
+    needs no re-read.
+
+  The bookmark and code CIDs leave out `adminNotes`, so a notes-only edit does
+  not move their tag and `If-Match` cannot detect a concurrent notes-only edit.
 - Timestamps are RFC3339 UTC strings.
 - The read API returns **published entries only**; the **write** key additionally
   previews drafts (a draft is a `404` without it).
@@ -103,6 +126,14 @@ analytics — session-gated console, no public API beyond `/status`; see
 | `PUT /api/entries/{slug}`            | replace — `X-API-Key`                    |
 | `DELETE /api/entries/{slug}`         | delete — `X-API-Key`                     |
 | `POST /api/series`                   | create a series fragment — `X-API-Key`   |
+| `PUT /api/series/{slug}`             | replace title/body — `X-API-Key`         |
+| `DELETE /api/series/{slug}`          | delete — `X-API-Key`; `409` while referenced |
+
+`DELETE /api/series/{slug}` answers `200 {"deleted":"<slug>"}`, `404` if the
+fragment is missing, and `409 {"error":"series is still referenced",
+"references":<n>}` while any entry body — drafts and trashed entries included —
+embeds `series://<slug>` (an exact slug match: `series://trip-2` does not count
+against `trip`). It honors `If-Match` like the other writes.
 
 Collections are managed in the admin UI. `POST /api/series` always assigns a
 fresh slug (slugified from the title) and returns the created fragment — it is
@@ -185,7 +216,9 @@ API or on the public HTML index. Admin-only `adminNotes` are never returned.
 | `DELETE /api/bookmarks/{id}`     | delete — `X-API-Key`                             |
 
 The write API is disabled unless `BOOKMARKS_API_KEY` is set on the service.
-The HTML admin UI lives under `/admin` and is gated by the shared `PASSWORD`.
+The HTML admin UI is rooted at `/` and gated by the shared `PASSWORD`.
+Private bookmarks and `adminNotes` are readable only through the
+**Private admin API** below.
 
 ## qr — `https://qr.farfield.systems`
 
@@ -199,7 +232,7 @@ for records marked both `public` and `enabled`.
 |----------------------------------|--------------------------------------------------|
 | `GET /qr/{id}` (or `.svg`)       | SVG QR image for a public/enabled record; `ETag` |
 | `GET /qr/{id}.png`               | PNG QR image, same record; `ETag`                |
-| `GET /r/{id}`                    | `303` redirect for public/enabled proxy records  |
+| `GET /r/{id}`                    | `302` redirect for public/enabled proxy records  |
 | `GET /api/codes`                 | `{ "codes": [QRCode, …] }` — public/enabled only; `ETag` |
 | `GET /api/codes/{id}`            | `QRCode` — `404` if missing/private/disabled; `ETag` |
 | `GET /status`                    | `{ "service", "ok", "codes" }`               |
@@ -256,6 +289,80 @@ ignores every message.
 
 Rejections answer `2xx` (Photon retries `5xx` only, and none of these are fixed
 by retrying); a bad signature answers `401`.
+
+## Private admin API — `/api/admin/…`
+
+What the session consoles see, as JSON, for a native client on the tailnet.
+Every route under `/api/admin/` in every app passes one gate
+(`web.PrivateAPI`), checked in this order:
+
+1. **Private ingress only.** A request carrying `Cf-Ray` or
+   `Cf-Connecting-IP` came through the Cloudflare tunnel — Cloudflare adds both
+   to every request it forwards, and tailnet traffic (`tailscale serve` to the
+   app) never has either — and gets `404 {"error":"not found"}` whatever key it
+   presents. From the internet the admin API does not exist. Reach it via the
+   app's tailnet address.
+2. **Fail closed.** No write key configured (no `<APP>_API_KEY` and no key
+   store) → `503 {"error":"admin API disabled: no key configured"}`.
+3. **Write key.** The app's `<APP>_API_KEY` or a write-scoped `ffk_` key, as
+   `X-API-Key` or `Authorization: Bearer`. Read keys (and library's upload key)
+   are refused: `401 {"error":"missing or invalid API key"}`.
+
+Every response is `Cache-Control: no-store`. An unknown path under
+`/api/admin/`, or a known one with the wrong method, is the same JSON `404`.
+
+| App | Method & path | Returns |
+|-----|---------------|---------|
+| bookmarks | `GET /api/admin/bookmarks` | `{"bookmarks":[Bookmark]}` — all, private included, with `adminNotes`; public-list order (category A–Z case-folded, then newest) |
+| bookmarks | `GET /api/admin/bookmarks/{id}` | `Bookmark` with `adminNotes`, private included; `ETag` = CID; `404` |
+| bookmarks | `POST /api/admin/bookmarks/{id}/refresh` | re-fetch OG/meta now (10 s bound) → `200 Bookmark` + `ETag`; `502 {"error"}` if the fetch fails (record unchanged); `404` |
+| qr | `GET /api/admin/codes` | `{"codes":[QRCode]}` — all, private/disabled included, with `adminNotes`; newest first |
+| qr | `GET /api/admin/codes/{id}` | `QRCode` with `adminNotes`; `ETag` = CID; `404` |
+| qr | `GET /api/admin/codes/{id}/preview.svg` | `image/svg+xml`, regardless of public/enabled; `404` |
+| qr | `GET /api/admin/codes/{id}/preview.png[?size=N]` | `image/png`, `N` clamped to 64–2048 (default 512); whole modules, so the image is at or just under `N` px square; `404` |
+| scrap | `GET /api/admin/pastes[?limit=&page=]` | `{"pastes":[Paste],"total":n}` — newest first; `limit` default 50, max 200; `page` 1-based; `body` is `""`; expired-but-unswept pastes included |
+| scrap | `GET /api/admin/pastes/{id}` | `Paste` with `body`; no token needed, no view counted, an expired paste is returned (not deleted); `ETag`; `404` |
+| scrap | `PUT /api/admin/pastes/{id}` | partial `{"title"?,"lang"?,"visibility"?,"expires"?}` → `200 Paste` + `ETag`; `400` bad JSON or unknown `expires`; `404` |
+| library | `GET /api/admin/books` | `{"books":[Book],"collections":[{"name","count"}],"uncategorized":n}` — books newest first; collections named only, A–Z |
+| sideload | `GET /api/admin/shares` | `{"shares":[Share]}` — share links (not self tokens), newest first |
+| sideload | `POST /api/admin/shares/{token}/revoke` | `200 Share` as it now stands (already revoked/consumed: unchanged, still `200`); `404` for an unknown or self token |
+| switchboard | `GET /api/admin/messages[?limit=]` | `{"messages":[Message]}` — newest first; `limit` default 100, max 500 |
+| switchboard | `GET /api/admin/jobs[?limit=]` | `{"jobs":[Job]}` — agent turns, all senders, newest first; same `limit` |
+| backup | `GET /api/admin/snapshots` | `{"snapshots":[Snapshot]}` — newest first; needs `BACKUP_API_KEY` |
+
+Scrap `PUT` applies create's rules: `title` trimmed; `lang` trimmed and
+lowercased; an unknown `visibility` falls back to `unlisted`; `expires` is one
+of `never|1h|1d|1w|1m`, measured from now (`never` clears it); a paste with a
+view token is never `public` (forced to `unlisted`). Omitted fields are kept.
+The scrap `ETag` hashes the whole record (the paste CID covers only the body).
+
+```jsonc
+// Paste — scrap
+{ "id", "cid", "title", "lang", "body", "visibility", "expiresAt",
+  "createdAt", "views", "alias"?, "hasToken" }
+
+// Book — library
+{ "cid", "title", "author", "language", "identifier", "description",
+  "collection", "filename", "size", "coverCid", "coverMime", "thumbCid",
+  "createdAt" }
+
+// Share — sideload; installs = delivered installs, live = a fresh install can
+// start now (active, unexpired, under maxInstalls; 0 = unlimited)
+{ "token", "buildId", "appName", "version", "label",
+  "state": "active|consumed|revoked", "expiresAt", "maxInstalls", "installs",
+  "revoked", "live", "createdAt", "consumedAt"?, "shareURL" }
+
+// Message — switchboard; one row per inbound text, reply = what was sent back
+{ "id", "direction": "inbound", "sender", "body", "route", "ref", "reply",
+  "status": "ok|ignored|error|pending|undone", "receivedAt" }
+
+// Job — switchboard agent turn
+{ "id", "messageId", "sender", "prompt", "status": "running|done|failed|cancelled",
+  "result", "error", "startedAt", "finishedAt" }
+
+// Snapshot — backup
+{ "app", "cid", "size", "createdAt" }
+```
 
 ## Record shapes
 

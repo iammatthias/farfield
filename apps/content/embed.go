@@ -72,7 +72,7 @@ func (s *Server) handleEmbedSeries(w http.ResponseWriter, r *http.Request) {
 		s.fail(w, "create series", err)
 		return
 	}
-	web.WriteJSON(w, http.StatusCreated, se)
+	web.WriteSaved(w, http.StatusCreated, se.CID, se)
 }
 
 // handleAPICreateSeries creates a series fragment from a posted JSON body. It
@@ -92,7 +92,7 @@ func (s *Server) handleAPICreateSeries(w http.ResponseWriter, r *http.Request) {
 		web.WriteError(w, http.StatusInternalServerError, "could not create series")
 		return
 	}
-	web.WriteJSON(w, http.StatusCreated, se)
+	web.WriteSaved(w, http.StatusCreated, se.CID, se)
 }
 
 // handleAPIUpdateSeries replaces an existing series fragment's title and body,
@@ -109,6 +109,13 @@ func (s *Server) handleAPIUpdateSeries(w http.ResponseWriter, r *http.Request) {
 	if se == nil {
 		web.WriteError(w, http.StatusNotFound, "series not found")
 		return
+	}
+	ifCID := ""
+	switch web.CheckIfMatch(w, r, se.CID, se) {
+	case web.Failed:
+		return
+	case web.Matched:
+		ifCID = se.CID
 	}
 	var in struct {
 		Title *string `json:"title"`
@@ -127,11 +134,86 @@ func (s *Server) handleAPIUpdateSeries(w http.ResponseWriter, r *http.Request) {
 	}
 	se.Body = *in.Body
 	se.UpdatedAt = store.NowRFC3339()
-	if err := upsertSeries(s.db, se); err != nil {
+	if ifCID == "" {
+		if err := upsertSeries(s.db, se); err != nil {
+			web.WriteError(w, http.StatusInternalServerError, "could not update series")
+			return
+		}
+		web.WriteSaved(w, http.StatusOK, se.CID, se)
+		return
+	}
+	updated, err := updateSeriesIf(s.db, se, ifCID)
+	if err != nil {
 		web.WriteError(w, http.StatusInternalServerError, "could not update series")
 		return
 	}
-	web.WriteJSON(w, http.StatusOK, se)
+	if !updated {
+		s.seriesRaceLost(w, se.Slug)
+		return
+	}
+	web.WriteSaved(w, http.StatusOK, se.CID, se)
+}
+
+// handleAPIDeleteSeries removes a fragment — refused with 409 while any
+// entry body (drafts and trashed entries included) still embeds it, since
+// deleting it would leave those bodies pointing at nothing. The session
+// form's delete has never checked; this is the scripted path, which is the
+// one that could clear a gallery out from under a live post unseen.
+func (s *Server) handleAPIDeleteSeries(w http.ResponseWriter, r *http.Request) {
+	slug := r.PathValue("slug")
+	se, err := getSeries(s.db, slug)
+	if err != nil {
+		web.WriteError(w, http.StatusInternalServerError, "could not read series")
+		return
+	}
+	if se == nil {
+		web.WriteError(w, http.StatusNotFound, "series not found")
+		return
+	}
+	ifCID := ""
+	switch web.CheckIfMatch(w, r, se.CID, se) {
+	case web.Failed:
+		return
+	case web.Matched:
+		ifCID = se.CID
+	}
+	refs, err := seriesReferences(s.db, slug)
+	if err != nil {
+		web.WriteError(w, http.StatusInternalServerError, "could not check series references")
+		return
+	}
+	if refs > 0 {
+		w.Header().Set("Cache-Control", "no-store")
+		web.WriteJSON(w, http.StatusConflict, map[string]any{
+			"error": "series is still referenced", "references": refs,
+		})
+		return
+	}
+	deleted, err := deleteSeriesIf(s.db, slug, ifCID)
+	if err != nil {
+		web.WriteError(w, http.StatusInternalServerError, "could not delete series")
+		return
+	}
+	if !deleted {
+		s.seriesRaceLost(w, slug)
+		return
+	}
+	web.WriteJSON(w, http.StatusOK, map[string]any{"deleted": slug})
+}
+
+// seriesRaceLost answers a guarded series write that matched no row: the
+// fragment was deleted (404) or saved again (412) after the If-Match check.
+func (s *Server) seriesRaceLost(w http.ResponseWriter, slug string) {
+	cur, err := getSeries(s.db, slug)
+	if err != nil {
+		web.WriteError(w, http.StatusInternalServerError, "could not read series")
+		return
+	}
+	if cur == nil {
+		web.WriteError(w, http.StatusNotFound, "series not found")
+		return
+	}
+	web.WritePreconditionFailed(w, cur.CID, cur)
 }
 
 // uniqueSlug returns a slug based on candidate that no series uses yet — the

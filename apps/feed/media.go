@@ -102,7 +102,7 @@ func (s *Server) handleAPICreateMedia(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	made = true
-	web.WriteJSON(w, http.StatusCreated, p)
+	web.WriteSaved(w, http.StatusCreated, p.CID, p)
 }
 
 // composeMediaBody puts the images under the text, one embed per line — the

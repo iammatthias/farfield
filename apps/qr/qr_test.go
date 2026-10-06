@@ -111,7 +111,7 @@ func TestCodeCRUDAndCID(t *testing.T) {
 
 	// Editing admin notes alone must NOT change the CID.
 	got.AdminNotes = "changed"
-	if _, err := updateCode(db, c.ID, got); err != nil {
+	if _, err := updateCode(db, c.ID, got, ""); err != nil {
 		t.Fatalf("updateCode: %v", err)
 	}
 	if got.CID != origCID {
@@ -120,7 +120,7 @@ func TestCodeCRUDAndCID(t *testing.T) {
 
 	// Editing the target MUST change the CID.
 	got.Target = "https://changed.example"
-	if _, err := updateCode(db, c.ID, got); err != nil {
+	if _, err := updateCode(db, c.ID, got, ""); err != nil {
 		t.Fatalf("updateCode: %v", err)
 	}
 	if got.CID == origCID {
@@ -128,7 +128,7 @@ func TestCodeCRUDAndCID(t *testing.T) {
 	}
 
 	// Delete.
-	if ok, err := deleteCode(db, c.ID); err != nil || !ok {
+	if ok, err := deleteCode(db, c.ID, ""); err != nil || !ok {
 		t.Fatalf("deleteCode ok=%v err=%v", ok, err)
 	}
 	if g, _ := getCode(db, c.ID); g != nil {
@@ -240,7 +240,7 @@ func TestProxyModeEncodesPublicURL(t *testing.T) {
 
 	// Critical: editing the target MUST NOT change the SVG.
 	c.Target = "https://example.com/v2-was-edited"
-	if _, err := updateCode(s.db, c.ID, c); err != nil {
+	if _, err := updateCode(s.db, c.ID, c, ""); err != nil {
 		t.Fatal(err)
 	}
 	updated, _ := getCode(s.db, c.ID)
@@ -277,7 +277,7 @@ func TestProxyRedirectFollowsCurrentTarget(t *testing.T) {
 
 	// Edit the target — same redirect path now resolves to the new URL.
 	c.Target = "https://example.com/v2"
-	if _, err := updateCode(s.db, c.ID, c); err != nil {
+	if _, err := updateCode(s.db, c.ID, c, ""); err != nil {
 		t.Fatal(err)
 	}
 	resp2 := requestNoRedirect(t, ts.URL+"/r/"+c.ID)

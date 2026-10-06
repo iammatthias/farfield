@@ -241,22 +241,38 @@ func insertPost(db *sql.DB, p *Post) error {
 	return err
 }
 
-// updatePost replaces a post's body and tags, and stamps updated_at.
-func updatePost(db *sql.DB, slug string, p *Post) (bool, error) {
+// updatePost replaces a post's body and tags, stamps updated_at, and fills p
+// with the row as stored — slug and both timestamps included, which the API
+// response used to leave blank.
+//
+// ifCID, when not empty, is the version the caller checked an If-Match
+// against: the write only lands while the row still carries it, so a save
+// that slipped in after the check makes this report false rather than be
+// overwritten. Empty is the unconditional write. false means "no row matched"
+// either way — the caller re-reads to tell a missing post from a lost race.
+func updatePost(db *sql.DB, slug string, p *Post, ifCID string) (bool, error) {
 	p.CID = postCID(p)
-	res, err := db.Exec(
-		`UPDATE posts SET body = ?, tags = ?, cid = ?, updated_at = ? WHERE slug = ?`,
-		p.Body, encodeTags(p.Tags), p.CID, store.NowRFC3339(), slug)
+	p.UpdatedAt = store.NowRFC3339()
+	err := db.QueryRow(
+		`UPDATE posts SET body = ?, tags = ?, cid = ?, updated_at = ?
+		 WHERE slug = ? AND (? = '' OR cid = ?) RETURNING created_at`,
+		p.Body, encodeTags(p.Tags), p.CID, p.UpdatedAt, slug, ifCID, ifCID,
+	).Scan(&p.CreatedAt)
+	if errors.Is(err, sql.ErrNoRows) {
+		return false, nil
+	}
 	if err != nil {
 		return false, err
 	}
-	n, _ := res.RowsAffected()
-	return n > 0, nil
+	p.Slug = slug
+	return true, nil
 }
 
-// deletePost removes a post by slug.
-func deletePost(db *sql.DB, slug string) (bool, error) {
-	res, err := db.Exec(`DELETE FROM posts WHERE slug = ?`, slug)
+// deletePost removes a post by slug. ifCID guards it exactly as in
+// updatePost.
+func deletePost(db *sql.DB, slug, ifCID string) (bool, error) {
+	res, err := db.Exec(`DELETE FROM posts WHERE slug = ? AND (? = '' OR cid = ?)`,
+		slug, ifCID, ifCID)
 	if err != nil {
 		return false, err
 	}

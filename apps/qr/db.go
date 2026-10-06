@@ -171,17 +171,23 @@ func insertCode(db *sql.DB, c *Code) error {
 
 // updateCode replaces a code in place, recomputing CID and updated_at. The id
 // and created_at are not read from c.
-func updateCode(db *sql.DB, id string, c *Code) (bool, error) {
+//
+// ifCID, when not empty, is the version an If-Match was checked against: the
+// write lands only while the row still carries it, so a save that slipped in
+// after the check makes this report false instead of being overwritten. Empty
+// is the unconditional write. false means no row matched either way; the
+// caller re-reads to tell a missing code from a lost race.
+func updateCode(db *sql.DB, id string, c *Code, ifCID string) (bool, error) {
 	normalize(c)
 	c.UpdatedAt = store.NowRFC3339()
 	c.CID = codeCID(c)
 	res, err := db.Exec(
 		`UPDATE codes SET label = ?, mode = ?, target = ?, ec = ?,
 			public = ?, enabled = ?, admin_notes = ?, cid = ?, updated_at = ?
-			WHERE id = ?`,
+			WHERE id = ? AND (? = '' OR cid = ?)`,
 		c.Label, string(c.Mode), c.Target, c.EC,
 		boolToInt(c.Public), boolToInt(c.Enabled), c.AdminNotes,
-		c.CID, c.UpdatedAt, id)
+		c.CID, c.UpdatedAt, id, ifCID, ifCID)
 	if err != nil {
 		return false, err
 	}
@@ -256,8 +262,10 @@ func countPublicCodes(db *sql.DB) (int, error) {
 	return n, err
 }
 
-func deleteCode(db *sql.DB, id string) (bool, error) {
-	res, err := db.Exec(`DELETE FROM codes WHERE id = ?`, id)
+// deleteCode removes a code by id. ifCID guards it exactly as in updateCode.
+func deleteCode(db *sql.DB, id, ifCID string) (bool, error) {
+	res, err := db.Exec(`DELETE FROM codes WHERE id = ? AND (? = '' OR cid = ?)`,
+		id, ifCID, ifCID)
 	if err != nil {
 		return false, err
 	}

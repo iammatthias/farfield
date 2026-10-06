@@ -168,6 +168,9 @@ func (s *Server) routes() http.Handler {
 	mux.HandleFunc("POST /api/pastes/{id}/token/roll", s.auth.RequireAPIKey(s.handleAPITokenRoll))
 	mux.HandleFunc("DELETE /api/pastes/{id}/token", s.auth.RequireAPIKey(s.handleAPITokenRemove))
 
+	// Private admin API — tailnet only, write key (see admin.go).
+	s.mountAdmin(mux)
+
 	mux.HandleFunc("GET /status", s.handleStatus)
 	mux.HandleFunc("GET /static/fonts.css", theme.FontsHandler())
 	mux.HandleFunc("GET /static/styles.css", theme.CSSHandler())

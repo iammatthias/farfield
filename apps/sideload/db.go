@@ -857,27 +857,49 @@ type shareRow struct {
 	Version string
 }
 
-// listShares returns every share token with its build, newest first.
-func listShares(db *sql.DB) ([]shareRow, error) {
-	rows, err := db.Query(`SELECT `+tokenColsT("t")+`,
+// shareSelect reads share tokens joined to their builds; callers append the
+// WHERE beyond the kind filter and the ORDER.
+var shareSelect = `SELECT ` + tokenColsT("t") + `,
 		COALESCE(b.app_name, ''), COALESCE(b.version, '')
 		FROM install_tokens t LEFT JOIN builds b ON b.id = t.build_id
-		WHERE t.kind = ? ORDER BY t.created_at DESC`, kindShare)
+		WHERE t.kind = ?`
+
+func scanShare(row scanner) (*shareRow, error) {
+	var s shareRow
+	if err := row.Scan(&s.Token.Token, &s.BuildID, &s.Kind, &s.State,
+		&s.MaxInstalls, &s.UsedInstalls, &s.ExpiresAt, &s.Label, &s.LastUA,
+		&s.LastIP, &s.CreatedAt, &s.ConsumedAt, &s.AppName, &s.Version); err != nil {
+		return nil, err
+	}
+	return &s, nil
+}
+
+// listShares returns every share token with its build, newest first.
+func listShares(db *sql.DB) ([]shareRow, error) {
+	rows, err := db.Query(shareSelect+` ORDER BY t.created_at DESC`, kindShare)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
 	out := []shareRow{}
 	for rows.Next() {
-		var s shareRow
-		if err := rows.Scan(&s.Token.Token, &s.BuildID, &s.Kind, &s.State,
-			&s.MaxInstalls, &s.UsedInstalls, &s.ExpiresAt, &s.Label, &s.LastUA,
-			&s.LastIP, &s.CreatedAt, &s.ConsumedAt, &s.AppName, &s.Version); err != nil {
+		s, err := scanShare(rows)
+		if err != nil {
 			return nil, err
 		}
-		out = append(out, s)
+		out = append(out, *s)
 	}
 	return out, rows.Err()
+}
+
+// getShare returns one share token with its build, or (nil, nil) when no
+// share has that token — a self token is not a share and reads as absent.
+func getShare(db *sql.DB, token string) (*shareRow, error) {
+	s, err := scanShare(db.QueryRow(shareSelect+` AND t.token = ?`, kindShare, token))
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, nil
+	}
+	return s, err
 }
 
 // tokenColsT qualifies tokenCols with a table alias for joins.

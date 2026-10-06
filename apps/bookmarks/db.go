@@ -207,11 +207,24 @@ func listBookmarks(db *sql.DB) ([]Bookmark, error) {
 	return out, rows.Err()
 }
 
-// listPublicBookmarks returns every public bookmark, newest first.
+// publicOrder is the public listing's order: by category, case-folded, then
+// newest first. The admin API lists in the same order so a client can show
+// both views without re-sorting.
+const publicOrder = `ORDER BY category COLLATE NOCASE ASC, created_at DESC, id DESC`
+
+// listPublicBookmarks returns every public bookmark in publicOrder.
 func listPublicBookmarks(db *sql.DB) ([]Bookmark, error) {
-	rows, err := db.Query(
-		`SELECT ` + bookmarkCols + ` FROM bookmarks WHERE public = 1 ` +
-			`ORDER BY category COLLATE NOCASE ASC, created_at DESC, id DESC`)
+	return queryBookmarks(db, `SELECT `+bookmarkCols+` FROM bookmarks WHERE public = 1 `+publicOrder)
+}
+
+// listAdminBookmarks returns every bookmark, private ones included, in
+// publicOrder — the admin API's view.
+func listAdminBookmarks(db *sql.DB) ([]Bookmark, error) {
+	return queryBookmarks(db, `SELECT `+bookmarkCols+` FROM bookmarks `+publicOrder)
+}
+
+func queryBookmarks(db *sql.DB, query string) ([]Bookmark, error) {
+	rows, err := db.Query(query)
 	if err != nil {
 		return nil, err
 	}
@@ -285,7 +298,13 @@ func insertBookmark(db *sql.DB, b *Bookmark) error {
 
 // updateBookmark replaces a bookmark in place, keyed by id, and stamps
 // updated_at. The id, created_at, and existing CID are not read from b.
-func updateBookmark(db *sql.DB, id string, b *Bookmark) (bool, error) {
+//
+// ifCID, when not empty, is the version an If-Match was checked against: the
+// write lands only while the row still carries it, so a save that slipped in
+// after the check makes this report false instead of being overwritten. Empty
+// is the unconditional write. false means no row matched either way; the
+// caller re-reads to tell a missing bookmark from a lost race.
+func updateBookmark(db *sql.DB, id string, b *Bookmark, ifCID string) (bool, error) {
 	b.URL = strings.TrimSpace(b.URL)
 	b.UpdatedAt = store.NowRFC3339()
 	b.CID = bookmarkCID(b)
@@ -297,10 +316,11 @@ func updateBookmark(db *sql.DB, id string, b *Bookmark) (bool, error) {
 		`UPDATE bookmarks SET url = ?, title = ?, description = ?, category = ?,
 			public = ?, admin_notes = ?, og_title = ?, og_description = ?,
 			og_image = ?, og_site_name = ?, og_type = ?, meta_author = ?,
-			favicon = ?, cid = ?, updated_at = ? WHERE id = ?`,
+			favicon = ?, cid = ?, updated_at = ?
+			WHERE id = ? AND (? = '' OR cid = ?)`,
 		b.URL, b.Title, b.Description, b.Category, pub, b.AdminNotes,
 		b.OGTitle, b.OGDescription, b.OGImage, b.OGSiteName, b.OGType,
-		b.MetaAuthor, b.Favicon, b.CID, b.UpdatedAt, id)
+		b.MetaAuthor, b.Favicon, b.CID, b.UpdatedAt, id, ifCID, ifCID)
 	if err != nil {
 		return false, err
 	}
@@ -347,9 +367,11 @@ func updateBookmarkMetadata(db *sql.DB, id string, m metaResult) error {
 	return tx.Commit()
 }
 
-// deleteBookmark removes a bookmark by id.
-func deleteBookmark(db *sql.DB, id string) (bool, error) {
-	res, err := db.Exec(`DELETE FROM bookmarks WHERE id = ?`, id)
+// deleteBookmark removes a bookmark by id. ifCID guards it exactly as in
+// updateBookmark.
+func deleteBookmark(db *sql.DB, id, ifCID string) (bool, error) {
+	res, err := db.Exec(`DELETE FROM bookmarks WHERE id = ? AND (? = '' OR cid = ?)`,
+		id, ifCID, ifCID)
 	if err != nil {
 		return false, err
 	}

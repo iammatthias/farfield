@@ -329,6 +329,27 @@ func listJobs(db *sql.DB, sender string, limit int) ([]Job, error) {
 	return out, rows.Err()
 }
 
+// listRecentJobs returns the newest jobs across every sender, for the admin
+// API — listJobs is one sender's view, which is what /jobs over iMessage
+// answers.
+func listRecentJobs(db *sql.DB, limit int) ([]Job, error) {
+	rows, err := db.Query(`SELECT `+jobCols+` FROM jobs
+	                       ORDER BY started_at DESC, rowid DESC LIMIT ?`, limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := []Job{}
+	for rows.Next() {
+		j, err := scanJob(rows)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, *j)
+	}
+	return out, rows.Err()
+}
+
 // failOrphanedJobs marks jobs that were running when the process died.
 //
 // Without it a restart leaves a row that says "running" forever and a sender

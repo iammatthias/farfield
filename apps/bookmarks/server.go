@@ -104,6 +104,9 @@ func (s *Server) routes() http.Handler {
 	mux.HandleFunc("PUT /api/bookmarks/{id}", s.auth.RequireAPIKey(s.handleAPIUpdate))
 	mux.HandleFunc("DELETE /api/bookmarks/{id}", s.auth.RequireAPIKey(s.handleAPIDelete))
 
+	// Private admin API — tailnet only, write key (see admin.go).
+	s.mountAdmin(mux)
+
 	// Shared theme stylesheet.
 	mux.HandleFunc("GET /static/fonts.css", theme.FontsHandler())
 	mux.HandleFunc("GET /static/styles.css", theme.CSSHandler())
@@ -199,7 +202,7 @@ func (s *Server) handleUpdate(w http.ResponseWriter, r *http.Request) {
 		s.renderForm(w, b, false, "/bookmarks/"+id, "URL is required.")
 		return
 	}
-	ok, err := updateBookmark(s.db, id, b)
+	ok, err := updateBookmark(s.db, id, b, "")
 	if err != nil {
 		s.fail(w, "update bookmark", err)
 		return
@@ -212,7 +215,7 @@ func (s *Server) handleUpdate(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleDelete(w http.ResponseWriter, r *http.Request) {
-	if _, err := deleteBookmark(s.db, r.PathValue("id")); err != nil {
+	if _, err := deleteBookmark(s.db, r.PathValue("id"), ""); err != nil {
 		s.fail(w, "delete bookmark", err)
 		return
 	}
@@ -236,7 +239,7 @@ func (s *Server) handleRefetch(w http.ResponseWriter, r *http.Request) {
 	b.OGTitle, b.OGDescription, b.OGImage = "", "", ""
 	b.OGSiteName, b.OGType, b.MetaAuthor, b.Favicon = "", "", "", ""
 	s.fetchAndApply(r.Context(), b)
-	if _, err := updateBookmark(s.db, id, b); err != nil {
+	if _, err := updateBookmark(s.db, id, b, ""); err != nil {
 		s.fail(w, "update bookmark", err)
 		return
 	}
@@ -423,9 +426,17 @@ func (s *Server) handleAPICreate(w http.ResponseWriter, r *http.Request) {
 	// Shortcut path used to block on a remote GET for up to 10s). Clients
 	// that need the enriched record re-GET it by ID once the fetch lands.
 	s.fetchInBackground(b)
-	web.WriteJSON(w, http.StatusCreated, &b)
+	web.WriteSaved(w, http.StatusCreated, b.CID, &b)
 }
 
+// handleAPIUpdate merges a partial body into a bookmark. With If-Match it is
+// a conditional write against the bookmark's CID (its GET ETag), checked
+// before the merge and guarded again on the UPDATE itself.
+//
+// The CID covers only the public-facing fields, so an edit that changes
+// nothing but adminNotes does not move the tag — If-Match cannot see a
+// concurrent notes-only edit. That is the ETag the GET has always sent; the
+// precondition inherits its scope rather than inventing a second validator.
 func (s *Server) handleAPIUpdate(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")
 	existing, err := getBookmark(s.db, id)
@@ -436,6 +447,13 @@ func (s *Server) handleAPIUpdate(w http.ResponseWriter, r *http.Request) {
 	if existing == nil {
 		web.WriteError(w, http.StatusNotFound, "bookmark not found")
 		return
+	}
+	ifCID := ""
+	switch web.CheckIfMatch(w, r, existing.CID, existing) {
+	case web.Failed:
+		return
+	case web.Matched:
+		ifCID = existing.CID
 	}
 	// Decode over a copy of the existing record so a partial body updates
 	// only the fields it names — fetched OG metadata, favicon, category,
@@ -450,29 +468,68 @@ func (s *Server) handleAPIUpdate(w http.ResponseWriter, r *http.Request) {
 	}
 	b.ID = existing.ID
 	b.CreatedAt = existing.CreatedAt
-	ok, err := updateBookmark(s.db, id, &b)
+	ok, err := updateBookmark(s.db, id, &b, ifCID)
 	if err != nil {
 		web.WriteError(w, http.StatusInternalServerError, "could not update bookmark")
 		return
 	}
 	if !ok {
-		web.WriteError(w, http.StatusNotFound, "bookmark not found")
+		s.lostRace(w, id)
 		return
 	}
-	web.WriteJSON(w, http.StatusOK, &b)
+	web.WriteSaved(w, http.StatusOK, b.CID, &b)
 }
 
 func (s *Server) handleAPIDelete(w http.ResponseWriter, r *http.Request) {
-	existed, err := deleteBookmark(s.db, r.PathValue("id"))
+	id := r.PathValue("id")
+	ifCID := ""
+	if r.Header.Get("If-Match") != "" {
+		cur, err := getBookmark(s.db, id)
+		if err != nil {
+			web.WriteError(w, http.StatusInternalServerError, "could not read bookmark")
+			return
+		}
+		if cur == nil {
+			web.WriteError(w, http.StatusNotFound, "bookmark not found")
+			return
+		}
+		switch web.CheckIfMatch(w, r, cur.CID, cur) {
+		case web.Failed:
+			return
+		case web.Matched:
+			ifCID = cur.CID
+		}
+	}
+	existed, err := deleteBookmark(s.db, id, ifCID)
 	if err != nil {
 		web.WriteError(w, http.StatusInternalServerError, "could not delete bookmark")
 		return
 	}
 	if !existed {
+		s.lostRace(w, id)
+		return
+	}
+	web.WriteJSON(w, http.StatusOK, map[string]any{"deleted": id})
+}
+
+// lostRace answers a write whose statement matched no row: the bookmark is
+// gone (404), or — for a guarded write — another save changed it after the
+// If-Match check passed (412 with the bookmark as it now stands).
+//
+// The 412's "current" is the full record, adminNotes and all, rather than the
+// public GET's view: the caller holds the write key, and the public GET would
+// 404 a private bookmark outright.
+func (s *Server) lostRace(w http.ResponseWriter, id string) {
+	cur, err := getBookmark(s.db, id)
+	if err != nil {
+		web.WriteError(w, http.StatusInternalServerError, "could not read bookmark")
+		return
+	}
+	if cur == nil {
 		web.WriteError(w, http.StatusNotFound, "bookmark not found")
 		return
 	}
-	web.WriteJSON(w, http.StatusOK, map[string]any{"deleted": r.PathValue("id")})
+	web.WritePreconditionFailed(w, cur.CID, cur)
 }
 
 // ── render helpers ─────────────────────────────────────────────────────────

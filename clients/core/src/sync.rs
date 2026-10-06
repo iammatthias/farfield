@@ -31,6 +31,8 @@ pub enum SaveOutcome {
 /// A record kind the sync layer can save.
 pub trait Kind {
     const SERVICE: &'static str;
+    /// Where its drafts live (defaults to the service).
+    const DRAFTS: &'static str = Self::SERVICE;
     /// The field holding the document text (merged line by line).
     const TEXT: &'static str = "body";
     /// The fields a person edits — what "the server has my version" compares.
@@ -115,7 +117,7 @@ pub fn is_new(d: &Draft) -> bool {
 /// Save a draft to the server. The draft on disk is updated to reflect the
 /// outcome before this returns, so a crash right after cannot lose it.
 pub async fn save<K: Kind>(s: &Session, d: &mut Draft) -> Result<SaveOutcome, ApiError> {
-    let drafts = s.drafts(K::SERVICE)?;
+    let drafts = s.drafts(K::DRAFTS)?;
     if d.state == SaveState::Pending {
         // a previous attempt's outcome is unknown: settle that first
         reconcile::<K>(s, d).await?;
@@ -142,7 +144,7 @@ pub async fn save<K: Kind>(s: &Session, d: &mut Draft) -> Result<SaveOutcome, Ap
             let old_key = d.key.clone();
             accept(d, v);
             if is_local_key(&old_key) && d.key != old_key {
-                drafts.discard(K::SERVICE, &old_key).map_err(|e| ApiError::BadRequest(e.to_string()))?;
+                drafts.discard(K::DRAFTS, &old_key).map_err(|e| ApiError::BadRequest(e.to_string()))?;
             }
             SaveOutcome::Saved
         }
@@ -233,11 +235,15 @@ pub async fn reconcile<K: Kind>(s: &Session, d: &mut Draft) -> Result<(), ApiErr
 }
 
 async fn find_created<K: Kind>(s: &Session, local: &Value) -> Result<Option<Versioned<Value>>, ApiError> {
-    let candidates: Vec<Value> = match K::SERVICE {
+    let candidates: Vec<Value> = match K::DRAFTS {
         content::SERVICE => {
             let col = local["collection"].as_str();
             let p = content::entries(s, col, content::Status::All, 1, 20).await?;
             p.value.items.into_iter().filter_map(|e| serde_json::to_value(e).ok()).collect()
+        }
+        "content-series" => {
+            let l = content::series_list(s).await?;
+            l.value.into_iter().filter_map(|e| serde_json::to_value(e).ok()).collect()
         }
         feed::SERVICE => {
             let p = feed::posts(s, None, 20).await?;
@@ -251,7 +257,7 @@ async fn find_created<K: Kind>(s: &Session, local: &Value) -> Result<Option<Vers
         if key.is_empty() {
             continue;
         }
-        if c.get("title") != local.get("title") && K::SERVICE == content::SERVICE {
+        if c.get("title") != local.get("title") && K::DRAFTS == content::SERVICE {
             continue;
         }
         let full = K::get(s, &key).await?;
@@ -301,7 +307,7 @@ pub async fn resolve<K: Kind>(s: &Session, d: &mut Draft, how: Resolution) -> Re
             d.base_etag = d.remote_etag.take();
             d.remote = None;
             d.state = if d.base.as_ref().is_some_and(|b| same_edits::<K>(b, &d.local)) { SaveState::Saved } else { SaveState::Local };
-            s.drafts(K::SERVICE)?.save(d).map_err(|e| ApiError::BadRequest(e.to_string()))?;
+            s.drafts(K::DRAFTS)?.save(d).map_err(|e| ApiError::BadRequest(e.to_string()))?;
             Ok(if d.state == SaveState::Saved { SaveOutcome::Saved } else { SaveOutcome::NotSaved(ApiError::Cancelled) })
         }
         Resolution::Merge => {
@@ -311,7 +317,7 @@ pub async fn resolve<K: Kind>(s: &Session, d: &mut Draft, how: Resolution) -> Re
             d.base_etag = d.remote_etag.take();
             d.remote = None;
             d.state = SaveState::Local;
-            s.drafts(K::SERVICE)?.save(d).map_err(|e| ApiError::BadRequest(e.to_string()))?;
+            s.drafts(K::DRAFTS)?.save(d).map_err(|e| ApiError::BadRequest(e.to_string()))?;
             Ok(SaveOutcome::NotSaved(ApiError::Cancelled))
         }
     }
@@ -321,13 +327,13 @@ pub async fn resolve<K: Kind>(s: &Session, d: &mut Draft, how: Resolution) -> Re
 /// or return the existing draft, which always wins over the server copy
 /// (local work is never silently replaced).
 pub async fn open<K: Kind>(s: &Session, key: &str) -> Result<Draft, ApiError> {
-    let drafts = s.drafts(K::SERVICE)?;
-    if let Some(d) = drafts.load(K::SERVICE, key) {
+    let drafts = s.drafts(K::DRAFTS)?;
+    if let Some(d) = drafts.load(K::DRAFTS, key) {
         return Ok(d);
     }
     let v = K::get(s, key).await?;
     Ok(Draft {
-        service: K::SERVICE.into(),
+        service: K::DRAFTS.into(),
         key: key.into(),
         base: Some(v.value.clone()),
         base_etag: v.etag,
@@ -371,4 +377,25 @@ pub fn edit(s: &Session, d: &mut Draft, local: Value) -> Result<(), ApiError> {
 /// throw away).
 pub fn close(s: &Session, d: &Draft) -> Result<(), ApiError> {
     s.drafts(&d.service)?.discard(&d.service, &d.key).map_err(|e| ApiError::BadRequest(e.to_string()))
+}
+
+pub struct ContentSeries;
+
+impl Kind for ContentSeries {
+    const SERVICE: &'static str = content::SERVICE;
+    const DRAFTS: &'static str = "content-series";
+    const EDITABLE: &'static [&'static str] = &["title", "body"];
+    fn key_of(v: &Value) -> String {
+        v["slug"].as_str().unwrap_or("").to_string()
+    }
+    async fn get(s: &Session, key: &str) -> Result<Versioned<Value>, ApiError> {
+        let l = content::series(s, key).await?;
+        to_value(Versioned { value: l.value, etag: l.etag })
+    }
+    async fn put(s: &Session, key: &str, v: &Value, if_match: Option<&str>) -> Result<Versioned<Value>, ApiError> {
+        to_value(content::update_series(s, key, v["title"].as_str().unwrap_or(""), v["body"].as_str().unwrap_or(""), if_match).await?)
+    }
+    async fn post(s: &Session, v: &Value) -> Result<Versioned<Value>, ApiError> {
+        to_value(content::create_series(s, v["title"].as_str().unwrap_or(""), v["slug"].as_str().unwrap_or(""), v["body"].as_str().unwrap_or("")).await?)
+    }
 }

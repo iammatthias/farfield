@@ -99,7 +99,10 @@ impl Session {
         Ok(Scope::new(&self.data_dir, &self.profile.id, &self.client(service)?.identity()))
     }
 
-    pub fn drafts(&self, service: &str) -> Result<Drafts, ApiError> {
+    /// Drafts for a service. A draft area may be a sub-kind of a service
+    /// (`content-series`); it is scoped by the service it belongs to.
+    pub fn drafts(&self, area: &str) -> Result<Drafts, ApiError> {
+        let service = area.split('-').next().unwrap_or(area);
         Ok(Drafts::new(self.scope(service)?))
     }
 

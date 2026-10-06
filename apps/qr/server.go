@@ -139,6 +139,9 @@ func (s *Server) routes() http.Handler {
 	mux.HandleFunc("PUT /api/codes/{id}", s.auth.RequireAPIKey(s.handleAPIUpdate))
 	mux.HandleFunc("DELETE /api/codes/{id}", s.auth.RequireAPIKey(s.handleAPIDelete))
 
+	// Private admin API — tailnet only, write key (see admin.go).
+	s.mountAdmin(mux)
+
 	// Shared theme stylesheet.
 	mux.HandleFunc("GET /static/fonts.css", theme.FontsHandler())
 	mux.HandleFunc("GET /static/styles.css", theme.CSSHandler())
@@ -229,7 +232,7 @@ func (s *Server) handleUpdate(w http.ResponseWriter, r *http.Request) {
 		s.renderForm(w, c, false, "/codes/"+id, msg)
 		return
 	}
-	ok, err := updateCode(s.db, id, c)
+	ok, err := updateCode(s.db, id, c, "")
 	if err != nil {
 		s.fail(w, "update code", err)
 		return
@@ -242,7 +245,7 @@ func (s *Server) handleUpdate(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleDelete(w http.ResponseWriter, r *http.Request) {
-	if _, err := deleteCode(s.db, r.PathValue("id")); err != nil {
+	if _, err := deleteCode(s.db, r.PathValue("id"), ""); err != nil {
 		s.fail(w, "delete code", err)
 		return
 	}
@@ -533,9 +536,13 @@ func (s *Server) handleAPICreate(w http.ResponseWriter, r *http.Request) {
 		web.WriteError(w, http.StatusInternalServerError, "could not create code")
 		return
 	}
-	web.WriteJSON(w, http.StatusCreated, &c)
+	web.WriteSaved(w, http.StatusCreated, c.CID, &c)
 }
 
+// handleAPIUpdate merges a partial body into a code. With If-Match it is a
+// conditional write against the code's CID (its GET ETag), checked before
+// the merge and guarded again on the UPDATE itself. Like bookmarks, the CID
+// leaves adminNotes out, so a notes-only edit does not move the tag.
 func (s *Server) handleAPIUpdate(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")
 	existing, err := getCode(s.db, id)
@@ -546,6 +553,13 @@ func (s *Server) handleAPIUpdate(w http.ResponseWriter, r *http.Request) {
 	if existing == nil {
 		web.WriteError(w, http.StatusNotFound, "code not found")
 		return
+	}
+	ifCID := ""
+	switch web.CheckIfMatch(w, r, existing.CID, existing) {
+	case web.Failed:
+		return
+	case web.Matched:
+		ifCID = existing.CID
 	}
 	// Decode ON TOP of the existing record, so a field the caller omitted keeps
 	// its stored value. Decoding into a zero Code and patching a few fields
@@ -567,29 +581,68 @@ func (s *Server) handleAPIUpdate(w http.ResponseWriter, r *http.Request) {
 		web.WriteError(w, http.StatusBadRequest, msg)
 		return
 	}
-	ok, err := updateCode(s.db, id, &c)
+	ok, err := updateCode(s.db, id, &c, ifCID)
 	if err != nil {
 		web.WriteError(w, http.StatusInternalServerError, "could not update code")
 		return
 	}
 	if !ok {
-		web.WriteError(w, http.StatusNotFound, "code not found")
+		s.lostRace(w, id)
 		return
 	}
-	web.WriteJSON(w, http.StatusOK, &c)
+	web.WriteSaved(w, http.StatusOK, c.CID, &c)
 }
 
 func (s *Server) handleAPIDelete(w http.ResponseWriter, r *http.Request) {
-	existed, err := deleteCode(s.db, r.PathValue("id"))
+	id := r.PathValue("id")
+	ifCID := ""
+	if r.Header.Get("If-Match") != "" {
+		cur, err := getCode(s.db, id)
+		if err != nil {
+			web.WriteError(w, http.StatusInternalServerError, "could not read code")
+			return
+		}
+		if cur == nil {
+			web.WriteError(w, http.StatusNotFound, "code not found")
+			return
+		}
+		switch web.CheckIfMatch(w, r, cur.CID, cur) {
+		case web.Failed:
+			return
+		case web.Matched:
+			ifCID = cur.CID
+		}
+	}
+	existed, err := deleteCode(s.db, id, ifCID)
 	if err != nil {
 		web.WriteError(w, http.StatusInternalServerError, "could not delete code")
 		return
 	}
 	if !existed {
+		s.lostRace(w, id)
+		return
+	}
+	web.WriteJSON(w, http.StatusOK, map[string]any{"deleted": id})
+}
+
+// lostRace answers a write whose statement matched no row: the code is gone
+// (404), or — for a guarded write — another save changed it after the
+// If-Match check passed (412 with the code as it now stands).
+//
+// The 412's "current" is the full record, adminNotes included, rather than
+// the public GET's view: the caller holds the write key, and the public GET
+// would 404 a private or disabled code outright.
+func (s *Server) lostRace(w http.ResponseWriter, id string) {
+	cur, err := getCode(s.db, id)
+	if err != nil {
+		web.WriteError(w, http.StatusInternalServerError, "could not read code")
+		return
+	}
+	if cur == nil {
 		web.WriteError(w, http.StatusNotFound, "code not found")
 		return
 	}
-	web.WriteJSON(w, http.StatusOK, map[string]any{"deleted": r.PathValue("id")})
+	web.WritePreconditionFailed(w, cur.CID, cur)
 }
 
 // ── render helpers ─────────────────────────────────────────────────────────

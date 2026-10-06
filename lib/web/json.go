@@ -27,7 +27,13 @@ func WriteError(w http.ResponseWriter, status int, msg string) {
 // rewrite strong tags to weak when they re-encode a response — and
 // comma-separated candidate lists, which an exact string compare misses.
 func ETagMatch(r *http.Request, etag string) bool {
-	header := r.Header.Get("If-None-Match")
+	return etagListMatch(r.Header.Get("If-None-Match"), etag)
+}
+
+// etagListMatch is the validator comparison both conditional headers share:
+// "*", or any candidate in a comma-separated list, weak or strong, quoted or
+// not. An empty header matches nothing.
+func etagListMatch(header, etag string) bool {
 	if header == "" {
 		return false
 	}

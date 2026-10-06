@@ -268,7 +268,7 @@ func (s *Server) handleUpdatePost(w http.ResponseWriter, r *http.Request) {
 		s.postSaveError(w, r, p, false, "/posts/"+slug, "A post needs a body.")
 		return
 	}
-	ok, err := updatePost(s.db, slug, p)
+	ok, err := updatePost(s.db, slug, p, "")
 	if err != nil {
 		s.fail(w, "update post", err)
 		return
@@ -314,7 +314,7 @@ func (s *Server) postSaveError(w http.ResponseWriter, r *http.Request, p *Post, 
 }
 
 func (s *Server) handleDeletePost(w http.ResponseWriter, r *http.Request) {
-	if _, err := deletePost(s.db, r.PathValue("slug")); err != nil {
+	if _, err := deletePost(s.db, r.PathValue("slug"), ""); err != nil {
 		s.fail(w, "delete post", err)
 		return
 	}
@@ -406,9 +406,12 @@ func (s *Server) handleAPICreate(w http.ResponseWriter, r *http.Request) {
 		web.WriteError(w, http.StatusInternalServerError, "could not create post")
 		return
 	}
-	web.WriteJSON(w, http.StatusCreated, p)
+	web.WriteSaved(w, http.StatusCreated, p.CID, p)
 }
 
+// handleAPIUpdate replaces a post. With If-Match it is a conditional write:
+// the post's CID (its GET ETag) must still be the one the client holds, both
+// at the check and at the write itself — see lostRace.
 func (s *Server) handleAPIUpdate(w http.ResponseWriter, r *http.Request) {
 	slug := r.PathValue("slug")
 	var p Post
@@ -420,41 +423,92 @@ func (s *Server) handleAPIUpdate(w http.ResponseWriter, r *http.Request) {
 		web.WriteError(w, http.StatusBadRequest, "body is required")
 		return
 	}
-	ok, err := updatePost(s.db, slug, &p)
+	ifCID, ok := s.ifMatchPost(w, r, slug)
+	if !ok {
+		return
+	}
+	updated, err := updatePost(s.db, slug, &p, ifCID)
 	if err != nil {
 		web.WriteError(w, http.StatusInternalServerError, "could not update post")
 		return
 	}
-	if !ok {
-		web.WriteError(w, http.StatusNotFound, "post not found")
+	if !updated {
+		s.lostRace(w, slug)
 		return
 	}
-	p.Slug = slug
-	web.WriteJSON(w, http.StatusOK, p)
+	web.WriteSaved(w, http.StatusOK, p.CID, p)
 }
 
 func (s *Server) handleAPIDelete(w http.ResponseWriter, r *http.Request) {
+	slug := r.PathValue("slug")
 	// ?media=release also lets go of the post's photos when nothing else
 	// embeds them — what taking a photo post back (/undo) means. Without it
 	// only the post goes: deleting blob bytes is permanent, so it is asked for
 	// explicitly, never implied.
 	var release []string
 	if r.URL.Query().Get("media") == "release" {
-		if p, err := getPost(s.db, r.PathValue("slug")); err == nil && p != nil {
+		if p, err := getPost(s.db, slug); err == nil && p != nil {
 			release = blobCIDs(p.Body)
 		}
 	}
-	existed, err := deletePost(s.db, r.PathValue("slug"))
+	ifCID, ok := s.ifMatchPost(w, r, slug)
+	if !ok {
+		return
+	}
+	existed, err := deletePost(s.db, slug, ifCID)
 	if err != nil {
 		web.WriteError(w, http.StatusInternalServerError, "could not delete post")
 		return
 	}
 	if !existed {
-		web.WriteError(w, http.StatusNotFound, "post not found")
+		s.lostRace(w, slug)
 		return
 	}
 	s.releaseMedia(release)
-	web.WriteJSON(w, http.StatusOK, map[string]any{"deleted": r.PathValue("slug")})
+	web.WriteJSON(w, http.StatusOK, map[string]any{"deleted": slug})
+}
+
+// ifMatchPost runs a write's If-Match check against the stored post and
+// returns the CID to guard the write on ("" when the request carries no
+// precondition). ok is false once a response is written: the 412, or a 404
+// for a post that does not exist. Without If-Match nothing is read and the
+// write proceeds exactly as it always has.
+func (s *Server) ifMatchPost(w http.ResponseWriter, r *http.Request, slug string) (ifCID string, ok bool) {
+	if r.Header.Get("If-Match") == "" {
+		return "", true
+	}
+	cur, err := getPost(s.db, slug)
+	if err != nil {
+		web.WriteError(w, http.StatusInternalServerError, "could not read post")
+		return "", false
+	}
+	if cur == nil {
+		web.WriteError(w, http.StatusNotFound, "post not found")
+		return "", false
+	}
+	switch web.CheckIfMatch(w, r, cur.CID, cur) {
+	case web.Failed:
+		return "", false
+	case web.Matched:
+		return cur.CID, true
+	}
+	return "", true
+}
+
+// lostRace answers a write whose statement matched no row: the post is gone
+// (404), or — for a guarded write — another save changed it after the
+// If-Match check passed (412 with the post as it now stands).
+func (s *Server) lostRace(w http.ResponseWriter, slug string) {
+	cur, err := getPost(s.db, slug)
+	if err != nil {
+		web.WriteError(w, http.StatusInternalServerError, "could not read post")
+		return
+	}
+	if cur == nil {
+		web.WriteError(w, http.StatusNotFound, "post not found")
+		return
+	}
+	web.WritePreconditionFailed(w, cur.CID, cur)
 }
 
 // ── helpers ────────────────────────────────────────────────────────────────

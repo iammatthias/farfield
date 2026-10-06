@@ -118,7 +118,7 @@ func TestBookmarkCRUD(t *testing.T) {
 
 	b.Title = "Edited"
 	b.Public = false
-	ok, err := updateBookmark(db, b.ID, b)
+	ok, err := updateBookmark(db, b.ID, b, "")
 	if err != nil || !ok {
 		t.Fatalf("updateBookmark: ok=%v err=%v", ok, err)
 	}
@@ -130,7 +130,7 @@ func TestBookmarkCRUD(t *testing.T) {
 		t.Error("updateBookmark cleared CID")
 	}
 
-	deleted, err := deleteBookmark(db, b.ID)
+	deleted, err := deleteBookmark(db, b.ID, "")
 	if err != nil || !deleted {
 		t.Fatalf("deleteBookmark: ok=%v err=%v", deleted, err)
 	}

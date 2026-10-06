@@ -52,8 +52,12 @@ func run(host, port string) error {
 	s := &Server{
 		db: db,
 		auth: &web.Auth{
-			DB:           db,
-			Password:     store.Env("PASSWORD", ""),
+			DB:       db,
+			Password: store.Env("PASSWORD", ""),
+			// BACKUP_API_KEY gates only the read-only admin API (admin.go).
+			// Unset, that API answers 503 — no admin-issued key store is
+			// attached here, so there is no second way in.
+			APIKey:       store.Env("BACKUP_API_KEY", ""),
 			CookieSecure: store.Env("COOKIE_SECURE", "false") == "true",
 		},
 		rd: &web.Renderer{Templates: tmpl, AssetVer: theme.Version, Funcs: tmplFuncs,
@@ -133,6 +137,9 @@ func (s *Server) routes() http.Handler {
 	mux.HandleFunc("GET /login", s.handleLoginForm)
 	mux.HandleFunc("POST /login", s.auth.HandleLogin)
 	mux.HandleFunc("GET /logout", s.auth.HandleLogout)
+
+	// Private admin API — tailnet only, BACKUP_API_KEY, read-only (see admin.go).
+	s.mountAdmin(mux)
 
 	mux.HandleFunc("GET /status", s.handleStatus)
 	mux.HandleFunc("GET /static/fonts.css", theme.FontsHandler())

@@ -1943,8 +1943,20 @@ dependencies = [
 name = "farfield-desktop"
 version = "0.1.0"
 dependencies = [
+ "anyhow",
  "base64 0.23.1",
+ "core-foundation 0.10.0",
+ "core-graphics 0.24.0",
+ "directories",
+ "farfield-core",
+ "farfield-editor",
  "gpui",
+ "image",
+ "parking_lot",
+ "serde",
+ "serde_json",
+ "smallvec",
+ "unicode-segmentation",
  "wuff",
 ]
 

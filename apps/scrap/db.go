@@ -213,6 +213,38 @@ func listManagePastes(db *sql.DB, visibility, lang, q string) ([]Paste, error) {
 	return collectPastes(rows)
 }
 
+// listAdminPastes returns one page of every paste, newest first, with bodies
+// blanked (a list is for choosing, and a page of 2 MiB bodies is not), plus
+// the total row count. Expired rows the sweep has not reached yet are
+// included — their expiresAt says so — because the admin view should show
+// what is actually stored. page is 1-based.
+func listAdminPastes(db *sql.DB, limit, page int) ([]Paste, int, error) {
+	var total int
+	if err := db.QueryRow(`SELECT COUNT(*) FROM pastes`).Scan(&total); err != nil {
+		return nil, 0, err
+	}
+	rows, err := db.Query(`SELECT `+strings.Replace(pasteCols, "p.body", "''", 1)+`
+		FROM pastes p ORDER BY p.created_at DESC, p.id LIMIT ? OFFSET ?`,
+		limit, (page-1)*limit)
+	if err != nil {
+		return nil, 0, err
+	}
+	ps, err := collectPastes(rows)
+	return ps, total, err
+}
+
+// updatePasteMeta rewrites a paste's metadata in place — never its body,
+// which is its content address and so its id. Reports whether the row exists.
+func updatePasteMeta(db *sql.DB, p *Paste) (bool, error) {
+	res, err := db.Exec(`UPDATE pastes SET title = ?, lang = ?, visibility = ?, expires_at = ?
+		WHERE id = ?`, p.Title, p.Lang, p.Visibility, p.ExpiresAt, p.ID)
+	if err != nil {
+		return false, err
+	}
+	n, _ := res.RowsAffected()
+	return n > 0, nil
+}
+
 // escapeLike escapes LIKE metacharacters so a search for "100%" matches
 // literally.
 func escapeLike(s string) string {

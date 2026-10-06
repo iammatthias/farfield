@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"regexp"
 	"strings"
 	"time"
 
@@ -585,6 +586,22 @@ func insertEntry(db *sql.DB, e *Entry) error {
 // new values (including a possibly-changed collection and slug). A trashed
 // entry is not editable — like every read, the update sees it as missing.
 func updateEntry(db *sql.DB, currentSlug string, e *Entry) error {
+	return updateEntryIf(db, currentSlug, e, entryVersion{})
+}
+
+// entryVersion is what an entry's ETag hashes — its CID and publish date
+// (see entryETag) — and so what a conditional write must guard on: the tag
+// cannot be inverted, but the two columns it came from can be compared. The
+// zero value means unconditional.
+type entryVersion struct{ CID, PublishedAt string }
+
+func versionOf(e *Entry) entryVersion { return entryVersion{e.CID, e.PublishedAt} }
+
+// updateEntryIf is updateEntry that lands only while the row is still at
+// version ifVer — the one an If-Match was checked against — so a save that
+// slipped in after the check is not overwritten. A moved version reads like
+// a missing row (sql.ErrNoRows); the caller re-reads to tell them apart.
+func updateEntryIf(db *sql.DB, currentSlug string, e *Entry, ifVer entryVersion) error {
 	e.Body = normalizeBody(e.Body)
 	collID, err := collectionID(db, e.Collection)
 	if err != nil {
@@ -611,9 +628,11 @@ func updateEntry(db *sql.DB, currentSlug string, e *Entry) error {
 	res, err := db.Exec(
 		`UPDATE entries SET collection_id = ?, slug = ?, title = ?, excerpt = ?,
 		   body = ?, tags = ?, published = ?, updated_at = ?, cid = ?, published_at = ?
-		 WHERE slug = ? AND deleted_at = ''`,
+		 WHERE slug = ? AND deleted_at = ''
+		   AND (? = '' OR (cid = ? AND published_at = ?))`,
 		collID, e.Slug, e.Title, e.Excerpt, e.Body, encodeTags(e.Tags),
-		e.Published, e.UpdatedAt, e.CID, e.PublishedAt, currentSlug)
+		e.Published, e.UpdatedAt, e.CID, e.PublishedAt, currentSlug,
+		ifVer.CID, ifVer.CID, ifVer.PublishedAt)
 	if err != nil {
 		if isUnique(err) {
 			return errSlugTaken
@@ -637,9 +656,15 @@ func updateEntry(db *sql.DB, currentSlug string, e *Entry) error {
 // creation millisecond, so a real collision is vanishingly unlikely — not
 // worth freeing the slug early for.
 func deleteEntry(db *sql.DB, slug string) (bool, error) {
+	return deleteEntryIf(db, slug, entryVersion{})
+}
+
+// deleteEntryIf is deleteEntry guarded on a version, as in updateEntryIf.
+func deleteEntryIf(db *sql.DB, slug string, ifVer entryVersion) (bool, error) {
 	res, err := db.Exec(
-		`UPDATE entries SET deleted_at = ? WHERE slug = ? AND deleted_at = ''`,
-		store.NowRFC3339(), slug)
+		`UPDATE entries SET deleted_at = ? WHERE slug = ? AND deleted_at = ''
+		   AND (? = '' OR (cid = ? AND published_at = ?))`,
+		store.NowRFC3339(), slug, ifVer.CID, ifVer.CID, ifVer.PublishedAt)
 	if err != nil {
 		return false, err
 	}
@@ -849,14 +874,65 @@ func upsertSeries(db *sql.DB, s *Series) error {
 	return err
 }
 
-// deleteSeries removes a series fragment by slug.
-func deleteSeries(db *sql.DB, slug string) (bool, error) {
-	res, err := db.Exec(`DELETE FROM series WHERE slug = ?`, slug)
+// updateSeriesIf rewrites an existing fragment's title and body only while
+// it still carries ifCID — the version an If-Match was checked against. It
+// is the guarded twin of upsertSeries for the API's conditional PUT: an
+// update, never an insert, so a fragment deleted in the meantime stays
+// deleted. false means no row matched; the caller re-reads to say why.
+func updateSeriesIf(db *sql.DB, s *Series, ifCID string) (bool, error) {
+	s.CID = seriesCID(s)
+	res, err := db.Exec(
+		`UPDATE series SET title = ?, body = ?, updated_at = ?, cid = ?
+		 WHERE slug = ? AND cid = ?`,
+		s.Title, s.Body, s.UpdatedAt, s.CID, s.Slug, ifCID)
 	if err != nil {
 		return false, err
 	}
 	n, _ := res.RowsAffected()
 	return n > 0, nil
+}
+
+// deleteSeries removes a series fragment by slug.
+func deleteSeries(db *sql.DB, slug string) (bool, error) {
+	return deleteSeriesIf(db, slug, "")
+}
+
+// deleteSeriesIf is deleteSeries guarded on a version, as in updateSeriesIf;
+// an empty ifCID is unconditional.
+func deleteSeriesIf(db *sql.DB, slug, ifCID string) (bool, error) {
+	res, err := db.Exec(`DELETE FROM series WHERE slug = ? AND (? = '' OR cid = ?)`,
+		slug, ifCID, ifCID)
+	if err != nil {
+		return false, err
+	}
+	n, _ := res.RowsAffected()
+	return n > 0, nil
+}
+
+// seriesReferences counts the entries whose body embeds series://<slug>.
+// Trashed entries count: a restore within the retention window would bring
+// back a body pointing at a fragment that no longer exists. instr narrows the
+// scan in SQL; the pattern then rejects a longer slug that merely starts with
+// this one (series://trip inside series://trip-2), which a substring match —
+// reslug's, where over-matching is harmless — would count.
+func seriesReferences(db *sql.DB, slug string) (int, error) {
+	ref := regexp.MustCompile(`series://` + regexp.QuoteMeta(slug) + `(?:[^a-z0-9-]|$)`)
+	rows, err := db.Query(`SELECT body FROM entries WHERE instr(body, ?) > 0`, "series://"+slug)
+	if err != nil {
+		return 0, err
+	}
+	defer rows.Close()
+	n := 0
+	for rows.Next() {
+		var body string
+		if err := rows.Scan(&body); err != nil {
+			return 0, err
+		}
+		if ref.MatchString(body) {
+			n++
+		}
+	}
+	return n, rows.Err()
 }
 
 // isUnique reports whether err is a SQLite UNIQUE-constraint violation.

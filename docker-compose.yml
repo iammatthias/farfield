@@ -436,6 +436,7 @@ services:
       - BACKUP_PORT=8791
       - BACKUP_DB_PATH=/data/backup.sqlite
       - BACKUP_INTERVAL=${BACKUP_INTERVAL:-6h}
+      - BACKUP_API_KEY=${BACKUP_API_KEY:-}
       - CONTENT_DB_PATH=/data/content.sqlite
       - FEED_DB_PATH=/data/feed.sqlite
       - BLOBS_DB_PATH=/data/blobs.sqlite

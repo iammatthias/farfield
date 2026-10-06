@@ -271,6 +271,9 @@ func (s *Server) routes() http.Handler {
 	mux.HandleFunc("PUT /api/books/{cid}/collection", s.requireUploadKey(s.handleAPISetCollection))
 	mux.HandleFunc("DELETE /api/books/{cid}", s.auth.RequireAPIKey(s.handleAPIDelete))
 
+	// Private admin API — tailnet only, full key (see admin.go).
+	s.mountAdmin(mux)
+
 	// tus resumable upload — chunked so a large EPUB clears the per-request body
 	// limit at the edge. Same upload-key scope as POST /api/books; OPTIONS is
 	// answered by the shim wrapping the whole stack (see below).
