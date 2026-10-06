@@ -925,7 +925,25 @@ impl Workspace for ContentWs {
 }
 
 impl Render for ContentWs {
-    fn render(&mut self, _w: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+    fn render(&mut self, w: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        // a reference handed over from Blobs lands at the open document's caret
+        if let Some(md) = cx.global_mut::<crate::shell::Overlay>().insert.take() {
+            let editor = self.selected.as_ref().and_then(|k| self.open.get(k)).map(|o| match o {
+                Open::Entry(d) => d.read(cx).editor.clone(),
+                Open::Series(d) => d.read(cx).editor.clone(),
+            });
+            match editor {
+                Some(ed) => {
+                    ed.update(cx, |e, cx| e.insert(&format!("\n{md}\n"), cx));
+                    ed.read(cx).focus_editor(w);
+                    log("blob-inserted", &[("md", &md)]);
+                    toast(cx, "Inserted at the caret.", false);
+                }
+                None => {
+                    toast(cx, format!("No document is open — {md} is on the clipboard; open one and paste."), false)
+                }
+            }
+        }
         let t = theme(cx).clone();
         let doc: Option<AnyElement> = self.selected.as_ref().and_then(|k| self.open.get(k)).map(|o| match o {
             Open::Entry(d) => d.clone().into_any_element(),

@@ -1,0 +1,9 @@
+[{"wait":1500},{"key":"cmd-1"},{"wait":1500},
+ {"note":"scenario: conflict"},
+ {"key":"cmd-f"},{"type":"photograph"},{"wait":300},{"key":"down"},{"wait":1500},{"key":"enter"},{"key":"cmd-down"},
+ {"type":"\nA closing line written on this Mac."},{"wait":800},
+ {"shell":"@EV@/other-device.sh"},
+ {"key":"cmd-s"},{"until":"conflict","timeout":15000},{"wait":1200},{"snap":"01-detected"},
+ {"key":"cmd-shift-p"},{"type":"merge both"},{"wait":300},{"key":"enter"},{"until":"resolve","timeout":5000},{"wait":1200},{"snap":"02-merged"},
+ {"key":"cmd-s"},{"until":"saved","timeout":15000},{"wait":1200},{"snap":"03-saved"},
+ {"quit":true}]

@@ -1,0 +1,11 @@
+[{"wait":1500},{"key":"cmd-1"},{"wait":1500},
+ {"note":"scenario: outage"},
+ {"key":"cmd-f"},{"type":"photograph"},{"wait":300},{"key":"down"},{"wait":1500},{"key":"enter"},{"key":"cmd-down"},
+ {"shell":"kill $(lsof -ti tcp:8787 -sTCP:LISTEN)"},
+ {"note":"content service stopped"},
+ {"type":"\nWritten while the content service was down."},{"wait":800},
+ {"key":"cmd-s"},{"until":"save-failed","timeout":20000},{"wait":1000},{"snap":"01-save-offline"},
+ {"key":"cmd-r"},{"wait":2500},{"snap":"02-stale-list"},
+ {"key":"cmd-2"},{"wait":2500},{"snap":"03-feed-unaffected"},
+ {"note":"quitting with unsaved work (the draft is on disk)"},
+ {"quit":true}]

@@ -70,3 +70,6 @@ if [ "${VERIFY:-0}" = 1 ]; then
   echo "bundle digest: $FIRST"
   if [ "$FIRST" = "$SECOND" ]; then echo "reproducible: identical on rebuild"; else echo "NOT reproducible: $SECOND"; exit 1; fi
 fi
+if [ -n "${REV:-}" ]; then
+  cd "$REPO" && git worktree remove --force "$WT" && git worktree prune
+fi

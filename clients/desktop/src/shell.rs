@@ -91,6 +91,9 @@ pub struct Overlay {
     pub goto: Option<String>,
     /// The profile changed: rebuild every workspace against the new session.
     pub reset: bool,
+    /// Markdown another workspace wants placed at the caret of the open
+    /// document (Blobs → "Insert into open document").
+    pub insert: Option<String>,
 }
 
 impl Global for Overlay {}

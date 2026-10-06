@@ -531,15 +531,16 @@ impl BlobsWs {
         }
     }
 
-    /// "Insert into the open document": the Markdown goes on the clipboard,
-    /// ready for ⌘V in the document — the editor owns its caret, and a paste
-    /// is the one insertion that cannot land in the wrong place.
+    /// "Insert into the open document": Content places the reference at the
+    /// caret of the document open there (one undo step), and the Markdown is
+    /// also left on the clipboard in case no document is open.
     fn insert_selected(&mut self, cx: &mut Context<Self>) {
         let Some(m) = self.selected_meta().cloned() else { return };
         let md = m.markdown("");
         cx.write_to_clipboard(ClipboardItem::new_string(md.clone()));
         log("blob-insert", &[("cid", &m.cid)]);
-        toast(cx, format!("Copied {md} — switch to the document (⌘1) and paste it where it belongs (⌘V)."), false);
+        cx.global_mut::<crate::shell::Overlay>().insert = Some(md);
+        crate::shell::goto(cx, "content");
     }
 
     fn pick_upload(&mut self, w: &mut Window, cx: &mut Context<Self>) {

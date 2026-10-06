@@ -101,14 +101,26 @@ REV=HEAD VERIFY=1 clients/desktop/packaging/build-app.sh # from a clean worktree
 
 Inputs are pinned (Cargo.lock `--locked`, pre-exported Go assets, `SOURCE_DATE_EPOCH`,
 remapped paths); the bundle is ad-hoc signed. Re-sign with a Developer ID to distribute.
+An ad-hoc signature changes with every build, so macOS may ask again for Keychain access
+after you install a new build; a stable signing identity avoids that.
 
 ## Evidence runs
 
-`FARFIELD_SCRIPT=steps.json FARFIELD_EVIDENCE_DIR=out/` replays a session through the real
-input path and captures the app's own window (no Screen Recording permission needed).
-`FARFIELD_SECRETS=memory` with `FARFIELD_KEY_<SERVICE>=…` keeps scripted runs off the
-Keychain. See `desktop/src/evidence.rs`. Every run appends structured events to
-`events.jsonl` in the data directory.
+```sh
+make dev
+clients/desktop/evidence/run.sh            # every scenario → clients/target/evidence/
+clients/desktop/evidence/run.sh conflict   # one
+```
+
+Scenarios: first-run setup, a light and a dark tour of every workspace, media publishing
+(drop a HEIC → blob → publish), a conflict with a second device and its merge, an outage
+mid-edit and recovery of the draft after a relaunch, inserting a blob into the open
+document, and a half-written post surviving a quit. Each replays through the real input
+path (`FARFIELD_SCRIPT`) and captures the app's own window (no Screen Recording
+permission needed); each run's structured `events.jsonl` sits beside its screenshots.
+Scripted runs keep keys in memory (`FARFIELD_SECRETS=memory`, `FARFIELD_KEY_<SERVICE>`).
+A script's `shell` step runs arbitrary commands — scripts are development tooling and run
+only when `FARFIELD_SCRIPT` is set.
 
 ## iOS
 

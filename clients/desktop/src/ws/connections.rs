@@ -786,11 +786,14 @@ impl Workspace for Connections {
             ("pulse", "Open the pulse console (browser)".into(), ""),
         ]
     }
-    fn run_command(&mut self, id: &str, _w: &mut Window, cx: &mut Context<Self>) {
+    fn run_command(&mut self, id: &str, w: &mut Window, cx: &mut Context<Self>) {
         match id {
             "test-all" => self.test_all(cx),
+            "sec-keys" => {
+                self.section = Section::Keys;
+                self.fleet_key.read(cx).focus(w);
+            }
             "sec-fleet" => self.section = Section::Fleet,
-            "sec-keys" => self.section = Section::Keys,
             "sec-profiles" => self.section = Section::Profiles,
             "sec-look" => self.section = Section::Appearance,
             "sec-data" => {

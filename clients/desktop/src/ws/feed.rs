@@ -35,6 +35,8 @@ use std::time::Duration;
 actions!(feed_ws, [Publish]);
 
 const PAGE: u32 = 20;
+/// The composer's local draft area (apart from edits to existing posts).
+const COMPOSER: &str = "feed-composer";
 /// Longest side of an attachment preview in the composer.
 const ATTACH_PX: u32 = 240;
 
@@ -48,6 +50,8 @@ pub struct FeedWs {
     scroll: ScrollHandle,
     search: Entity<TextField>,
     composer: Entity<DocEditor>,
+    /// Debounced write of the composer to its local draft.
+    composer_save: Option<gpui::Task<()>>,
     attachments: Vec<PathBuf>,
     attach_previews: HashMap<PathBuf, Arc<RenderImage>>,
     /// The post being sent, while it is.
@@ -87,7 +91,10 @@ impl FeedWs {
         let composer =
             cx.new(|cx| DocEditor::new(w, cx, "", "What's happening? Trailing #tags become tags.", Some(session)));
         cx.subscribe_in(&composer, w, |this: &mut Self, _, e: &DocEvent, _w, cx| match e {
-            DocEvent::Changed => cx.notify(),
+            DocEvent::Changed => {
+                this.persist_composer(cx);
+                cx.notify()
+            }
             DocEvent::FilesDropped(p) => this.attach(p.clone(), cx),
             DocEvent::Blur => {}
         })
@@ -104,6 +111,7 @@ impl FeedWs {
             scroll: ScrollHandle::new(),
             search,
             composer,
+            composer_save: None,
             attachments: Vec::new(),
             attach_previews: HashMap::new(),
             posting: None,
@@ -116,6 +124,7 @@ impl FeedWs {
             retired: Vec::new(),
         };
         this.reload(cx);
+        this.restore_composer(cx);
         this
     }
 
@@ -243,6 +252,57 @@ impl FeedWs {
 
     // ── composing ──
 
+    /// The composer is local work like any draft: written to this Mac a moment
+    /// after typing stops (text and attachment paths), restored at launch,
+    /// and dropped once posted.
+    fn persist_composer(&mut self, cx: &mut Context<Self>) {
+        self.composer_save = Some(cx.spawn(async move |this, cx| {
+            cx.background_executor().timer(std::time::Duration::from_millis(400)).await;
+            let _ = this.update(cx, |this, cx| {
+                let body = this.composer.update(cx, |e, _| e.text());
+                let files: Vec<String> = this.attachments.iter().map(|p| p.display().to_string()).collect();
+                let s = app::session(cx);
+                farfield_core::spawn(async move {
+                    let Ok(d) = s.drafts(COMPOSER) else { return };
+                    if body.trim().is_empty() && files.is_empty() {
+                        let _ = d.discard(COMPOSER, "composer");
+                    } else {
+                        let mut draft = farfield_core::sync::new_draft(
+                            COMPOSER,
+                            serde_json::json!({"body": body, "attachments": files}),
+                        );
+                        draft.key = "composer".into();
+                        let _ = d.save(&draft);
+                    }
+                });
+            });
+        }));
+    }
+
+    fn restore_composer(&mut self, cx: &mut Context<Self>) {
+        let s = app::session(cx);
+        let task = farfield_core::spawn(async move { s.drafts(COMPOSER).ok()?.load(COMPOSER, "composer") });
+        cx.spawn(async move |this, cx| {
+            if let Ok(Some(d)) = task.await {
+                let _ = this.update(cx, |this, cx| {
+                    let body = d.local["body"].as_str().unwrap_or("").to_string();
+                    if !body.is_empty() {
+                        this.composer.update(cx, |e, cx| e.set_text(&body, cx));
+                    }
+                    let files: Vec<PathBuf> = d.local["attachments"]
+                        .as_array()
+                        .map(|a| {
+                            a.iter().filter_map(|v| v.as_str()).map(PathBuf::from).filter(|p| p.exists()).collect()
+                        })
+                        .unwrap_or_default();
+                    this.attach(files, cx);
+                    log("feed-composer-restored", &[("chars", &body.len().to_string())]);
+                });
+            }
+        })
+        .detach();
+    }
+
     fn attach(&mut self, paths: Vec<PathBuf>, cx: &mut Context<Self>) {
         for p in paths {
             if p.is_dir() || self.attachments.contains(&p) {
@@ -250,6 +310,7 @@ impl FeedWs {
             }
             log("feed-attach", &[("file", &p.display().to_string())]);
             self.attachments.push(p.clone());
+            self.persist_composer(cx);
             let task = farfield_core::runtime().spawn_blocking({
                 let p = p.clone();
                 move || std::fs::read(&p).ok().and_then(|b| decode(&b, ATTACH_PX))
@@ -273,6 +334,7 @@ impl FeedWs {
 
     fn detach_file(&mut self, p: &PathBuf, cx: &mut Context<Self>) {
         self.attachments.retain(|a| a != p);
+        self.persist_composer(cx);
         if let Some(im) = self.attach_previews.remove(p) {
             self.retired.push(im);
         }
@@ -362,6 +424,7 @@ impl FeedWs {
                                 this.retired.push(im);
                             }
                         }
+                        this.persist_composer(cx);
                         this.selected = Some(p.value.slug.clone());
                         this.posts.insert(0, p.value);
                         toast(cx, "Posted.", false);

@@ -1,0 +1,10 @@
+[{"wait":1500},{"key":"cmd-1"},{"wait":1200},
+ {"note":"scenario: media publishing"},
+ {"key":"cmd-n"},{"wait":600},{"type":"A field note with a photograph"},{"key":"enter"},
+ {"type":"Written in the native client. The photo below was dropped onto the document; blobs converted it from HEIC and stripped its location before hashing.\n"},
+ {"drop":["@ASSETS@/horizon.heic"]},{"until":"upload-done","timeout":90000},{"wait":3000},
+ {"snap":"01-uploaded"},
+ {"key":"cmd-s"},{"until":"saved","timeout":20000},{"wait":800},{"snap":"02-saved"},
+ {"key":"cmd-shift-p"},{"wait":300},{"type":"publish this"},{"wait":300},{"snap":"03-palette"},{"key":"enter"},{"wait":500},{"snap":"04-confirm"},
+ {"key":"enter"},{"until":"saved","timeout":20000},{"wait":1500},{"snap":"05-published"},
+ {"quit":true}]

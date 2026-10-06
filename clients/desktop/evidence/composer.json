@@ -1,0 +1,3 @@
+[{"wait":1500},{"key":"cmd-2"},{"wait":2000},{"key":"cmd-n"},{"wait":300},
+ {"note":"scenario: feed composer survives a quit"},
+ {"type":"Half a thought, left for later #drafts"},{"wait":1200},{"snap":"01-typed"},{"quit":true}]

@@ -1,0 +1,4 @@
+[{"wait":2500},{"snap":"01-welcome"},{"key":"cmd-enter"},{"wait":1500},{"key":"enter"},{"wait":2500},{"snap":"02-fleet-detected"},
+ {"key":"cmd-a"},{"type":"127.0.0.1"},{"key":"enter"},{"wait":1500},{"snap":"03-fleet-checked"},
+ {"key":"cmd-enter"},{"wait":800},{"type":"dev-content-key"},{"key":"enter"},{"wait":2500},{"snap":"04-keys"},
+ {"key":"cmd-enter"},{"wait":600},{"snap":"05-look"},{"key":"cmd-enter"},{"wait":600},{"snap":"06-done"},{"key":"cmd-enter"},{"wait":2000},{"snap":"07-app"},{"quit":true}]
