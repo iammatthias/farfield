@@ -117,6 +117,7 @@ impl Fleet {
                 (format!("{up}_API_KEY"), key(app)),
                 (format!("{up}_READ_KEY"), read_key(app)),
                 ("KEYS_DB_PATH".into(), d.join("keys.sqlite").display().to_string()),
+                ("LIBRARY_DIR".into(), d.join("library-data").display().to_string()),
                 ("BLOBS_BACKEND".into(), "local".into()),
                 ("BLOBS_DIR".into(), d.join("blobs-data").display().to_string()),
                 ("BLOBS_SPOOL_DIR".into(), d.join("blob-spool").display().to_string()),
