@@ -37,7 +37,7 @@ func (s *Server) handleAdminBooks(w http.ResponseWriter, r *http.Request) {
 	if named == nil {
 		named = []CollectionStat{}
 	}
-	web.WriteJSON(w, http.StatusOK, map[string]any{
+	web.WriteJSONValidated(w, r, map[string]any{
 		"books": books, "collections": named, "uncategorized": uncategorized,
 	})
 }

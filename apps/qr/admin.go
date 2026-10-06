@@ -28,7 +28,7 @@ func (s *Server) handleAdminList(w http.ResponseWriter, r *http.Request) {
 		web.WriteError(w, http.StatusInternalServerError, "could not list codes")
 		return
 	}
-	web.WriteJSON(w, http.StatusOK, map[string]any{"codes": cs})
+	web.WriteJSONValidated(w, r, map[string]any{"codes": cs})
 }
 
 func (s *Server) handleAdminGet(w http.ResponseWriter, r *http.Request) {

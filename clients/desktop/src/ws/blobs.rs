@@ -385,6 +385,7 @@ impl BlobsWs {
                         };
                         set_health(cx, "blobs", h);
                         this.freshness = Some(l.freshness);
+                        crate::perf::end("switch:blobs");
                         log("blobs-loaded", &[("page", &page.to_string()), ("count", &this.blobs.len().to_string())]);
                     }
                     Ok(Err(e)) => {

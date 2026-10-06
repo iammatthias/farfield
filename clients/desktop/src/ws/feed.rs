@@ -185,6 +185,7 @@ impl FeedWs {
                         };
                         set_health(cx, "feed", h);
                         this.freshness = Some(l.freshness);
+                        crate::perf::end("switch:feed");
                         log("feed-loaded", &[("count", &this.posts.len().to_string()), ("page", &n.to_string())]);
                     }
                     Ok(Err(e)) => {

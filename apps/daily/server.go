@@ -402,7 +402,7 @@ func (s *Server) handleAPIPhotos(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	cacheFor(w, publicMaxAge)
-	web.WriteJSON(w, http.StatusOK, map[string]any{
+	web.WriteJSONValidated(w, r, map[string]any{
 		"source": sourceNASA,
 		"page":   res.Page,
 		"pages":  res.Pages,

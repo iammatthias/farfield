@@ -77,6 +77,11 @@ shown again (only a hint). For the dev fleet each app's key is `dev-<app>-key`.
   anything is resent. Other services keep working.
 - Drop files on a document (or Insert file…) to upload to blobs and insert `blob://` refs.
 
+## Performance
+
+Journeys, how to measure them, baselines and results: [`docs/PERF.md`](../docs/PERF.md).
+`clients/desktop/perf/run.sh 5 check` times the desktop journeys against the dev fleet.
+
 ## Tests
 
 ```sh

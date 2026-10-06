@@ -8,6 +8,7 @@ import (
 	"io"
 	"log/slog"
 	"net/http"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -91,12 +92,24 @@ func CORS(next http.Handler, methods ...string) http.Handler {
 // compressed media (images, EPUBs, archives) is excluded by omission.
 var gzipTypes = []string{"text/", "application/json", "application/atom+xml", "image/svg+xml"}
 
+// gzipMinSize is the smallest body worth compressing. Below it gzip's ~20
+// bytes of header and trailer outweigh the saving — measured, a 24-byte JSON
+// list went out as 49 bytes — and the compressor costs CPU for nothing.
+const gzipMinSize = 1024
+
 type gzipWriter struct {
 	http.ResponseWriter
 	r           *http.Request
 	zw          *gzip.Writer
 	decided     bool
 	wroteHeader bool
+	// pending: the response is compressible but its size is not yet known.
+	// The status (code) and the first bytes (buf) are held back until the
+	// body reaches gzipMinSize (compress), the handler flushes (compress), or
+	// the handler returns short of it (send plain, from Close).
+	pending bool
+	code    int
+	buf     []byte
 }
 
 func (gw *gzipWriter) WriteHeader(code int) {
@@ -105,11 +118,17 @@ func (gw *gzipWriter) WriteHeader(code int) {
 	}
 	gw.wroteHeader = true
 	gw.decide(code)
+	if gw.pending {
+		gw.code = code
+		return
+	}
 	gw.ResponseWriter.WriteHeader(code)
 }
 
-// decide inspects the response once, at first write, and turns compression on
-// only when it is safe and worthwhile.
+// decide inspects the response once, at first write, and holds it back for
+// compression only when that is safe and might be worthwhile. Everything
+// else is committed at once, so passthrough responses (and ReadFrom's
+// sendfile path) behave exactly as if the wrapper were not there.
 func (gw *gzipWriter) decide(code int) {
 	if gw.decided {
 		return
@@ -131,15 +150,54 @@ func (gw *gzipWriter) decide(code int) {
 	if !compressible {
 		return
 	}
-	h.Set("Content-Encoding", "gzip")
-	h.Add("Vary", "Accept-Encoding")
-	h.Del("Content-Length") // the compressed length differs
-	gw.zw = gzip.NewWriter(gw.ResponseWriter)
+	// A handler that declared its length up front has told us the answer.
+	if n, err := strconv.ParseInt(h.Get("Content-Length"), 10, 64); err == nil && n < gzipMinSize {
+		return
+	}
+	gw.pending = true
+}
+
+// commit ends the pending state, sending the held status and bytes either
+// through a new compressor or as they are.
+func (gw *gzipWriter) commit(compress bool) error {
+	gw.pending = false
+	buf := gw.buf
+	gw.buf = nil
+	if compress {
+		h := gw.Header()
+		h.Set("Content-Encoding", "gzip")
+		h.Add("Vary", "Accept-Encoding")
+		h.Del("Content-Length") // the compressed length differs
+		gw.ResponseWriter.WriteHeader(gw.code)
+		gw.zw = gzip.NewWriter(gw.ResponseWriter)
+		if len(buf) == 0 {
+			return nil
+		}
+		_, err := gw.zw.Write(buf)
+		return err
+	}
+	gw.ResponseWriter.WriteHeader(gw.code)
+	if len(buf) == 0 {
+		return nil
+	}
+	_, err := gw.ResponseWriter.Write(buf)
+	return err
 }
 
 func (gw *gzipWriter) Write(b []byte) (int, error) {
 	if !gw.wroteHeader {
 		gw.WriteHeader(http.StatusOK)
+	}
+	if gw.pending {
+		gw.buf = append(gw.buf, b...)
+		if len(gw.buf) < gzipMinSize {
+			return len(b), nil
+		}
+		// The buffered bytes, b among them, go out with the commit.
+		if err := gw.commit(true); err != nil {
+			return 0, err
+		}
+		return len(b), nil
 	}
 	if gw.zw != nil {
 		return gw.zw.Write(b)
@@ -150,9 +208,17 @@ func (gw *gzipWriter) Write(b []byte) (int, error) {
 // Flush pushes the compressor's buffered bytes out and then flushes the
 // connection, so a streaming handler (SSE, a progress log) reaches the client
 // incrementally instead of stalling inside the gzip buffer.
+//
+// A flush that arrives while the response is still under gzipMinSize commits
+// to compression: a handler that flushes is streaming, and a stream's final
+// size is unknown, so the small-body exemption cannot be proven to apply.
+// Holding the bytes back instead would break the flush's promise to deliver.
 func (gw *gzipWriter) Flush() {
 	if !gw.wroteHeader {
 		gw.WriteHeader(http.StatusOK)
+	}
+	if gw.pending {
+		_ = gw.commit(true)
 	}
 	if gw.zw != nil {
 		_ = gw.zw.Flush()
@@ -169,6 +235,11 @@ func (gw *gzipWriter) ReadFrom(src io.Reader) (int64, error) {
 	if !gw.wroteHeader {
 		gw.WriteHeader(http.StatusOK)
 	}
+	if gw.pending {
+		// Size unknown: route through Write so the threshold applies. The
+		// struct hides this method, or io.Copy would recurse into it.
+		return io.Copy(struct{ io.Writer }{gw}, src)
+	}
 	if gw.zw != nil {
 		return io.Copy(gw.zw, src)
 	}
@@ -182,7 +253,12 @@ func (gw *gzipWriter) ReadFrom(src io.Reader) (int64, error) {
 // Unwrap exposes the wrapped writer to http.ResponseController.
 func (gw *gzipWriter) Unwrap() http.ResponseWriter { return gw.ResponseWriter }
 
+// Close finishes the response: a body that ended under gzipMinSize goes out
+// plain, a compressed one gets its gzip trailer.
 func (gw *gzipWriter) Close() error {
+	if gw.pending {
+		return gw.commit(false)
+	}
 	if gw.zw != nil {
 		return gw.zw.Close()
 	}
@@ -219,7 +295,8 @@ func PathPrefixSkipper(prefixes ...string) func(*http.Request) bool {
 }
 
 // Gzip compresses text, JSON, Atom, and SVG responses when the client accepts
-// it. Range requests and already-encoded responses pass through untouched.
+// it. Range requests and already-encoded responses pass through untouched, and
+// bodies under gzipMinSize go out plain — compressing them makes them bigger.
 // Content-Type decides: raw blob bytes served via http.ServeContent are
 // classified as images/video/octet-stream and skipped already, but prefer
 // GzipExcept for routes that stream large objects, so they never enter the

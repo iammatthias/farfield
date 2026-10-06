@@ -65,7 +65,7 @@ func (s *Server) handleAdminShares(w http.ResponseWriter, r *http.Request) {
 	for i := range shares {
 		out = append(out, s.shareView(&shares[i]))
 	}
-	web.WriteJSON(w, http.StatusOK, map[string]any{"shares": out})
+	web.WriteJSONValidated(w, r, map[string]any{"shares": out})
 }
 
 // handleAdminShareRevoke is the console's revoke: the same revokeToken, then

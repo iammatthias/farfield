@@ -61,7 +61,7 @@ func (s *Server) handleAdminMessages(w http.ResponseWriter, r *http.Request) {
 			ReceivedAt: m.ReceivedAt,
 		})
 	}
-	web.WriteJSON(w, http.StatusOK, map[string]any{"messages": out})
+	web.WriteJSONValidated(w, r, map[string]any{"messages": out})
 }
 
 // jobView is one agent turn, without the chat GUID it replies into.
@@ -91,5 +91,5 @@ func (s *Server) handleAdminJobs(w http.ResponseWriter, r *http.Request) {
 			StartedAt: j.StartedAt, FinishedAt: j.FinishedAt,
 		})
 	}
-	web.WriteJSON(w, http.StatusOK, map[string]any{"jobs": out})
+	web.WriteJSONValidated(w, r, map[string]any{"jobs": out})
 }

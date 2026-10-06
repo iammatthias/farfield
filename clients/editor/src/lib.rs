@@ -162,6 +162,12 @@ fn runtime() -> &'static Runtime {
     })
 }
 
+/// Compile the module ahead of first use (call from a background thread at
+/// startup): the first editor then opens without paying for compilation.
+pub fn prewarm() {
+    let _ = module();
+}
+
 fn module() -> Result<&'static Module> {
     use std::sync::OnceLock;
     static M: OnceLock<std::result::Result<Module, String>> = OnceLock::new();

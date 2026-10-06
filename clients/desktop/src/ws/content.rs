@@ -61,6 +61,10 @@ pub struct ContentWs {
     scroll: UniformListScrollHandle,
     open: HashMap<String, Open>,
     selected: Option<String>,
+    /// Rows already prefetched on hover this session.
+    prefetched: std::collections::HashSet<String>,
+    /// A newer server copy to show in place of an untouched cached open.
+    pending_refresh: Option<(String, farfield_core::transport::Versioned<serde_json::Value>)>,
 }
 
 fn entry_specs() -> Vec<FieldSpec> {
@@ -106,6 +110,8 @@ impl ContentWs {
             scroll: UniformListScrollHandle::new(),
             open: HashMap::new(),
             selected: None,
+            prefetched: Default::default(),
+            pending_refresh: None,
         };
         this.reload(cx);
         this
@@ -191,6 +197,8 @@ impl ContentWs {
                             }
                         }
                         this.has_more = more;
+                        crate::perf::since_start("cold-content-list");
+                        crate::perf::end("switch:content");
                         this.error = None;
                         let h = match &fresh {
                             Freshness::Live => Health::Up,
@@ -256,6 +264,7 @@ impl ContentWs {
     }
 
     fn select_row(&mut self, row: Row, w: &mut Window, cx: &mut Context<Self>) {
+        crate::perf::mark("doc-open");
         let key = match &row {
             Row::Draft(d) => d.key.clone(),
             Row::Entry(e) => e.slug.clone(),
@@ -272,24 +281,122 @@ impl ContentWs {
                 let s = app::session(cx);
                 let k = key.clone();
                 let mode = self.mode;
-                let task = farfield_core::spawn(async move {
-                    match mode {
-                        Mode::Entries => sync::open::<ContentEntry>(&s, &k).await,
-                        Mode::Series => sync::open::<ContentSeries>(&s, &k).await,
-                    }
-                });
+                // First what this Mac already has (a draft, or the cached copy a
+                // hover prefetched): the document opens without waiting on the
+                // network, and is revalidated right after.
+                let cached = {
+                    let (s, k) = (s.clone(), k.clone());
+                    farfield_core::spawn(async move {
+                        match mode {
+                            Mode::Entries => sync::open_cached::<ContentEntry>(&s, &k, &content::entry_path(&k)),
+                            Mode::Series => sync::open_cached::<ContentSeries>(&s, &k, &content::series_path(&k)),
+                        }
+                    })
+                };
                 cx.spawn_in(w, async move |this, cx| {
-                    let r = task.await;
-                    let _ = this.update_in(cx, |this, w, cx| match r {
-                        Ok(Ok(d)) => this.open_draft(d, w, cx),
-                        Ok(Err(e)) => toast(cx, describe(&e), true),
-                        Err(e) => toast(cx, e.to_string(), true),
-                    });
+                    if let Ok(Some(d)) = cached.await {
+                        let revalidate = d.state == SaveState::Saved;
+                        let base = d.base_etag.clone();
+                        let _ = this.update_in(cx, |this, w, cx| {
+                            this.open_draft(d, w, cx);
+                            crate::perf::lap("doc-open", "from-cache");
+                        });
+                        if revalidate {
+                            let _ = this.update(cx, |this, cx| this.revalidate(k, base, cx));
+                        }
+                        return;
+                    }
+                    let _ = this.update_in(cx, |this, w, cx| this.open_from_server(k, w, cx));
                 })
                 .detach();
             }
         }
         cx.notify();
+    }
+
+    /// Open a record that nothing local has yet: fetch, then build.
+    fn open_from_server(&mut self, key: String, w: &mut Window, cx: &mut Context<Self>) {
+        let s = app::session(cx);
+        let mode = self.mode;
+        let task = farfield_core::spawn(async move {
+            match mode {
+                Mode::Entries => sync::open::<ContentEntry>(&s, &key).await,
+                Mode::Series => sync::open::<ContentSeries>(&s, &key).await,
+            }
+        });
+        cx.spawn_in(w, async move |this, cx| {
+            let t = std::time::Instant::now();
+            let r = task.await;
+            crate::perf::record("doc-fetch", t.elapsed().as_secs_f64() * 1000.0);
+            crate::perf::lap("doc-open", "fetched");
+            let _ = this.update_in(cx, |this, w, cx| match r {
+                Ok(Ok(d)) => {
+                    let t = std::time::Instant::now();
+                    this.open_draft(d, w, cx);
+                    crate::perf::record("doc-build", t.elapsed().as_secs_f64() * 1000.0);
+                    crate::perf::lap("doc-open", "built");
+                }
+                Ok(Err(e)) => toast(cx, describe(&e), true),
+                Err(e) => toast(cx, e.to_string(), true),
+            });
+        })
+        .detach();
+        cx.notify();
+    }
+
+    /// After a cached open: fetch the server's current version and, if it has
+    /// moved on while nothing was edited here, show it instead. Once the
+    /// person has typed, the conditional save decides — a conflict, never an
+    /// overwrite.
+    fn revalidate(&mut self, key: String, base: Option<String>, cx: &mut Context<Self>) {
+        let s = app::session(cx);
+        let k = key.clone();
+        let mode = self.mode;
+        let task = farfield_core::spawn(async move {
+            use farfield_core::sync::Kind;
+            match mode {
+                Mode::Entries => ContentEntry::get(&s, &k).await,
+                Mode::Series => ContentSeries::get(&s, &k).await,
+            }
+        });
+        cx.spawn(async move |this, cx| {
+            let Ok(Ok(fresh)) = task.await else { return };
+            if fresh.etag.is_some() && fresh.etag == base {
+                return;
+            }
+            let _ = this.update(cx, |this, cx| {
+                let untouched = |d: &Draft| d.state == SaveState::Saved && d.base.as_ref() == Some(&d.local);
+                let still = match this.open.get(&key) {
+                    Some(Open::Entry(d)) => untouched(&d.read(cx).draft),
+                    Some(Open::Series(d)) => untouched(&d.read(cx).draft),
+                    None => false,
+                };
+                if still {
+                    this.open.remove(&key);
+                    this.pending_refresh = Some((key.clone(), fresh));
+                    log("doc-revalidated", &[("key", &key)]);
+                    cx.notify();
+                }
+            });
+        })
+        .detach();
+    }
+
+    /// Warm the cache for the row under the pointer, so a click opens it from
+    /// this Mac. One request per row per session, never for an open record.
+    fn prefetch(&mut self, row: &Row, cx: &mut Context<Self>) {
+        let (key, path) = match row {
+            Row::Entry(e) => (e.slug.clone(), content::entry_path(&e.slug)),
+            Row::Series(s) => (s.slug.clone(), content::series_path(&s.slug)),
+            Row::Draft(_) => return,
+        };
+        if self.open.contains_key(&key) || !self.prefetched.insert(key) {
+            return;
+        }
+        let s = app::session(cx);
+        farfield_core::spawn(async move {
+            let _ = s.load::<serde_json::Value>(content::SERVICE, &path).await;
+        });
     }
 
     fn open_draft(&mut self, d: Draft, w: &mut Window, cx: &mut Context<Self>) {
@@ -383,6 +490,12 @@ impl ContentWs {
         };
         self.scroll.scroll_to_item(next, gpui::ScrollStrategy::Center);
         self.select_row(rows[next].clone(), w, cx);
+        // the keyboard has no hover: warm the rows either side instead
+        for n in [next.wrapping_sub(1), next + 1] {
+            if let Some(r) = rows.get(n) {
+                self.prefetch(r, cx);
+            }
+        }
     }
 
     /// Enter from the list: put the caret in the open document.
@@ -712,6 +825,14 @@ impl ContentWs {
                                     .when_some(chip, |d, (w, c)| d.child(ui::chip(w, c, cx))),
                             )
                             .child(div().text_xs().font_family(FONT_MONO).text_color(t.ink_3).truncate().child(sub))
+                            .on_hover({
+                                let (e, row) = (e.clone(), row.clone());
+                                move |hovered, _, cx| {
+                                    if *hovered {
+                                        e.update(cx, |this, cx| this.prefetch(&row, cx));
+                                    }
+                                }
+                            })
                             .on_click(move |_, w, cx| e.update(cx, |this, cx| this.select_row(row.clone(), w, cx)))
                             .into_any_element()
                     })
@@ -926,6 +1047,26 @@ impl Workspace for ContentWs {
 
 impl Render for ContentWs {
     fn render(&mut self, w: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        crate::perf::lap("doc-open", "content-render");
+        // a newer server copy replaces an untouched document opened from cache
+        if let Some((key, fresh)) = self.pending_refresh.take() {
+            let area = if self.mode == Mode::Entries { "content" } else { "content-series" };
+            let d = Draft {
+                service: area.into(),
+                key: key.clone(),
+                base: Some(fresh.value.clone()),
+                base_etag: fresh.etag,
+                local: fresh.value,
+                state: SaveState::Saved,
+                remote: None,
+                remote_etag: None,
+                updated_ms: farfield_core::store::now_ms(),
+            };
+            // open_draft selects what it opens; keep whatever was selected
+            let selected = self.selected.clone();
+            self.open_draft(d, w, cx);
+            self.selected = selected;
+        }
         // a reference handed over from Blobs lands at the open document's caret
         if let Some(md) = cx.global_mut::<crate::shell::Overlay>().insert.take() {
             let editor = self.selected.as_ref().and_then(|k| self.open.get(k)).map(|o| match o {

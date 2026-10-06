@@ -60,6 +60,27 @@ pub fn write_atomic(path: &Path, bytes: &[u8]) -> std::io::Result<()> {
     Ok(())
 }
 
+/// Replace `path` atomically (temp file + rename) without forcing it to disk.
+/// For data that can be refetched (the response cache): a crash may lose the
+/// newest copy but never leaves a torn one. Drafts use `write_atomic`.
+pub fn write_replace(path: &Path, bytes: &[u8]) -> std::io::Result<()> {
+    let dir = path.parent().expect("path has a parent");
+    if !dir.exists() {
+        private_dir(dir)?;
+    }
+    let tmp = dir.join(format!(".{}.{}.tmp", path.file_name().unwrap().to_string_lossy(), std::process::id()));
+    {
+        let mut f = fs::OpenOptions::new().write(true).create(true).truncate(true).open(&tmp)?;
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            f.set_permissions(fs::Permissions::from_mode(0o600))?;
+        }
+        f.write_all(bytes)?;
+    }
+    fs::rename(&tmp, path)
+}
+
 fn hash(s: &str) -> String {
     hex::encode(&Sha256::digest(s.as_bytes())[..12])
 }
@@ -106,11 +127,19 @@ pub struct Cache {
     mem: Mutex<MemCache>,
     mem_cap: usize,
     disk_cap: u64,
+    /// Bytes believed to be on disk (starts past the cap so the first put
+    /// measures the real size once).
+    disk_estimate: std::sync::atomic::AtomicU64,
 }
 
 impl Cache {
     pub fn new(mem_cap: usize, disk_cap: u64) -> Self {
-        Cache { mem: Mutex::new((HashMap::new(), 0)), mem_cap, disk_cap }
+        Cache {
+            mem: Mutex::new((HashMap::new(), 0)),
+            mem_cap,
+            disk_cap,
+            disk_estimate: std::sync::atomic::AtomicU64::new(u64::MAX / 2),
+        }
     }
 
     fn path(scope: &Scope, service: &str, key: &str) -> PathBuf {
@@ -136,10 +165,17 @@ impl Cache {
     pub fn put(&self, scope: &Scope, service: &str, key: &str, entry: CacheEntry) {
         let p = Self::path(scope, service, key);
         if let Ok(b) = serde_json::to_vec(&entry) {
-            let _ = write_atomic(&p, &b);
+            let _ = write_replace(&p, &b);
         }
+        // walking the cache directory is the expensive part of a write: keep
+        // a running estimate and walk only when it passes the cap (the walk
+        // then resets it to the measured size)
+        let len = fs::metadata(&p).map(|m| m.len()).unwrap_or(0);
         self.remember(p, entry);
-        self.evict_disk(scope);
+        let est = self.disk_estimate.fetch_add(len, std::sync::atomic::Ordering::Relaxed) + len;
+        if est > self.disk_cap {
+            self.evict_disk(scope);
+        }
     }
 
     /// Mark an entry fresh again after a 304.
@@ -185,6 +221,7 @@ impl Cache {
             }
         }
         if total <= self.disk_cap {
+            self.disk_estimate.store(total, std::sync::atomic::Ordering::Relaxed);
             return;
         }
         files.sort();
@@ -196,6 +233,7 @@ impl Cache {
             self.mem.lock().0.remove(&p);
             total -= len;
         }
+        self.disk_estimate.store(total, std::sync::atomic::Ordering::Relaxed);
     }
 }
 

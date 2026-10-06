@@ -146,8 +146,16 @@ pub async fn entries(
 }
 
 /// One entry, with the version to send back as If-Match.
+pub fn entry_path(slug: &str) -> String {
+    format!("/api/entries/{}", enc(slug))
+}
+
+pub fn series_path(slug: &str) -> String {
+    format!("/api/series/{}", enc(slug))
+}
+
 pub async fn entry(s: &Session, slug: &str) -> Result<Loaded<Entry>, ApiError> {
-    s.load(SERVICE, &format!("/api/entries/{}", enc(slug))).await
+    s.load(SERVICE, &entry_path(slug)).await
 }
 
 pub async fn create(s: &Session, e: &Entry) -> Result<Versioned<Entry>, ApiError> {

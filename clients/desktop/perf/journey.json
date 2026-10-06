@@ -1,0 +1,9 @@
+[{"wait":3000},
+ {"key":"cmd-f"},{"type":"photograph"},{"wait":300},{"key":"down"},{"wait":1500},
+ {"key":"enter"},{"key":"cmd-down"},
+ {"type":"\nTyping speed sample: the quick brown fox jumps over the lazy dog, repeatedly, so the editor has real work to do on every keystroke."},
+ {"wait":500},{"key":"cmd-s"},{"until":"saved","timeout":15000},
+ {"key":"cmd-f"},{"key":"up"},{"wait":800},{"key":"down"},{"wait":800},{"key":"up"},{"wait":800},
+ {"key":"cmd-2"},{"wait":1500},{"key":"cmd-3"},{"wait":1500},{"key":"cmd-1"},{"wait":1500},
+ {"key":"cmd-2"},{"wait":1500},{"key":"cmd-3"},{"wait":1500},{"key":"cmd-1"},{"wait":1500},
+ {"quit":true}]

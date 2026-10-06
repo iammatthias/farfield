@@ -180,6 +180,12 @@ pub struct DocEditor {
     requested: std::collections::HashSet<String>,
     down: bool,
     plain: bool,
+    /// When the last unpainted input arrived (keystroke → frame timing).
+    input_at: Option<Instant>,
+    /// The document text at a revision: the platform input system asks for
+    /// it several times per keystroke, and each read copies the whole
+    /// document out of the module.
+    text_cache: Option<(u32, String)>,
 }
 
 impl EventEmitter<DocEvent> for DocEditor {}
@@ -234,6 +240,8 @@ impl DocEditor {
             requested: Default::default(),
             down: false,
             plain: false,
+            input_at: None,
+            text_cache: None,
         };
         this.rev = this.with(|e| e.revision()).unwrap_or(0);
         this.apply_palette(cx);
@@ -274,7 +282,15 @@ impl DocEditor {
     }
 
     pub fn text(&mut self) -> String {
-        self.with(|e| e.text()).unwrap_or_default()
+        let rev = self.with(|e| e.revision()).unwrap_or(u32::MAX);
+        if let Some((r, t)) = &self.text_cache {
+            if *r == rev {
+                return t.clone();
+            }
+        }
+        let t = self.with(|e| e.text()).unwrap_or_default();
+        self.text_cache = Some((rev, t.clone()));
+        t
     }
 
     pub fn words(&mut self) -> u32 {
@@ -283,6 +299,9 @@ impl DocEditor {
 
     /// Replace the whole document (loading a record, taking a resolution).
     pub fn set_text(&mut self, s: &str, cx: &mut Context<Self>) {
+        // a replaced document may restart the revision count: never trust the
+        // cached text across it
+        self.text_cache = None;
         self.marked = None;
         self.with(|e| e.set_text(s));
         self.rev = self.with(|e| e.revision()).unwrap_or(self.rev);
@@ -302,6 +321,7 @@ impl DocEditor {
     }
 
     fn after(&mut self, cx: &mut Context<Self>) {
+        self.input_at.get_or_insert_with(Instant::now);
         let r = self.with(|e| e.revision()).unwrap_or(self.rev);
         if r != self.rev {
             self.rev = r;
@@ -618,7 +638,9 @@ impl Element for Surface {
         let scale = w.scale_factor();
         let focus = self.ed.read(cx).focus.clone();
         w.handle_input(&focus, ElementInputHandler::new(bounds, self.ed.clone()), cx);
-        let (img, retired, marked) = self.ed.update(cx, |this, _| {
+        crate::perf::lap("doc-open", "surface-paint");
+        let t_paint = std::time::Instant::now();
+        let (img, retired, marked, input_at) = self.ed.update(cx, |this, _| {
             this.bounds = Some(bounds);
             let dw = (f32::from(bounds.size.width) * scale).round().max(1.0) as u32;
             let dh = (f32::from(bounds.size.height) * scale).round().max(1.0) as u32;
@@ -643,15 +665,26 @@ impl Element for Surface {
                 Some(m) => this.with(|e| e.caret_rect()).map(|r| (m, r)),
                 None => None,
             };
-            (this.image.clone(), std::mem::take(&mut this.retired), caret)
+            (this.image.clone(), std::mem::take(&mut this.retired), caret, this.input_at.take())
         });
         // every replaced frame leaves the sprite atlas, or GPU memory grows
         // with each keystroke and caret blink
         for old in retired {
             let _ = w.drop_image(old);
         }
+        let t_upload = std::time::Instant::now();
+        if input_at.is_some() {
+            crate::perf::record("frame-host-prep", (t_upload - t_paint).as_secs_f64() * 1000.0);
+        }
         if let Some(img) = img {
             let _ = w.paint_image(bounds, Corners::default(), img, 0, false);
+            if input_at.is_some() {
+                crate::perf::record("frame-paint-image", t_upload.elapsed().as_secs_f64() * 1000.0);
+            }
+            crate::perf::end("doc-open");
+        }
+        if let Some(t) = input_at {
+            crate::perf::record("key-to-frame", t.elapsed().as_secs_f64() * 1000.0);
         }
         // composition text, drawn over the caret until the IME commits it
         if let Some((text, r)) = marked {
@@ -726,6 +759,7 @@ cmds! {
 
 impl Render for DocEditor {
     fn render(&mut self, _w: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        crate::perf::lap("doc-open", "editor-render");
         let t = theme(cx).clone();
         if let Some(err) = &self.error {
             return div().p_4().text_color(t.bad).child(err.clone()).into_any_element();

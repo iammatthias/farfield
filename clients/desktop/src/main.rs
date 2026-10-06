@@ -6,6 +6,7 @@
 #![allow(clippy::type_complexity, clippy::too_many_arguments)]
 mod app;
 mod evidence;
+mod perf;
 mod shell;
 mod theme;
 mod ui;
@@ -47,6 +48,9 @@ fn entries() -> Vec<Entry> {
 }
 
 fn main() {
+    perf::process_start();
+    // compile editor.wasm off the main thread while the window comes up
+    std::thread::spawn(farfield_editor::prewarm);
     Application::new().run(|cx: &mut App| {
         theme::load_fonts(cx);
         cx.set_global(app::AppState::load());
@@ -67,6 +71,14 @@ fn main() {
                         traffic_light_position: Some(gpui::point(px(14.), px(17.))),
                     }),
                     window_min_size: Some(size(px(760.), px(480.))),
+                    // measurement runs keep the window above others: macOS stops
+                    // drawing a covered window, which would time the occlusion,
+                    // not the app (FARFIELD_TOPMOST=1, set by perf/run.sh)
+                    kind: if std::env::var("FARFIELD_TOPMOST").as_deref() == Ok("1") {
+                        gpui::WindowKind::PopUp
+                    } else {
+                        gpui::WindowKind::Normal
+                    },
                     ..Default::default()
                 },
                 |w, cx| {

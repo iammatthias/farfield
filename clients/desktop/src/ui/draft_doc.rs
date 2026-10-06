@@ -230,6 +230,7 @@ impl<K: Kind + 'static> DraftDoc<K> {
         let session = app::session(cx);
         let old_key = d.key.clone();
         log("save-start", &[("service", K::DRAFTS), ("key", &old_key)]);
+        crate::perf::mark("save");
         let task = farfield_core::spawn(async move {
             let r = sync::save::<K>(&session, &mut d).await;
             (r, d)
@@ -265,6 +266,7 @@ impl<K: Kind + 'static> DraftDoc<K> {
                     self.reload_fields(&d.local, cx);
                 }
                 log("saved", &[("service", K::DRAFTS), ("key", &d.key)]);
+                crate::perf::end("save");
                 toast(cx, "Saved to the server.", false);
                 cx.emit(DraftEvent::Saved);
             }
@@ -673,6 +675,7 @@ fn merge_keep_bookkeeping(server: &Value, mine: &Value) -> Value {
 
 impl<K: Kind + 'static> Render for DraftDoc<K> {
     fn render(&mut self, _w: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        crate::perf::lap("doc-open", "draft-render");
         let _ = S4;
         self.render_body(cx)
     }

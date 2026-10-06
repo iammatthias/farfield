@@ -1,0 +1,9 @@
+{
+  "_note": "Medians in ms on the reference Mac (Apple Silicon, release build). perf.rs fails at 1.5x. Lower these when something gets faster; never raise one to make the test pass.",
+  "first-instance-ms": 60,
+  "new-instance-ms": 0.5,
+  "load-dictionary-ms": 4.5,
+  "set-text-and-render-ms": 5,
+  "insert-and-render-ms": 5,
+  "framebuffer-bgra-full-ms": 1.3
+}

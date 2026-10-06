@@ -440,3 +440,28 @@ impl Kind for ContentSeries {
         )
     }
 }
+
+/// Open from what this Mac already has — a draft, or the cached server copy —
+/// without waiting for the network. Returns None when nothing is cached; the
+/// caller then falls back to `open`. A cached open must be revalidated (see
+/// `Kind::get`): a newer server version is taken only while the document is
+/// untouched, and a save is conditional either way, so a stale open can
+/// never overwrite a newer record.
+pub fn open_cached<K: Kind>(s: &Session, key: &str, path: &str) -> Option<Draft> {
+    let drafts = s.drafts(K::DRAFTS).ok()?;
+    if let Some(d) = drafts.load(K::DRAFTS, key) {
+        return Some(d);
+    }
+    let (v, etag): (Value, Option<String>) = s.peek(K::SERVICE, path)?;
+    Some(Draft {
+        service: K::DRAFTS.into(),
+        key: key.into(),
+        base: Some(v.clone()),
+        base_etag: etag,
+        local: v,
+        state: SaveState::Saved,
+        remote: None,
+        remote_etag: None,
+        updated_ms: now_ms(),
+    })
+}

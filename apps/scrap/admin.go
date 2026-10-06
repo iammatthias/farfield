@@ -45,7 +45,7 @@ func (s *Server) handleAdminList(w http.ResponseWriter, r *http.Request) {
 		web.WriteError(w, http.StatusInternalServerError, "could not list pastes")
 		return
 	}
-	web.WriteJSON(w, http.StatusOK, map[string]any{"pastes": ps, "total": total})
+	web.WriteJSONValidated(w, r, map[string]any{"pastes": ps, "total": total})
 }
 
 // handleAdminGet returns a paste with its body. The ETag hashes the whole

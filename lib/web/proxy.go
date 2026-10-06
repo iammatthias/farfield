@@ -36,12 +36,23 @@ func ProxyGet(w http.ResponseWriter, r *http.Request, target, apiKey string) {
 	if apiKey != "" {
 		req.Header.Set("X-API-Key", apiKey)
 	}
+	// Revalidation passes through: the browser's If-None-Match goes upstream
+	// and the upstream's validator comes back, so an unchanged list costs a
+	// 304 instead of the whole body on every picker open.
+	if inm := r.Header.Get("If-None-Match"); inm != "" {
+		req.Header.Set("If-None-Match", inm)
+	}
 	resp, err := proxyClient.Do(req)
 	if err != nil {
 		WriteError(w, http.StatusBadGateway, "upstream unreachable")
 		return
 	}
 	defer resp.Body.Close()
+	for _, h := range []string{"ETag", "Cache-Control"} {
+		if v := resp.Header.Get(h); v != "" {
+			w.Header().Set(h, v)
+		}
+	}
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(resp.StatusCode)
 	_, _ = io.Copy(w, resp.Body)

@@ -157,6 +157,14 @@ impl Session {
         }
     }
 
+    /// The cached copy of a read, without touching the network — for showing
+    /// something immediately while `load` revalidates.
+    pub fn peek<T: DeserializeOwned>(&self, service: &str, path: &str) -> Option<(T, Option<String>)> {
+        let scope = self.scope(service).ok()?;
+        let e = self.cache.get(&scope, service, path)?;
+        Some((serde_json::from_value(e.body).ok()?, e.etag))
+    }
+
     /// Drop a cached read (after a mutation that changes it).
     pub fn invalidate(&self, service: &str, path: &str) {
         if let Ok(scope) = self.scope(service) {

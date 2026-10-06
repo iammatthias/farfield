@@ -4,6 +4,8 @@ import (
 	"encoding/json"
 	"net/http"
 	"strings"
+
+	"github.com/iammatthias/farfield/lib/cid"
 )
 
 // WriteJSON writes v as a JSON response with the given status.
@@ -63,4 +65,33 @@ func WriteRecord(w http.ResponseWriter, r *http.Request, etag string, v any) {
 		return
 	}
 	WriteJSON(w, http.StatusOK, v)
+}
+
+// WriteJSONValidated writes v as a 200 JSON response whose ETag is the CID of
+// the response bytes themselves, answering 304 Not Modified when the client
+// already holds them. It is for list reads that have no single record version
+// to hand out: a tag derived from the bytes is correct by construction — any
+// change to any row, page, or query changes the body and so the tag — with no
+// version bookkeeping to keep in step with the writes.
+//
+// The body is byte-identical to WriteJSON's (Encode's trailing newline
+// included), so switching a route over changes no client's parse. It sets no
+// Cache-Control: each route keeps its own (PrivateAPI's no-store still wins,
+// and 304 still pays off for a client that keeps its own copy).
+func WriteJSONValidated(w http.ResponseWriter, r *http.Request, v any) {
+	body, err := json.Marshal(v)
+	if err != nil {
+		WriteError(w, http.StatusInternalServerError, "could not encode response")
+		return
+	}
+	body = append(body, '\n')
+	etag := cid.Of(body)
+	w.Header().Set("ETag", `"`+etag+`"`)
+	if ETagMatch(r, etag) {
+		w.WriteHeader(http.StatusNotModified)
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusOK)
+	_, _ = w.Write(body)
 }

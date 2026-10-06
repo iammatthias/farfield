@@ -25,7 +25,7 @@ func (s *Server) handleAdminList(w http.ResponseWriter, r *http.Request) {
 		web.WriteError(w, http.StatusInternalServerError, "could not list bookmarks")
 		return
 	}
-	web.WriteJSON(w, http.StatusOK, map[string]any{"bookmarks": bs})
+	web.WriteJSONValidated(w, r, map[string]any{"bookmarks": bs})
 }
 
 func (s *Server) handleAdminGet(w http.ResponseWriter, r *http.Request) {

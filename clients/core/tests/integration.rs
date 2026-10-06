@@ -397,3 +397,92 @@ fn private_routes_refuse_tunnel_ingress_and_weak_keys() {
         }
     }
 }
+
+#[test]
+fn cached_open_is_instant_and_revalidates() {
+    use farfield_core::sync::Kind;
+    let f = Fleet::start(&["content"]);
+    make_collection(&f, "notes");
+    let s = f.admin();
+    block(async {
+        let c = content::create(&s, &entry("Cached", "v1", false)).await.unwrap();
+        let slug = c.value.slug.clone();
+        let path = content::entry_path(&slug);
+        // nothing cached yet: the caller must go to the server
+        assert!(sync::open_cached::<ContentEntry>(&s, &slug, &path).is_none());
+        // a hover prefetch fills the cache
+        content::entry(&s, &slug).await.unwrap();
+        let d = sync::open_cached::<ContentEntry>(&s, &slug, &path).expect("cached open");
+        assert_eq!(d.local["body"], "v1");
+        assert!(d.base_etag.is_some());
+        // someone else saves: revalidation sees a new version
+        let mut e = content::entry(&s, &slug).await.unwrap().value;
+        e.body = "v2".into();
+        content::update(&s, &slug, &e, None).await.unwrap();
+        let fresh = ContentEntry::get(&s, &slug).await.unwrap();
+        assert_ne!(fresh.etag, d.base_etag);
+        assert_eq!(fresh.value["body"], "v2");
+        // and a save from the stale cached open is refused, never overwrites
+        let mut stale = d.clone();
+        let mut l = stale.local.clone();
+        l["body"] = json!("from a stale open");
+        sync::edit(&s, &mut stale, l).unwrap();
+        assert_eq!(sync::save::<ContentEntry>(&s, &mut stale).await.unwrap(), SaveOutcome::Conflict);
+    });
+}
+
+/// Every list the client reads must revalidate: an ETag on the 200, and a
+/// 304 (no body) for a client that already holds that version — otherwise
+/// every refresh re-downloads the list, which over the tailnet is the cost
+/// that matters.
+#[test]
+fn every_list_read_revalidates() {
+    let f = Fleet::start(&[
+        "content",
+        "feed",
+        "blobs",
+        "bookmarks",
+        "qr",
+        "scrap",
+        "library",
+        "sideload",
+        "switchboard",
+        "backup",
+        "daily",
+        "apex",
+    ]);
+    let http = reqwest::blocking::Client::builder().redirect(reqwest::redirect::Policy::none()).build().unwrap();
+    let reads = [
+        ("content", "/api/collections"),
+        ("content", "/api/entries?status=all&limit=50&bodies=0"),
+        ("content", "/api/series"),
+        ("feed", "/api/posts?limit=20"),
+        ("blobs", "/blobs?page=1"),
+        ("bookmarks", "/api/admin/bookmarks"),
+        ("qr", "/api/admin/codes"),
+        ("scrap", "/api/admin/pastes?limit=50"),
+        ("library", "/api/admin/books"),
+        ("sideload", "/api/builds"),
+        ("sideload", "/api/admin/shares"),
+        ("switchboard", "/api/admin/messages?limit=100"),
+        ("switchboard", "/api/admin/jobs?limit=100"),
+        ("backup", "/api/admin/snapshots"),
+        ("daily", "/api/photos?page=1"),
+        ("apex", "/api/profile"),
+    ];
+    let mut missing = Vec::new();
+    for (app, path) in reads {
+        let url = format!("{}{path}", f.url(app));
+        let r = http.get(&url).header("X-API-Key", key(app)).send().unwrap();
+        assert_eq!(r.status(), 200, "{app}{path}");
+        let Some(etag) = r.headers().get("etag").map(|v| v.to_str().unwrap().to_string()) else {
+            missing.push(format!("{app}{path}: no ETag"));
+            continue;
+        };
+        let again = http.get(&url).header("X-API-Key", key(app)).header("If-None-Match", &etag).send().unwrap();
+        if again.status() != 304 {
+            missing.push(format!("{app}{path}: revalidation answered {}", again.status()));
+        }
+    }
+    assert!(missing.is_empty(), "{missing:#?}");
+}

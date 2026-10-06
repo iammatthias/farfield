@@ -519,7 +519,7 @@ func (s *Server) handleAPIList(w http.ResponseWriter, r *http.Request) {
 	if blobs == nil {
 		blobs = []Meta{}
 	}
-	web.WriteJSON(w, http.StatusOK, map[string]any{
+	web.WriteJSONValidated(w, r, map[string]any{
 		"blobs": blobs,
 		"total": total,
 		"page":  page,

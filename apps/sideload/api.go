@@ -17,7 +17,7 @@ func (s *Server) handleAPIList(w http.ResponseWriter, r *http.Request) {
 		web.WriteError(w, http.StatusInternalServerError, "could not list builds")
 		return
 	}
-	web.WriteJSON(w, http.StatusOK, map[string]any{"builds": builds})
+	web.WriteJSONValidated(w, r, map[string]any{"builds": builds})
 }
 
 func (s *Server) handleAPIDelete(w http.ResponseWriter, r *http.Request) {

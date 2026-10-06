@@ -2,6 +2,7 @@
 //! line, and the floating layers (palette, confirmations, toasts).
 
 use crate::app::{self, log, state, AppState, Health};
+use crate::perf;
 use crate::theme::{theme, Theme, FONT_MONO, S2, S3, S4, TOP_H};
 use crate::ui::input::{FieldEvent, TextField};
 use crate::ui::{self, floating, Kind};
@@ -246,6 +247,7 @@ impl Shell {
             self.open.push(h);
         }
         self.active = id.into();
+        perf::mark(&format!("switch:{id}"));
         // focus left in the workspace being hidden would leave keystrokes with
         // no path to the shell's bindings; take it back
         w.focus(&self.focus);
@@ -674,6 +676,15 @@ fn cycle_theme(w: &mut Window, cx: &mut App) {
 
 impl Render for Shell {
     fn render(&mut self, w: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        perf::lap("doc-open", "shell-render");
+        // cold start: the first frame the shell actually presents
+        static FIRST: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+        if !FIRST.swap(true, std::sync::atomic::Ordering::Relaxed) {
+            w.on_next_frame(|w, _| {
+                perf::since_start("cold-first-frame");
+                log("window-state", &[("active", if w.is_window_active() { "1" } else { "0" })]);
+            });
+        }
         // first run (or "Run setup again"): the onboarding owns the window
         if !state(cx).prefs.onboarded {
             let ob = match &self.onboarding {

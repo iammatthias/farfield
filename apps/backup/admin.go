@@ -25,5 +25,5 @@ func (s *Server) handleAdminSnapshots(w http.ResponseWriter, r *http.Request) {
 	if backups == nil {
 		backups = []Backup{}
 	}
-	web.WriteJSON(w, http.StatusOK, map[string]any{"snapshots": backups})
+	web.WriteJSONValidated(w, r, map[string]any{"snapshots": backups})
 }
