@@ -1,0 +1,26 @@
+[
+  {
+    "text": "Intro.\n\n![a photo](blob://bafkreiexamplecid)\n\n\u003cSeries slug=\"spring\" /\u003e\n\n\u003cUnknown thing=\"1\"\u003e\nkeep me\n\u003c/Unknown\u003e\n\n::recipe\n2 cups flour\n::\n\nseries://spring",
+    "selStart": 0,
+    "selEnd": 0,
+    "revision": 1,
+    "words": 20,
+    "frame": "347ab0af6135584e01da223bbd6328e968cfdea3ad8e6dccda55a11bc3a73dc4"
+  },
+  {
+    "text": "Intro.\n\n![a photo](blob://bafkreiexamplecid)\n\n\u003cSeries slug=\"spring\" /\u003e\n\n\u003cUnknown thing=\"1\"\u003e\nkeep me\n\u003c/Unknown\u003e\n\n::recipe\n2 cups flour\n::\n\nseries://spring\n- item\n- next",
+    "selStart": 167,
+    "selEnd": 167,
+    "revision": 5,
+    "words": 22,
+    "frame": "8f674683cb31fbc220266bc28fbb197208e15ac072bacc6860acc5ad2279aab5"
+  },
+  {
+    "text": "Intro.\n\n![a photo](blob://bafkreiexamplecid)\n\n\u003cSeries slug=\"spring\" /\u003e\n\n\u003cUnknown thing=\"1\"\u003e\nkeep me\n\u003c/Unknown\u003e\n\n::recipe\n2 cups flour\n::\n\nseries://spring\n- item\n- next",
+    "selStart": 111,
+    "selEnd": 112,
+    "revision": 5,
+    "words": 22,
+    "frame": "8e24c236830876813f8d7bcce06a7866f8e6f5ed0792eb056371b6ad52f09385"
+  }
+]

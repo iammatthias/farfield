@@ -1,0 +1,17 @@
+{
+  "name": "unicode",
+  "width": 600, "height": 400, "scale": 1,
+  "ops": [
+    {"op": "set_text", "s": "naïve café — 東京 👋🏽 Ελληνικά"},
+    {"op": "key", "k": 6, "m": 4},
+    {"op": "key", "k": 9, "m": 0},
+    {"op": "check"},
+    {"op": "key", "k": 1, "m": 2},
+    {"op": "key", "k": 1, "m": 3},
+    {"op": "check"},
+    {"op": "insert", "s": "日本語"},
+    {"op": "check"},
+    {"op": "command", "c": 13},
+    {"op": "check"}
+  ]
+}

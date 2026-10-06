@@ -1,0 +1,13 @@
+[package]
+name = "farfield-desktop"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[dependencies]
+gpui = { version = "0.2.2", features = ["runtime_shaders"] }
+
+[build-dependencies]
+base64 = "0.23.1"
+wuff = "0.2.9"

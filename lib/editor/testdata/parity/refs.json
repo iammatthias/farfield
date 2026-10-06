@@ -1,0 +1,17 @@
+{
+  "name": "refs",
+  "width": 700, "height": 520, "scale": 2,
+  "ops": [
+    {"op": "set_text", "s": "Intro.\n\n![a photo](blob://bafkreiexamplecid)\n\n<Series slug=\"spring\" />\n\n<Unknown thing=\"1\">\nkeep me\n</Unknown>\n\n::recipe\n2 cups flour\n::\n\nseries://spring"},
+    {"op": "check"},
+    {"op": "key", "k": 6, "m": 4},
+    {"op": "key", "k": 11, "m": 0},
+    {"op": "insert", "s": "- item"},
+    {"op": "key", "k": 11, "m": 0},
+    {"op": "insert", "s": "next"},
+    {"op": "check"},
+    {"op": "pointer", "kind": 1, "x": 40, "y": 30, "m": 0, "clicks": 2},
+    {"op": "pointer", "kind": 3, "x": 0, "y": 0, "m": 0, "clicks": 0},
+    {"op": "check"}
+  ]
+}

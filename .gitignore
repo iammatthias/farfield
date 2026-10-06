@@ -49,3 +49,6 @@ PLAN.md
 
 # Stray local library output — dev runs must use data/library.
 /library-data/
+
+# Native client build output.
+/clients/target/

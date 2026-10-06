@@ -1,0 +1,19 @@
+{
+  "name": "basics",
+  "width": 640, "height": 480, "scale": 2,
+  "ops": [
+    {"op": "set_text", "s": "# Title\n\nHello world, this is a paragraph."},
+    {"op": "check"},
+    {"op": "key", "k": 6, "m": 4},
+    {"op": "insert", "s": " More."},
+    {"op": "check"},
+    {"op": "command", "c": 15},
+    {"op": "command", "c": 1},
+    {"op": "check"},
+    {"op": "command", "c": 13},
+    {"op": "command", "c": 13},
+    {"op": "check"},
+    {"op": "command", "c": 14},
+    {"op": "check"}
+  ]
+}
